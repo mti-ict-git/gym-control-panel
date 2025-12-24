@@ -9,20 +9,21 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function SettingsPage() {
   const navigate = useNavigate();
-  const { admin, logout } = useAuth();
+  const { user, logout } = useAuth();
   const { toast } = useToast();
   
-  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isUpdating, setIsUpdating] = useState(false);
 
-  const handleChangePassword = (e: React.FormEvent) => {
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!currentPassword || !newPassword || !confirmPassword) {
+    if (!newPassword || !confirmPassword) {
       toast({
         title: "Validation Error",
         description: "Please fill in all password fields.",
@@ -49,21 +50,32 @@ export default function SettingsPage() {
       return;
     }
 
-    // Mock password change
-    toast({
-      title: "Password Updated",
-      description: "Your password has been changed successfully.",
-    });
+    setIsUpdating(true);
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    setIsUpdating(false);
 
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
+    if (error) {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Password Updated",
+        description: "Your password has been changed successfully.",
+      });
+      setNewPassword('');
+      setConfirmPassword('');
+    }
   };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
+
+  const displayName = user?.user_metadata?.username || user?.email || 'Admin';
 
   return (
     <AppLayout>
@@ -84,11 +96,11 @@ export default function SettingsPage() {
           <CardContent className="space-y-4">
             <div className="flex items-center gap-4">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary text-primary-foreground text-xl font-semibold">
-                {admin?.username?.charAt(0).toUpperCase()}
+                {displayName.charAt(0).toUpperCase()}
               </div>
               <div>
-                <p className="font-medium text-lg">{admin?.username}</p>
-                <p className="text-sm text-muted-foreground">Administrator</p>
+                <p className="font-medium text-lg">{displayName}</p>
+                <p className="text-sm text-muted-foreground">{user?.email}</p>
               </div>
             </div>
           </CardContent>
@@ -104,17 +116,6 @@ export default function SettingsPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleChangePassword} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="currentPassword">Current Password</Label>
-                <Input
-                  id="currentPassword"
-                  type="password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  placeholder="Enter current password"
-                  className="touch-target"
-                />
-              </div>
               <div className="space-y-2">
                 <Label htmlFor="newPassword">New Password</Label>
                 <Input
@@ -137,8 +138,8 @@ export default function SettingsPage() {
                   className="touch-target"
                 />
               </div>
-              <Button type="submit" className="touch-target">
-                Update Password
+              <Button type="submit" className="touch-target" disabled={isUpdating}>
+                {isUpdating ? 'Updating...' : 'Update Password'}
               </Button>
             </form>
           </CardContent>

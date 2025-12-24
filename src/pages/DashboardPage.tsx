@@ -4,12 +4,17 @@ import { format } from 'date-fns';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/StatCard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { gymUsers, getTodaySchedules, getUpcomingSchedules, getUserById } from '@/data/mockData';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useGymUsers } from '@/hooks/useGymUsers';
+import { useUpcomingSchedules, useTodaySchedulesCount } from '@/hooks/useGymSchedules';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const todaySchedules = getTodaySchedules();
-  const upcomingSchedules = getUpcomingSchedules().slice(0, 5);
+  const { data: users, isLoading: usersLoading } = useGymUsers();
+  const { data: upcomingSchedules, isLoading: schedulesLoading } = useUpcomingSchedules(5);
+  const { data: todayCount, isLoading: todayLoading } = useTodaySchedulesCount();
+
+  const isLoading = usersLoading || schedulesLoading || todayLoading;
 
   return (
     <AppLayout>
@@ -20,24 +25,34 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
-          <StatCard
-            title="Total Gym Users"
-            value={gymUsers.length}
-            icon={Users}
-            onClick={() => navigate('/users')}
-          />
-          <StatCard
-            title="Today's Schedules"
-            value={todaySchedules.length}
-            icon={Calendar}
-            onClick={() => navigate('/schedules?filter=today')}
-          />
-          <StatCard
-            title="Upcoming Schedules"
-            value={upcomingSchedules.length}
-            icon={Clock}
-            onClick={() => navigate('/schedules')}
-          />
+          {isLoading ? (
+            <>
+              <Skeleton className="h-32" />
+              <Skeleton className="h-32" />
+              <Skeleton className="h-32" />
+            </>
+          ) : (
+            <>
+              <StatCard
+                title="Total Gym Users"
+                value={users?.length || 0}
+                icon={Users}
+                onClick={() => navigate('/users')}
+              />
+              <StatCard
+                title="Today's Schedules"
+                value={todayCount || 0}
+                icon={Calendar}
+                onClick={() => navigate('/schedules?filter=today')}
+              />
+              <StatCard
+                title="Upcoming Schedules"
+                value={upcomingSchedules?.length || 0}
+                icon={Clock}
+                onClick={() => navigate('/schedules')}
+              />
+            </>
+          )}
         </div>
 
         <Card className="card-interactive" onClick={() => navigate('/schedules')}>
@@ -46,19 +61,24 @@ export default function DashboardPage() {
             <ArrowRight className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {upcomingSchedules.length > 0 ? (
+            {schedulesLoading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-16" />
+                ))}
+              </div>
+            ) : upcomingSchedules && upcomingSchedules.length > 0 ? (
               <div className="space-y-3">
                 {upcomingSchedules.map((schedule) => {
-                  const user = getUserById(schedule.gymUserId);
-                  const scheduleDate = new Date(schedule.scheduleTime);
+                  const scheduleDate = new Date(schedule.schedule_time);
                   return (
                     <div 
                       key={schedule.id} 
                       className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
                     >
                       <div>
-                        <p className="font-medium">{user?.name}</p>
-                        <p className="text-sm text-muted-foreground">{user?.employeeId}</p>
+                        <p className="font-medium">{schedule.gym_users?.name}</p>
+                        <p className="text-sm text-muted-foreground">{schedule.gym_users?.employee_id}</p>
                       </div>
                       <div className="text-right">
                         <p className="font-medium">{format(scheduleDate, 'MMM d')}</p>

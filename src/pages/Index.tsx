@@ -2,13 +2,13 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 
 const Index = () => {
-  const { admin, isLoading } = useAuth();
+  const { user, isLoading } = useAuth();
 
   if (isLoading) {
     return null;
   }
 
-  if (admin) {
+  if (user) {
     return <Navigate to="/dashboard" replace />;
   }
 

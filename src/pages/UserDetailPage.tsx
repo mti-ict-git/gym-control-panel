@@ -14,8 +14,10 @@ import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { getUserById, getSchedulesByUserId, GymSchedule } from '@/data/mockData';
+import { useGymUser } from '@/hooks/useGymUsers';
+import { useUserSchedules, useAddSchedule, useDeleteSchedule } from '@/hooks/useGymSchedules';
 import { cn } from '@/lib/utils';
 
 export default function UserDetailPage() {
@@ -23,14 +25,27 @@ export default function UserDetailPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
   
-  const user = getUserById(userId || '');
-  const initialSchedules = getSchedulesByUserId(userId || '');
+  const { data: user, isLoading: userLoading } = useGymUser(userId);
+  const { data: schedules, isLoading: schedulesLoading } = useUserSchedules(userId);
+  const addScheduleMutation = useAddSchedule();
+  const deleteScheduleMutation = useDeleteSchedule();
   
-  const [schedules, setSchedules] = useState<GymSchedule[]>(initialSchedules);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [deleteScheduleId, setDeleteScheduleId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [selectedTime, setSelectedTime] = useState('09:00');
+
+  if (userLoading) {
+    return (
+      <AppLayout>
+        <div className="space-y-6">
+          <Skeleton className="h-10 w-32" />
+          <Skeleton className="h-40" />
+          <Skeleton className="h-60" />
+        </div>
+      </AppLayout>
+    );
+  }
 
   if (!user) {
     return (
@@ -64,37 +79,30 @@ export default function UserDetailPage() {
     const scheduleTime = new Date(selectedDate);
     scheduleTime.setHours(hours, minutes, 0, 0);
 
-    const newSchedule: GymSchedule = {
-      id: String(Date.now()),
-      gymUserId: user.id,
-      scheduleTime: scheduleTime.toISOString(),
-      createdAt: new Date().toISOString(),
-    };
-
-    setSchedules([...schedules, newSchedule]);
-    setIsAddDialogOpen(false);
-    setSelectedDate(new Date());
-    setSelectedTime('09:00');
-    
-    toast({
-      title: "Schedule Added",
-      description: `Schedule for ${format(scheduleTime, 'MMM d, h:mm a')} has been added.`,
-    });
+    addScheduleMutation.mutate(
+      { gym_user_id: user.id, schedule_time: scheduleTime.toISOString() },
+      {
+        onSuccess: () => {
+          setIsAddDialogOpen(false);
+          setSelectedDate(new Date());
+          setSelectedTime('09:00');
+        },
+      }
+    );
   };
 
   const handleDeleteSchedule = () => {
     if (deleteScheduleId) {
-      setSchedules(schedules.filter(s => s.id !== deleteScheduleId));
-      toast({
-        title: "Schedule Deleted",
-        description: "The schedule has been removed.",
+      deleteScheduleMutation.mutate(deleteScheduleId, {
+        onSuccess: () => {
+          setDeleteScheduleId(null);
+        },
       });
-      setDeleteScheduleId(null);
     }
   };
 
-  const sortedSchedules = [...schedules].sort(
-    (a, b) => new Date(a.scheduleTime).getTime() - new Date(b.scheduleTime).getTime()
+  const sortedSchedules = [...(schedules || [])].sort(
+    (a, b) => new Date(a.schedule_time).getTime() - new Date(b.schedule_time).getTime()
   );
 
   return (
@@ -121,7 +129,7 @@ export default function UserDetailPage() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Employee ID</p>
-                <p className="font-medium">{user.employeeId}</p>
+                <p className="font-medium">{user.employee_id}</p>
               </div>
             </div>
           </CardContent>
@@ -143,7 +151,13 @@ export default function UserDetailPage() {
               </Button>
             </div>
 
-            {sortedSchedules.length > 0 ? (
+            {schedulesLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-12" />
+                <Skeleton className="h-12" />
+                <Skeleton className="h-12" />
+              </div>
+            ) : sortedSchedules.length > 0 ? (
               <div className="rounded-lg border bg-card overflow-hidden">
                 <Table>
                   <TableHeader>
@@ -155,7 +169,7 @@ export default function UserDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {sortedSchedules.map((schedule) => {
-                      const scheduleDate = new Date(schedule.scheduleTime);
+                      const scheduleDate = new Date(schedule.schedule_time);
                       const isPast = scheduleDate < new Date();
                       return (
                         <TableRow key={schedule.id}>
@@ -238,7 +252,9 @@ export default function UserDetailPage() {
               <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleAddSchedule}>Add Schedule</Button>
+              <Button onClick={handleAddSchedule} disabled={addScheduleMutation.isPending}>
+                {addScheduleMutation.isPending ? 'Adding...' : 'Add Schedule'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -253,8 +269,12 @@ export default function UserDetailPage() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDeleteSchedule} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                Delete
+              <AlertDialogAction 
+                onClick={handleDeleteSchedule} 
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                disabled={deleteScheduleMutation.isPending}
+              >
+                {deleteScheduleMutation.isPending ? 'Deleting...' : 'Delete'}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
