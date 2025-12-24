@@ -6,11 +6,12 @@ import { EmptyState } from '@/components/EmptyState';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useGymUsers } from '@/hooks/useGymUsers';
-import { useNextScheduleForUser } from '@/hooks/useGymSchedules';
+import { useGymUsers, GymUser } from '@/hooks/useGymUsers';
+import { useMostRelevantSchedule } from '@/hooks/useGymSchedules';
+import { StatusBadge } from '@/components/StatusBadge';
 
-function UserRow({ user, onClick }: { user: { id: string; name: string; employee_id: string }; onClick: () => void }) {
-  const { data: nextSchedule } = useNextScheduleForUser(user.id);
+function UserRow({ user, onClick }: { user: GymUser; onClick: () => void }) {
+  const { data: schedule } = useMostRelevantSchedule(user.id);
   
   return (
     <TableRow 
@@ -19,12 +20,26 @@ function UserRow({ user, onClick }: { user: { id: string; name: string; employee
     >
       <TableCell className="font-medium">{user.name}</TableCell>
       <TableCell>{user.employee_id}</TableCell>
-      <TableCell className="hidden md:table-cell">
-        {nextSchedule ? (
-          format(new Date(nextSchedule.schedule_time), 'MMM d, h:mm a')
+      <TableCell>{user.department || '-'}</TableCell>
+      <TableCell>
+        {schedule ? (
+          format(new Date(schedule.schedule_time), 'MMM d, h:mm a')
         ) : (
-          <span className="text-muted-foreground">No upcoming</span>
+          <span className="text-muted-foreground">-</span>
         )}
+      </TableCell>
+      <TableCell>
+        {schedule?.check_in_time ? (
+          format(new Date(schedule.check_in_time), 'h:mm a')
+        ) : '-'}
+      </TableCell>
+      <TableCell>
+        {schedule?.check_out_time ? (
+          format(new Date(schedule.check_out_time), 'h:mm a')
+        ) : '-'}
+      </TableCell>
+      <TableCell>
+        {schedule ? <StatusBadge status={schedule.status} /> : <span className="text-muted-foreground">-</span>}
       </TableCell>
     </TableRow>
   );
@@ -38,8 +53,8 @@ export default function GymUsersPage() {
     <AppLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold">Gym Users</h1>
-          <p className="text-muted-foreground">Members with gym access from Vault.</p>
+          <h1 className="text-2xl font-bold">Live Gym Monitoring</h1>
+          <p className="text-muted-foreground">Real-time overview of active gym members and access status.</p>
         </div>
 
         {isLoading ? (
@@ -54,8 +69,12 @@ export default function GymUsersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead>Employee ID</TableHead>
-                  <TableHead className="hidden md:table-cell">Next Schedule</TableHead>
+                  <TableHead>ID Employee</TableHead>
+                  <TableHead>Department</TableHead>
+                  <TableHead>Schedule</TableHead>
+                  <TableHead>Time In</TableHead>
+                  <TableHead>Time Out</TableHead>
+                  <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

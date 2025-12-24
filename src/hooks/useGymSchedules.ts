@@ -160,6 +160,56 @@ export function useNextScheduleForUser(userId: string | undefined) {
   });
 }
 
+export function useMostRelevantSchedule(userId: string | undefined) {
+  return useQuery({
+    queryKey: ['relevant-schedule', userId],
+    queryFn: async () => {
+      if (!userId) return null;
+      
+      // First check if user is currently IN_GYM
+      const { data: inGymData } = await supabase
+        .from('gym_schedules')
+        .select('*')
+        .eq('gym_user_id', userId)
+        .eq('status', 'IN_GYM')
+        .maybeSingle();
+        
+      if (inGymData) return inGymData as GymSchedule;
+
+      // Then check for next BOOKED schedule
+      const { data: bookedData } = await supabase
+        .from('gym_schedules')
+        .select('*')
+        .eq('gym_user_id', userId)
+        .gte('schedule_time', new Date().toISOString())
+        .eq('status', 'BOOKED')
+        .order('schedule_time', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+        
+      if (bookedData) return bookedData as GymSchedule;
+
+      // Finally check for last OUT schedule (today only)
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      
+      const { data: outData } = await supabase
+        .from('gym_schedules')
+        .select('*')
+        .eq('gym_user_id', userId)
+        .eq('status', 'OUT')
+        .gte('schedule_time', startOfToday.toISOString())
+        .order('schedule_time', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      return (outData as GymSchedule) || null;
+    },
+    enabled: !!userId,
+    refetchInterval: 30000, // Refetch every 30 seconds
+  });
+}
+
 export function useAddSchedule() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
