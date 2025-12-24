@@ -12,6 +12,8 @@ import GymUsersPage from "./pages/GymUsersPage";
 import UserDetailPage from "./pages/UserDetailPage";
 import SchedulesPage from "./pages/SchedulesPage";
 import SettingsPage from "./pages/SettingsPage";
+import VaultPage from "./pages/VaultPage";
+import EntryModePage from "./pages/EntryModePage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -51,10 +53,26 @@ const App = () => (
               }
             />
             <Route
+              path="/vault"
+              element={
+                <ProtectedRoute>
+                  <VaultPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/schedules"
               element={
                 <ProtectedRoute>
                   <SchedulesPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/entry"
+              element={
+                <ProtectedRoute>
+                  <EntryModePage />
                 </ProtectedRoute>
               }
             />
