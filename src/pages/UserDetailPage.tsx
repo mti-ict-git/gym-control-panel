@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Calendar, Plus, Trash2, User } from 'lucide-react';
+import { ArrowLeft, Calendar, Plus, Trash2, User, LogIn, LogOut } from 'lucide-react';
 import { format } from 'date-fns';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
+import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -17,7 +18,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { useGymUser } from '@/hooks/useGymUsers';
-import { useUserSchedules, useAddSchedule, useDeleteSchedule } from '@/hooks/useGymSchedules';
+import { useUserSchedules, useAddSchedule, useDeleteSchedule, useCheckIn, useCheckOut, useGymOccupancy } from '@/hooks/useGymSchedules';
 import { cn } from '@/lib/utils';
 
 export default function UserDetailPage() {
@@ -27,11 +28,15 @@ export default function UserDetailPage() {
   
   const { data: user, isLoading: userLoading } = useGymUser(userId);
   const { data: schedules, isLoading: schedulesLoading } = useUserSchedules(userId);
+  const { data: occupancy } = useGymOccupancy();
   const addScheduleMutation = useAddSchedule();
   const deleteScheduleMutation = useDeleteSchedule();
+  const checkInMutation = useCheckIn();
+  const checkOutMutation = useCheckOut();
   
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [deleteScheduleId, setDeleteScheduleId] = useState<string | null>(null);
+  const [showCapacityAlert, setShowCapacityAlert] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [selectedTime, setSelectedTime] = useState('09:00');
 
@@ -101,8 +106,27 @@ export default function UserDetailPage() {
     }
   };
 
+  const handleCheckIn = async (scheduleId: string) => {
+    if ((occupancy || 0) >= 15) {
+      setShowCapacityAlert(true);
+      return;
+    }
+    
+    try {
+      await checkInMutation.mutateAsync(scheduleId);
+    } catch (error: any) {
+      if (error.message === 'GYM_FULL') {
+        setShowCapacityAlert(true);
+      }
+    }
+  };
+
+  const handleCheckOut = (scheduleId: string) => {
+    checkOutMutation.mutate(scheduleId);
+  };
+
   const sortedSchedules = [...(schedules || [])].sort(
-    (a, b) => new Date(a.schedule_time).getTime() - new Date(b.schedule_time).getTime()
+    (a, b) => new Date(b.schedule_time).getTime() - new Date(a.schedule_time).getTime()
   );
 
   return (
@@ -162,32 +186,62 @@ export default function UserDetailPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Time</TableHead>
-                      <TableHead className="w-12"></TableHead>
+                      <TableHead>Date & Time</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {sortedSchedules.map((schedule) => {
                       const scheduleDate = new Date(schedule.schedule_time);
-                      const isPast = scheduleDate < new Date();
                       return (
                         <TableRow key={schedule.id}>
-                          <TableCell className={cn(isPast && "text-muted-foreground")}>
-                            {format(scheduleDate, 'MMM d, yyyy')}
-                          </TableCell>
-                          <TableCell className={cn(isPast && "text-muted-foreground")}>
-                            {format(scheduleDate, 'h:mm a')}
+                          <TableCell>
+                            <div>
+                              <p className="font-medium">{format(scheduleDate, 'MMM d, yyyy')}</p>
+                              <p className="text-sm text-muted-foreground">{format(scheduleDate, 'h:mm a')}</p>
+                            </div>
                           </TableCell>
                           <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setDeleteScheduleId(schedule.id)}
-                              className="text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            <StatusBadge status={schedule.status} />
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-2">
+                              {schedule.status === 'BOOKED' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleCheckIn(schedule.id)}
+                                  disabled={checkInMutation.isPending}
+                                  className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                                >
+                                  <LogIn className="h-4 w-4 mr-1" />
+                                  Check In
+                                </Button>
+                              )}
+                              {schedule.status === 'IN_GYM' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleCheckOut(schedule.id)}
+                                  disabled={checkOutMutation.isPending}
+                                  className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                >
+                                  <LogOut className="h-4 w-4 mr-1" />
+                                  Check Out
+                                </Button>
+                              )}
+                              {schedule.status === 'BOOKED' && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setDeleteScheduleId(schedule.id)}
+                                  className="text-destructive hover:text-destructive"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       );
@@ -275,6 +329,22 @@ export default function UserDetailPage() {
                 disabled={deleteScheduleMutation.isPending}
               >
                 {deleteScheduleMutation.isPending ? 'Deleting...' : 'Delete'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={showCapacityAlert} onOpenChange={setShowCapacityAlert}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="text-red-600">Gym is Full</AlertDialogTitle>
+              <AlertDialogDescription>
+                The gym has reached maximum capacity (15/15). Please wait until someone checks out before checking in this user.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogAction onClick={() => setShowCapacityAlert(false)}>
+                OK
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
