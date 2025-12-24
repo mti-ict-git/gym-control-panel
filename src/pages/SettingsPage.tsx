@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Lock, Info, User } from 'lucide-react';
+import { LogOut, Lock, Info, User, Plug, ExternalLink, Shield, Database, Cloud } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -142,6 +143,74 @@ export default function SettingsPage() {
                 {isUpdating ? 'Updating...' : 'Update Password'}
               </Button>
             </form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Plug className="h-5 w-5 text-muted-foreground" />
+              <CardTitle className="text-lg">Integrations</CardTitle>
+            </div>
+            <CardDescription>Connect external systems and services</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between p-4 border rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <Shield className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="font-medium">HashiCorp Vault</p>
+                  <p className="text-sm text-muted-foreground">Secrets management & encryption</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">Not Connected</Badge>
+                <Button variant="outline" size="sm" className="touch-target">
+                  <ExternalLink className="h-4 w-4 mr-1" />
+                  Connect
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-4 border rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <Database className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="font-medium">HR System</p>
+                  <p className="text-sm text-muted-foreground">Employee data sync</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">Not Connected</Badge>
+                <Button variant="outline" size="sm" className="touch-target">
+                  <ExternalLink className="h-4 w-4 mr-1" />
+                  Connect
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-4 border rounded-lg">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <Cloud className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="font-medium">Access Control System</p>
+                  <p className="text-sm text-muted-foreground">Door & turnstile integration</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="outline">Not Connected</Badge>
+                <Button variant="outline" size="sm" className="touch-target">
+                  <ExternalLink className="h-4 w-4 mr-1" />
+                  Connect
+                </Button>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
