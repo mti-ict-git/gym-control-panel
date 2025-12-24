@@ -10,18 +10,42 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { gymUsers, getNextScheduleForUser, GymUser } from '@/data/mockData';
+import { useGymUsers, useAddGymUser } from '@/hooks/useGymUsers';
+import { useNextScheduleForUser } from '@/hooks/useGymSchedules';
+
+function UserRow({ user, onClick }: { user: { id: string; name: string; employee_id: string }; onClick: () => void }) {
+  const { data: nextSchedule } = useNextScheduleForUser(user.id);
+  
+  return (
+    <TableRow 
+      className="row-interactive"
+      onClick={onClick}
+    >
+      <TableCell className="font-medium">{user.name}</TableCell>
+      <TableCell>{user.employee_id}</TableCell>
+      <TableCell className="hidden md:table-cell">
+        {nextSchedule ? (
+          format(new Date(nextSchedule.schedule_time), 'MMM d, h:mm a')
+        ) : (
+          <span className="text-muted-foreground">No upcoming</span>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+}
 
 export default function GymUsersPage() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [users, setUsers] = useState<GymUser[]>(gymUsers);
+  const { data: users, isLoading } = useGymUsers();
+  const addUserMutation = useAddGymUser();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [newEmployeeId, setNewEmployeeId] = useState('');
 
-  const handleAddUser = () => {
+  const handleAddUser = async () => {
     if (!newUserName.trim() || !newEmployeeId.trim()) {
       toast({
         title: "Validation Error",
@@ -31,22 +55,16 @@ export default function GymUsersPage() {
       return;
     }
 
-    const newUser: GymUser = {
-      id: String(Date.now()),
-      name: newUserName,
-      employeeId: newEmployeeId,
-      createdAt: new Date().toISOString(),
-    };
-
-    setUsers([...users, newUser]);
-    setNewUserName('');
-    setNewEmployeeId('');
-    setIsDialogOpen(false);
-    
-    toast({
-      title: "User Added",
-      description: `${newUserName} has been added successfully.`,
-    });
+    addUserMutation.mutate(
+      { name: newUserName, employee_id: newEmployeeId },
+      {
+        onSuccess: () => {
+          setNewUserName('');
+          setNewEmployeeId('');
+          setIsDialogOpen(false);
+        },
+      }
+    );
   };
 
   return (
@@ -57,7 +75,13 @@ export default function GymUsersPage() {
           <p className="text-muted-foreground">Manage gym members and their schedules.</p>
         </div>
 
-        {users.length > 0 ? (
+        {isLoading ? (
+          <div className="space-y-4">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        ) : users && users.length > 0 ? (
           <div className="rounded-lg border bg-card overflow-hidden">
             <Table>
               <TableHeader>
@@ -68,26 +92,13 @@ export default function GymUsersPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {users.map((user) => {
-                  const nextSchedule = getNextScheduleForUser(user.id);
-                  return (
-                    <TableRow 
-                      key={user.id} 
-                      className="row-interactive"
-                      onClick={() => navigate(`/users/${user.id}`)}
-                    >
-                      <TableCell className="font-medium">{user.name}</TableCell>
-                      <TableCell>{user.employeeId}</TableCell>
-                      <TableCell className="hidden md:table-cell">
-                        {nextSchedule ? (
-                          format(new Date(nextSchedule.scheduleTime), 'MMM d, h:mm a')
-                        ) : (
-                          <span className="text-muted-foreground">No upcoming</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                {users.map((user) => (
+                  <UserRow 
+                    key={user.id} 
+                    user={user}
+                    onClick={() => navigate(`/users/${user.id}`)}
+                  />
+                ))}
               </TableBody>
             </Table>
           </div>
@@ -138,7 +149,9 @@ export default function GymUsersPage() {
               <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleAddUser}>Add User</Button>
+              <Button onClick={handleAddUser} disabled={addUserMutation.isPending}>
+                {addUserMutation.isPending ? 'Adding...' : 'Add User'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

@@ -6,14 +6,15 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { gymSchedules, getUserById, getTodaySchedules, getThisWeekSchedules } from '@/data/mockData';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useGymSchedules } from '@/hooks/useGymSchedules';
 
 type FilterType = 'all' | 'today' | 'week';
 
 export default function SchedulesPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const initialFilter = searchParams.get('filter') as FilterType || 'all';
+  const initialFilter = (searchParams.get('filter') as FilterType) || 'all';
   const [filter, setFilter] = useState<FilterType>(initialFilter);
 
   useEffect(() => {
@@ -23,20 +24,7 @@ export default function SchedulesPage() {
     }
   }, [searchParams]);
 
-  const getFilteredSchedules = () => {
-    switch (filter) {
-      case 'today':
-        return getTodaySchedules();
-      case 'week':
-        return getThisWeekSchedules();
-      default:
-        return [...gymSchedules].sort(
-          (a, b) => new Date(a.scheduleTime).getTime() - new Date(b.scheduleTime).getTime()
-        );
-    }
-  };
-
-  const filteredSchedules = getFilteredSchedules();
+  const { data: schedules, isLoading } = useGymSchedules(filter);
 
   return (
     <AppLayout>
@@ -70,7 +58,13 @@ export default function SchedulesPage() {
           </Button>
         </div>
 
-        {filteredSchedules.length > 0 ? (
+        {isLoading ? (
+          <div className="space-y-4">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+          </div>
+        ) : schedules && schedules.length > 0 ? (
           <div className="rounded-lg border bg-card overflow-hidden">
             <Table>
               <TableHeader>
@@ -82,19 +76,18 @@ export default function SchedulesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredSchedules.map((schedule) => {
-                  const user = getUserById(schedule.gymUserId);
-                  const scheduleDate = new Date(schedule.scheduleTime);
+                {schedules.map((schedule) => {
+                  const scheduleDate = new Date(schedule.schedule_time);
                   return (
                     <TableRow 
                       key={schedule.id}
                       className="row-interactive"
-                      onClick={() => navigate(`/users/${schedule.gymUserId}`)}
+                      onClick={() => navigate(`/users/${schedule.gym_user_id}`)}
                     >
                       <TableCell>{format(scheduleDate, 'MMM d, yyyy')}</TableCell>
                       <TableCell>{format(scheduleDate, 'h:mm a')}</TableCell>
-                      <TableCell className="font-medium">{user?.name || 'Unknown'}</TableCell>
-                      <TableCell className="hidden md:table-cell">{user?.employeeId || '-'}</TableCell>
+                      <TableCell className="font-medium">{schedule.gym_users?.name || 'Unknown'}</TableCell>
+                      <TableCell className="hidden md:table-cell">{schedule.gym_users?.employee_id || '-'}</TableCell>
                     </TableRow>
                   );
                 })}

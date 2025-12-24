@@ -32,12 +32,14 @@ const menuItems = [
 export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { admin, logout } = useAuth();
+  const { user, logout } = useAuth();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login');
   };
+
+  const displayName = user?.user_metadata?.username || user?.email || 'Admin';
 
   return (
     <Sidebar className="border-r border-sidebar-border">
@@ -87,11 +89,11 @@ export function AppSidebar() {
         <div className="flex items-center gap-3 mb-4">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
             <span className="text-sm font-medium text-muted-foreground">
-              {admin?.username?.charAt(0).toUpperCase()}
+              {displayName.charAt(0).toUpperCase()}
             </span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{admin?.username}</p>
+            <p className="text-sm font-medium truncate">{displayName}</p>
             <p className="text-xs text-muted-foreground">Administrator</p>
           </div>
         </div>
