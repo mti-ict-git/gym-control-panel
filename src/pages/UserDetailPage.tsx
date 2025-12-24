@@ -1,0 +1,265 @@
+import { useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Calendar, Plus, Trash2, User } from 'lucide-react';
+import { format } from 'date-fns';
+import { AppLayout } from '@/components/layout/AppLayout';
+import { EmptyState } from '@/components/EmptyState';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/hooks/use-toast';
+import { getUserById, getSchedulesByUserId, GymSchedule } from '@/data/mockData';
+import { cn } from '@/lib/utils';
+
+export default function UserDetailPage() {
+  const { userId } = useParams<{ userId: string }>();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  
+  const user = getUserById(userId || '');
+  const initialSchedules = getSchedulesByUserId(userId || '');
+  
+  const [schedules, setSchedules] = useState<GymSchedule[]>(initialSchedules);
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [deleteScheduleId, setDeleteScheduleId] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+  const [selectedTime, setSelectedTime] = useState('09:00');
+
+  if (!user) {
+    return (
+      <AppLayout>
+        <EmptyState
+          icon={User}
+          title="User not found"
+          description="The user you're looking for doesn't exist."
+          action={
+            <Button onClick={() => navigate('/users')}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Users
+            </Button>
+          }
+        />
+      </AppLayout>
+    );
+  }
+
+  const handleAddSchedule = () => {
+    if (!selectedDate) {
+      toast({
+        title: "Validation Error",
+        description: "Please select a date.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const [hours, minutes] = selectedTime.split(':').map(Number);
+    const scheduleTime = new Date(selectedDate);
+    scheduleTime.setHours(hours, minutes, 0, 0);
+
+    const newSchedule: GymSchedule = {
+      id: String(Date.now()),
+      gymUserId: user.id,
+      scheduleTime: scheduleTime.toISOString(),
+      createdAt: new Date().toISOString(),
+    };
+
+    setSchedules([...schedules, newSchedule]);
+    setIsAddDialogOpen(false);
+    setSelectedDate(new Date());
+    setSelectedTime('09:00');
+    
+    toast({
+      title: "Schedule Added",
+      description: `Schedule for ${format(scheduleTime, 'MMM d, h:mm a')} has been added.`,
+    });
+  };
+
+  const handleDeleteSchedule = () => {
+    if (deleteScheduleId) {
+      setSchedules(schedules.filter(s => s.id !== deleteScheduleId));
+      toast({
+        title: "Schedule Deleted",
+        description: "The schedule has been removed.",
+      });
+      setDeleteScheduleId(null);
+    }
+  };
+
+  const sortedSchedules = [...schedules].sort(
+    (a, b) => new Date(a.scheduleTime).getTime() - new Date(b.scheduleTime).getTime()
+  );
+
+  return (
+    <AppLayout>
+      <div className="space-y-6">
+        <Button 
+          variant="ghost" 
+          onClick={() => navigate('/users')}
+          className="mb-4"
+        >
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to Users
+        </Button>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>User Information</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm text-muted-foreground">Name</p>
+                <p className="font-medium">{user.name}</p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Employee ID</p>
+                <p className="font-medium">{user.employeeId}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Tabs defaultValue="schedules">
+          <TabsList className="grid w-full grid-cols-1">
+            <TabsTrigger value="schedules" className="touch-target">
+              <Calendar className="h-4 w-4 mr-2" />
+              Schedules
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="schedules" className="mt-4">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="font-medium">Schedule History</h3>
+              <Button size="sm" onClick={() => setIsAddDialogOpen(true)}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Schedule
+              </Button>
+            </div>
+
+            {sortedSchedules.length > 0 ? (
+              <div className="rounded-lg border bg-card overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Time</TableHead>
+                      <TableHead className="w-12"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedSchedules.map((schedule) => {
+                      const scheduleDate = new Date(schedule.scheduleTime);
+                      const isPast = scheduleDate < new Date();
+                      return (
+                        <TableRow key={schedule.id}>
+                          <TableCell className={cn(isPast && "text-muted-foreground")}>
+                            {format(scheduleDate, 'MMM d, yyyy')}
+                          </TableCell>
+                          <TableCell className={cn(isPast && "text-muted-foreground")}>
+                            {format(scheduleDate, 'h:mm a')}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setDeleteScheduleId(schedule.id)}
+                              className="text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <EmptyState
+                icon={Calendar}
+                title="No schedules"
+                description="This user has no scheduled sessions."
+                action={
+                  <Button onClick={() => setIsAddDialogOpen(true)}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Add Schedule
+                  </Button>
+                }
+              />
+            )}
+          </TabsContent>
+        </Tabs>
+
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add Schedule</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="w-full justify-start text-left font-normal touch-target">
+                      <Calendar className="mr-2 h-4 w-4" />
+                      {selectedDate ? format(selectedDate, 'PPP') : 'Pick a date'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="single"
+                      selected={selectedDate}
+                      onSelect={setSelectedDate}
+                      initialFocus
+                      className="pointer-events-auto"
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="time">Time</Label>
+                <Input
+                  id="time"
+                  type="time"
+                  value={selectedTime}
+                  onChange={(e) => setSelectedTime(e.target.value)}
+                  className="touch-target"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleAddSchedule}>Add Schedule</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <AlertDialog open={!!deleteScheduleId} onOpenChange={() => setDeleteScheduleId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Schedule</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete this schedule? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteSchedule} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </AppLayout>
+  );
+}
