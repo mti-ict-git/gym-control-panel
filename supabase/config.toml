@@ -1,1 +1,4 @@
 project_id = "cazoafsklonqtrttxqsx"
+
+[functions.vault-users]
+verify_jwt = false

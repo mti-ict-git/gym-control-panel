@@ -55,24 +55,30 @@ export type Database = {
       gym_users: {
         Row: {
           created_at: string
+          department: string | null
           employee_id: string
           id: string
           name: string
           updated_at: string
+          vault_employee_id: string | null
         }
         Insert: {
           created_at?: string
+          department?: string | null
           employee_id: string
           id?: string
           name: string
           updated_at?: string
+          vault_employee_id?: string | null
         }
         Update: {
           created_at?: string
+          department?: string | null
           employee_id?: string
           id?: string
           name?: string
           updated_at?: string
+          vault_employee_id?: string | null
         }
         Relationships: []
       }
