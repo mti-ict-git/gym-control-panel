@@ -16,22 +16,31 @@ export type Database = {
     Tables: {
       gym_schedules: {
         Row: {
+          check_in_time: string | null
+          check_out_time: string | null
           created_at: string
           gym_user_id: string
           id: string
           schedule_time: string
+          status: string
         }
         Insert: {
+          check_in_time?: string | null
+          check_out_time?: string | null
           created_at?: string
           gym_user_id: string
           id?: string
           schedule_time: string
+          status?: string
         }
         Update: {
+          check_in_time?: string | null
+          check_out_time?: string | null
           created_at?: string
           gym_user_id?: string
           id?: string
           schedule_time?: string
+          status?: string
         }
         Relationships: [
           {
@@ -114,6 +123,8 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_in_user: { Args: { schedule_id: string }; Returns: Json }
+      get_gym_occupancy: { Args: never; Returns: number }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]

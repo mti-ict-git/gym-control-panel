@@ -4,12 +4,11 @@ import { Calendar } from 'lucide-react';
 import { format } from 'date-fns';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
+import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useGymSchedules } from '@/hooks/useGymSchedules';
-
-type FilterType = 'all' | 'today' | 'week';
+import { useGymSchedules, FilterType } from '@/hooks/useGymSchedules';
 
 export default function SchedulesPage() {
   const navigate = useNavigate();
@@ -26,6 +25,14 @@ export default function SchedulesPage() {
 
   const { data: schedules, isLoading } = useGymSchedules(filter);
 
+  const filterButtons: { label: string; value: FilterType }[] = [
+    { label: 'All', value: 'all' },
+    { label: 'Today', value: 'today' },
+    { label: 'In Gym', value: 'IN_GYM' },
+    { label: 'Booked', value: 'BOOKED' },
+    { label: 'Out', value: 'OUT' },
+  ];
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -34,28 +41,18 @@ export default function SchedulesPage() {
           <p className="text-muted-foreground">View and manage all gym schedules.</p>
         </div>
 
-        <div className="flex gap-2">
-          <Button
-            variant={filter === 'all' ? 'default' : 'outline'}
-            onClick={() => setFilter('all')}
-            className="touch-target"
-          >
-            All
-          </Button>
-          <Button
-            variant={filter === 'today' ? 'default' : 'outline'}
-            onClick={() => setFilter('today')}
-            className="touch-target"
-          >
-            Today
-          </Button>
-          <Button
-            variant={filter === 'week' ? 'default' : 'outline'}
-            onClick={() => setFilter('week')}
-            className="touch-target"
-          >
-            This Week
-          </Button>
+        <div className="flex flex-wrap gap-2">
+          {filterButtons.map((btn) => (
+            <Button
+              key={btn.value}
+              variant={filter === btn.value ? 'default' : 'outline'}
+              onClick={() => setFilter(btn.value)}
+              className="touch-target"
+              size="sm"
+            >
+              {btn.label}
+            </Button>
+          ))}
         </div>
 
         {isLoading ? (
@@ -69,9 +66,9 @@ export default function SchedulesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Time</TableHead>
-                  <TableHead>User Name</TableHead>
+                  <TableHead>Date & Time</TableHead>
+                  <TableHead>User</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead className="hidden md:table-cell">Employee ID</TableHead>
                 </TableRow>
               </TableHeader>
@@ -84,9 +81,16 @@ export default function SchedulesPage() {
                       className="row-interactive"
                       onClick={() => navigate(`/users/${schedule.gym_user_id}`)}
                     >
-                      <TableCell>{format(scheduleDate, 'MMM d, yyyy')}</TableCell>
-                      <TableCell>{format(scheduleDate, 'h:mm a')}</TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">{format(scheduleDate, 'MMM d, yyyy')}</p>
+                          <p className="text-sm text-muted-foreground">{format(scheduleDate, 'h:mm a')}</p>
+                        </div>
+                      </TableCell>
                       <TableCell className="font-medium">{schedule.gym_users?.name || 'Unknown'}</TableCell>
+                      <TableCell>
+                        <StatusBadge status={schedule.status} />
+                      </TableCell>
                       <TableCell className="hidden md:table-cell">{schedule.gym_users?.employee_id || '-'}</TableCell>
                     </TableRow>
                   );
@@ -101,8 +105,12 @@ export default function SchedulesPage() {
             description={
               filter === 'today' 
                 ? "No schedules for today." 
-                : filter === 'week' 
-                ? "No schedules for this week." 
+                : filter === 'IN_GYM'
+                ? "No one is currently in the gym."
+                : filter === 'BOOKED'
+                ? "No booked schedules."
+                : filter === 'OUT'
+                ? "No completed sessions."
                 : "No schedules have been created yet."
             }
           />
