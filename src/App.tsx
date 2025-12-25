@@ -13,6 +13,7 @@ import UserDetailPage from "./pages/UserDetailPage";
 import SchedulesPage from "./pages/SchedulesPage";
 import VaultPage from "./pages/VaultPage";
 import EntryModePage from "./pages/EntryModePage";
+import ReportsPage from "./pages/ReportsPage";
 import NotFound from "./pages/NotFound";
 
 // Settings pages
@@ -21,7 +22,8 @@ import ProfileSettings from "./pages/settings/ProfileSettings";
 import SecuritySettings from "./pages/settings/SecuritySettings";
 import ActiveDirectorySettings from "./pages/settings/ActiveDirectorySettings";
 import WhatsAppSettings from "./pages/settings/WhatsAppSettings";
-import DatabaseSettings from "./pages/settings/DatabaseSettings";
+import DatabaseList from "./pages/settings/DatabaseList";
+import DatabaseForm from "./pages/settings/DatabaseForm";
 
 const queryClient = new QueryClient();
 
@@ -83,6 +85,14 @@ const App = () => (
                 </ProtectedRoute>
               }
             />
+            <Route
+              path="/reports"
+              element={
+                <ProtectedRoute>
+                  <ReportsPage />
+                </ProtectedRoute>
+              }
+            />
             {/* Settings routes with nested layout */}
             <Route
               path="/settings"
@@ -97,7 +107,9 @@ const App = () => (
               <Route path="security" element={<SecuritySettings />} />
               <Route path="config/active-directory" element={<ActiveDirectorySettings />} />
               <Route path="config/whatsapp" element={<WhatsAppSettings />} />
-              <Route path="config/database" element={<DatabaseSettings />} />
+              <Route path="config/database" element={<DatabaseList />} />
+              <Route path="config/database/add" element={<DatabaseForm />} />
+              <Route path="config/database/:id" element={<DatabaseForm />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
