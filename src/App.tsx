@@ -13,6 +13,7 @@ import UserDetailPage from "./pages/UserDetailPage";
 import SchedulesPage from "./pages/SchedulesPage";
 import VaultPage from "./pages/VaultPage";
 import EntryModePage from "./pages/EntryModePage";
+import ReportsPage from "./pages/ReportsPage";
 import NotFound from "./pages/NotFound";
 
 // Settings pages
@@ -81,6 +82,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <EntryModePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/reports"
+              element={
+                <ProtectedRoute>
+                  <ReportsPage />
                 </ProtectedRoute>
               }
             />
