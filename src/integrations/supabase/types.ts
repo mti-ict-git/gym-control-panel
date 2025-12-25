@@ -14,6 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
+      database_connections: {
+        Row: {
+          connection_status: string
+          created_at: string
+          created_by: string | null
+          database_name: string
+          database_type: string
+          display_name: string
+          host: string
+          id: string
+          is_active: boolean
+          last_tested_at: string | null
+          password_encrypted: string
+          port: number
+          updated_at: string
+          username: string
+        }
+        Insert: {
+          connection_status?: string
+          created_at?: string
+          created_by?: string | null
+          database_name: string
+          database_type?: string
+          display_name: string
+          host: string
+          id?: string
+          is_active?: boolean
+          last_tested_at?: string | null
+          password_encrypted: string
+          port?: number
+          updated_at?: string
+          username: string
+        }
+        Update: {
+          connection_status?: string
+          created_at?: string
+          created_by?: string | null
+          database_name?: string
+          database_type?: string
+          display_name?: string
+          host?: string
+          id?: string
+          is_active?: boolean
+          last_tested_at?: string | null
+          password_encrypted?: string
+          port?: number
+          updated_at?: string
+          username?: string
+        }
+        Relationships: []
+      }
       gym_schedules: {
         Row: {
           check_in_time: string | null
