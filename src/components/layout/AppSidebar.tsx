@@ -7,7 +7,8 @@ import {
   LogOut,
   Dumbbell,
   Database,
-  Scan
+  Scan,
+  FileText
 } from 'lucide-react';
 import {
   Sidebar,
@@ -29,6 +30,7 @@ const menuItems = [
   { title: 'Live Gym', url: '/users', icon: Users },
   { title: 'Vault', url: '/vault', icon: Database },
   { title: 'Schedules', url: '/schedules', icon: Calendar },
+  { title: 'Reports', url: '/reports', icon: FileText },
   { title: 'Entry Mode', url: '/entry', icon: Scan },
   { title: 'Settings', url: '/settings', icon: Settings },
 ];
