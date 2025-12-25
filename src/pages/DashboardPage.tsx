@@ -1,14 +1,17 @@
 import { useNavigate } from 'react-router-dom';
-import { Users, Calendar, Clock, ArrowRight } from 'lucide-react';
+import { Users, Calendar, Clock, ArrowRight, TrendingUp, BarChart3 } from 'lucide-react';
 import { format } from 'date-fns';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, AreaChart, Area } from 'recharts';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/StatCard';
 import { OccupancyCard } from '@/components/OccupancyCard';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useGymUsers } from '@/hooks/useGymUsers';
 import { useUpcomingSchedules, useTodaySchedulesCount, useGymOccupancy } from '@/hooks/useGymSchedules';
+import { usePeakHoursData, useWeeklyTrendsData, useOccupancyPatternData, useMonthlyStats } from '@/hooks/useGymAnalytics';
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -16,6 +19,12 @@ export default function DashboardPage() {
   const { data: upcomingSchedules, isLoading: schedulesLoading } = useUpcomingSchedules(5);
   const { data: todayCount, isLoading: todayLoading } = useTodaySchedulesCount();
   const { data: occupancy, isLoading: occupancyLoading } = useGymOccupancy();
+  
+  // Analytics data
+  const { data: peakHoursData, isLoading: peakLoading } = usePeakHoursData();
+  const { data: weeklyTrendsData, isLoading: weeklyLoading } = useWeeklyTrendsData();
+  const { data: occupancyPatternData, isLoading: patternLoading } = useOccupancyPatternData();
+  const { data: monthlyStats, isLoading: monthlyLoading } = useMonthlyStats();
 
   const isLoading = usersLoading || schedulesLoading || todayLoading;
 
@@ -63,6 +72,187 @@ export default function DashboardPage() {
                 icon={Clock}
                 onClick={() => navigate('/schedules')}
               />
+            </>
+          )}
+        </div>
+
+        {/* Analytics Section */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5" />
+              Analytics
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Tabs defaultValue="peak-hours" className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="peak-hours">Peak Hours</TabsTrigger>
+                <TabsTrigger value="weekly-trends">Weekly Trends</TabsTrigger>
+                <TabsTrigger value="occupancy-pattern">Occupancy Pattern</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="peak-hours" className="mt-4">
+                <div className="h-[300px]">
+                  {peakLoading ? (
+                    <Skeleton className="h-full w-full" />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={peakHoursData}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis 
+                          dataKey="hour" 
+                          tick={{ fontSize: 12 }}
+                          className="text-muted-foreground"
+                        />
+                        <YAxis 
+                          tick={{ fontSize: 12 }}
+                          className="text-muted-foreground"
+                        />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'hsl(var(--card))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '8px'
+                          }}
+                          labelStyle={{ color: 'hsl(var(--foreground))' }}
+                        />
+                        <Bar 
+                          dataKey="count" 
+                          fill="hsl(var(--primary))" 
+                          radius={[4, 4, 0, 0]}
+                          name="Bookings"
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground mt-2 text-center">
+                  Today's bookings by hour
+                </p>
+              </TabsContent>
+
+              <TabsContent value="weekly-trends" className="mt-4">
+                <div className="h-[300px]">
+                  {weeklyLoading ? (
+                    <Skeleton className="h-full w-full" />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={weeklyTrendsData}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis 
+                          dataKey="day" 
+                          tick={{ fontSize: 12 }}
+                        />
+                        <YAxis tick={{ fontSize: 12 }} />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'hsl(var(--card))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '8px'
+                          }}
+                        />
+                        <Bar 
+                          dataKey="total" 
+                          fill="hsl(var(--primary))" 
+                          radius={[4, 4, 0, 0]}
+                          name="Total Bookings"
+                        />
+                        <Bar 
+                          dataKey="completed" 
+                          fill="hsl(var(--chart-2))" 
+                          radius={[4, 4, 0, 0]}
+                          name="Completed"
+                        />
+                        <Bar 
+                          dataKey="noShow" 
+                          fill="hsl(var(--destructive))" 
+                          radius={[4, 4, 0, 0]}
+                          name="No Show"
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground mt-2 text-center">
+                  This week's attendance breakdown
+                </p>
+              </TabsContent>
+
+              <TabsContent value="occupancy-pattern" className="mt-4">
+                <div className="h-[300px]">
+                  {patternLoading ? (
+                    <Skeleton className="h-full w-full" />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={occupancyPatternData}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis 
+                          dataKey="time" 
+                          tick={{ fontSize: 12 }}
+                        />
+                        <YAxis tick={{ fontSize: 12 }} />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'hsl(var(--card))',
+                            border: '1px solid hsl(var(--border))',
+                            borderRadius: '8px'
+                          }}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="avgOccupancy" 
+                          stroke="hsl(var(--primary))"
+                          fill="hsl(var(--primary)/0.2)"
+                          name="Avg Occupancy"
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+                <p className="text-sm text-muted-foreground mt-2 text-center">
+                  Average occupancy by hour (last 7 days)
+                </p>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+
+        {/* Monthly Stats */}
+        <div className="grid gap-4 md:grid-cols-4">
+          {monthlyLoading ? (
+            <>
+              <Skeleton className="h-24" />
+              <Skeleton className="h-24" />
+              <Skeleton className="h-24" />
+              <Skeleton className="h-24" />
+            </>
+          ) : (
+            <>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="text-2xl font-bold">{monthlyStats?.total || 0}</div>
+                  <p className="text-sm text-muted-foreground">Total Bookings (This Month)</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="text-2xl font-bold text-green-600">{monthlyStats?.completed || 0}</div>
+                  <p className="text-sm text-muted-foreground">Completed Sessions</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="text-2xl font-bold text-blue-600">{monthlyStats?.inProgress || 0}</div>
+                  <p className="text-sm text-muted-foreground">Currently In Gym</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="text-2xl font-bold text-destructive">{monthlyStats?.noShow || 0}</div>
+                  <p className="text-sm text-muted-foreground">No Shows</p>
+                </CardContent>
+              </Card>
             </>
           )}
         </div>
