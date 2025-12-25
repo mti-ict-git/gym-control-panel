@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LogOut, Lock, Info, User, Plug, ExternalLink, Shield, Database, Cloud } from 'lucide-react';
+import { LogOut, Lock, Info, User, Plug, ExternalLink, Shield, Database, Cloud, Users, MessageCircle, Server } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,24 @@ export default function SettingsPage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
+  
+  // Active Directory Config
+  const [adServer, setAdServer] = useState('');
+  const [adDomain, setAdDomain] = useState('');
+  const [adUsername, setAdUsername] = useState('');
+  const [adPassword, setAdPassword] = useState('');
+  
+  // WhatsApp Config
+  const [waApiKey, setWaApiKey] = useState('');
+  const [waPhoneNumber, setWaPhoneNumber] = useState('');
+  const [waWebhookUrl, setWaWebhookUrl] = useState('');
+  
+  // Database Config
+  const [dbServer, setDbServer] = useState('');
+  const [dbName, setDbName] = useState('');
+  const [dbUser, setDbUser] = useState('');
+  const [dbPassword, setDbPassword] = useState('');
+  const [dbPort, setDbPort] = useState('1433');
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -210,6 +228,198 @@ export default function SettingsPage() {
                   Connect
                 </Button>
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Active Directory Configuration */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-muted-foreground" />
+              <CardTitle className="text-lg">Active Directory</CardTitle>
+            </div>
+            <CardDescription>Configure LDAP/Active Directory for user authentication</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="adServer">Server Address</Label>
+                <Input
+                  id="adServer"
+                  value={adServer}
+                  onChange={(e) => setAdServer(e.target.value)}
+                  placeholder="ldap://192.168.1.1"
+                  className="touch-target"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="adDomain">Domain</Label>
+                <Input
+                  id="adDomain"
+                  value={adDomain}
+                  onChange={(e) => setAdDomain(e.target.value)}
+                  placeholder="corp.example.com"
+                  className="touch-target"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="adUsername">Bind Username</Label>
+                <Input
+                  id="adUsername"
+                  value={adUsername}
+                  onChange={(e) => setAdUsername(e.target.value)}
+                  placeholder="admin@corp.example.com"
+                  className="touch-target"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="adPassword">Bind Password</Label>
+                <Input
+                  id="adPassword"
+                  type="password"
+                  value={adPassword}
+                  onChange={(e) => setAdPassword(e.target.value)}
+                  placeholder="Enter password"
+                  className="touch-target"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="touch-target">
+                Test Connection
+              </Button>
+              <Button className="touch-target">
+                Save Configuration
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* WhatsApp Configuration */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <MessageCircle className="h-5 w-5 text-muted-foreground" />
+              <CardTitle className="text-lg">WhatsApp Integration</CardTitle>
+            </div>
+            <CardDescription>Configure WhatsApp Business API for notifications</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="waApiKey">API Key</Label>
+                <Input
+                  id="waApiKey"
+                  type="password"
+                  value={waApiKey}
+                  onChange={(e) => setWaApiKey(e.target.value)}
+                  placeholder="Enter API key"
+                  className="touch-target"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="waPhoneNumber">Phone Number ID</Label>
+                <Input
+                  id="waPhoneNumber"
+                  value={waPhoneNumber}
+                  onChange={(e) => setWaPhoneNumber(e.target.value)}
+                  placeholder="+62812xxxxx"
+                  className="touch-target"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="waWebhookUrl">Webhook URL</Label>
+                <Input
+                  id="waWebhookUrl"
+                  value={waWebhookUrl}
+                  onChange={(e) => setWaWebhookUrl(e.target.value)}
+                  placeholder="https://your-webhook-url.com/webhook"
+                  className="touch-target"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="touch-target">
+                Send Test Message
+              </Button>
+              <Button className="touch-target">
+                Save Configuration
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Database Management Configuration */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Server className="h-5 w-5 text-muted-foreground" />
+              <CardTitle className="text-lg">Database Management</CardTitle>
+            </div>
+            <CardDescription>Configure external database connections (SQL Server, MySQL, etc.)</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="dbServer">Server Address</Label>
+                <Input
+                  id="dbServer"
+                  value={dbServer}
+                  onChange={(e) => setDbServer(e.target.value)}
+                  placeholder="10.60.10.47"
+                  className="touch-target"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dbPort">Port</Label>
+                <Input
+                  id="dbPort"
+                  value={dbPort}
+                  onChange={(e) => setDbPort(e.target.value)}
+                  placeholder="1433"
+                  className="touch-target"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dbName">Database Name</Label>
+                <Input
+                  id="dbName"
+                  value={dbName}
+                  onChange={(e) => setDbName(e.target.value)}
+                  placeholder="GymDB"
+                  className="touch-target"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="dbUser">Username</Label>
+                <Input
+                  id="dbUser"
+                  value={dbUser}
+                  onChange={(e) => setDbUser(e.target.value)}
+                  placeholder="db_user"
+                  className="touch-target"
+                />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="dbPassword">Password</Label>
+                <Input
+                  id="dbPassword"
+                  type="password"
+                  value={dbPassword}
+                  onChange={(e) => setDbPassword(e.target.value)}
+                  placeholder="Enter database password"
+                  className="touch-target"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="touch-target">
+                Test Connection
+              </Button>
+              <Button className="touch-target">
+                Save Configuration
+              </Button>
             </div>
           </CardContent>
         </Card>
