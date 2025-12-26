@@ -129,11 +129,50 @@ export function useDatabaseConnections() {
 
   const testConnection = useMutation({
     mutationFn: async (id: string) => {
-      // Simulate connection test - in real implementation, this would call an edge function
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const success = Math.random() > 0.3; // 70% success rate for demo
-      
+      const { data: conn, error: fetchErr } = await supabase
+        .from('database_connections')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (fetchErr) throw fetchErr;
+      if (!conn) throw new Error('Connection not found');
+
+      let success = false;
+      const testerUrl = import.meta.env.VITE_DB_TEST_ENDPOINT;
+
+      if (testerUrl) {
+        try {
+          const resp = await fetch(`${testerUrl}/test`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              host: conn.host,
+              port: conn.port,
+              database: conn.database_name,
+              user: conn.username,
+              password: conn.password_encrypted,
+              type: conn.database_type,
+            }),
+          });
+          if (resp.ok) {
+            const json = await resp.json();
+            success = Boolean(json.success);
+          }
+        } catch (_) {
+          success = false;
+        }
+      } else {
+        try {
+          const { data: result } = await supabase.functions.invoke('test-db', {
+            body: { host: conn.host, port: conn.port },
+          });
+          success = Boolean(result?.reachable);
+        } catch (_) {
+          success = false;
+        }
+      }
+
       const { error } = await supabase
         .from('database_connections')
         .update({
@@ -143,7 +182,7 @@ export function useDatabaseConnections() {
         .eq('id', id);
 
       if (error) throw error;
-      
+
       return { success };
     },
     onSuccess: (result) => {

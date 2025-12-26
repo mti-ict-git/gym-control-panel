@@ -43,8 +43,14 @@ This journal tracks decisions, notes, and progress for the project.
     - Added GymDB env block and separated Master DB with MASTER_DB_ prefix.
   - Database:
     - Created MSSQL migration for dbo.LiveSchedules with constraints (status enum and time order).
+    - Implemented credential verification for MSSQL:
+      - Added local tester service [db-tester.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/server/db-tester.js) with login check via mssql driver.
+      - Added script "npm run dbtester" and env [env](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/.env) variable VITE_DB_TEST_ENDPOINT.
+      - Updated testing flow [useDatabaseConnections.ts](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/hooks/useDatabaseConnections.ts#L130-L166) to call tester, fallback to Supabase function reachability.
+      - Added Supabase edge function reachability checker [test-db](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/supabase/functions/test-db/index.ts).
 - Decisions:
   - Use Supabase range + count for efficient pagination.
   - Persist theme in localStorage and default to OS preference on first load.
   - Keep table minimal but add serial for quick referencing.
+  - Run credential tester inside LAN for private IP access; cloud functions used only for reachability fallback.
 
