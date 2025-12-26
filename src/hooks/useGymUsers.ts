@@ -12,18 +12,29 @@ export interface GymUser {
   updated_at: string;
 }
 
-export function useGymUsers() {
+export function useGymUsers(search: string = '', page: number = 1, pageSize: number = 10) {
   return useQuery({
-    queryKey: ['gym-users'],
+    queryKey: ['gym-users', { search, page, pageSize }],
     queryFn: async () => {
-      const { data, error } = await supabase
+      const from = (page - 1) * pageSize;
+      const to = from + pageSize - 1;
+
+      let query = supabase
         .from('gym_users')
-        .select('*')
-        .order('created_at', { ascending: false });
-      
+        .select('*', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      if (search && search.trim().length > 0) {
+        const s = `%${search.trim()}%`;
+        query = query.or(`name.ilike.${s},employee_id.ilike.${s},department.ilike.${s}`);
+      }
+
+      const { data, error, count } = await query;
       if (error) throw error;
-      return data as GymUser[];
+      return { data: data as GymUser[], total: count ?? 0 };
     },
+    keepPreviousData: true,
   });
 }
 
