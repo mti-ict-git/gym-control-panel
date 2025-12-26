@@ -34,7 +34,7 @@ export function useGymUsers(search: string = '', page: number = 1, pageSize: num
       if (error) throw error;
       return { data: data as GymUser[], total: count ?? 0 };
     },
-    keepPreviousData: true,
+    placeholderData: (previousData) => previousData,
   });
 }
 

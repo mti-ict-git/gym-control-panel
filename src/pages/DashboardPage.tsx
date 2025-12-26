@@ -15,7 +15,8 @@ import { usePeakHoursData, useWeeklyTrendsData, useOccupancyPatternData, useMont
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { data: users, isLoading: usersLoading } = useGymUsers();
+  const { data: usersResult, isLoading: usersLoading } = useGymUsers();
+  const users = usersResult?.data ?? [];
   const { data: upcomingSchedules, isLoading: schedulesLoading } = useUpcomingSchedules(5);
   const { data: todayCount, isLoading: todayLoading } = useTodaySchedulesCount();
   const { data: occupancy, isLoading: occupancyLoading } = useGymOccupancy();

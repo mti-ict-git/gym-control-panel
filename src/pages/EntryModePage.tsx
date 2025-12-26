@@ -23,7 +23,8 @@ export default function EntryModePage() {
   const [denialReason, setDenialReason] = useState<DenialReason | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   
-  const { data: gymUsers } = useGymUsers();
+  const { data: gymUsersResult } = useGymUsers();
+  const gymUsers = gymUsersResult?.data ?? [];
   const { data: occupancy = 0 } = useGymOccupancy();
   const checkInMutation = useCheckIn();
   const { toast } = useToast();

@@ -61,11 +61,11 @@ function VaultUserRow({
 export default function VaultPage() {
   const { toast } = useToast();
   const { data: vaultUsers, isLoading: isLoadingVault, error: vaultError } = useVaultUsers();
-  const { data: gymUsers, isLoading: isLoadingGym } = useGymUsers();
+  const { data: gymUsersResult, isLoading: isLoadingGym } = useGymUsers();
   const addFromVaultMutation = useAddGymUserFromVault();
 
   const gymUserEmployeeIds = new Set(
-    gymUsers?.map(u => u.vault_employee_id).filter(Boolean) || []
+    gymUsersResult?.data?.map(u => u.vault_employee_id).filter(Boolean) || []
   );
 
   const handleAddToGym = (user: VaultUser) => {
