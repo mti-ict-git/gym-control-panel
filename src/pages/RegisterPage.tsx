@@ -139,19 +139,36 @@ export default function RegisterPage() {
 
           {/* Carousel - Centered on circles */}
           <div className="absolute inset-0 flex items-center justify-center z-10">
-            <div className="w-48 h-48 flex items-center justify-center">
-              {carouselImages.map((img, idx) => (
-                <img
-                  key={idx}
-                  src={img}
-                  alt={`Fitness ${idx + 1}`}
-                  className={`absolute w-40 h-40 object-contain transition-all duration-500 ${
-                    idx === currentSlide
-                      ? 'opacity-100 scale-100'
-                      : 'opacity-0 scale-95'
-                  }`}
-                />
-              ))}
+            <div className="flex flex-col items-center">
+              <div className="w-48 h-48 flex items-center justify-center relative">
+                {carouselImages.map((img, idx) => (
+                  <img
+                    key={idx}
+                    src={img}
+                    alt={`Fitness ${idx + 1}`}
+                    className={`absolute w-40 h-40 object-contain transition-all duration-500 ${
+                      idx === currentSlide
+                        ? 'opacity-100 scale-100'
+                        : 'opacity-0 scale-95'
+                    }`}
+                  />
+                ))}
+              </div>
+              {/* Dot indicators */}
+              <div className="flex gap-2 mt-4">
+                {carouselImages.map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setCurrentSlide(idx)}
+                    className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                      idx === currentSlide
+                        ? 'bg-slate-800 w-4'
+                        : 'bg-slate-300 hover:bg-slate-400'
+                    }`}
+                    aria-label={`Go to slide ${idx + 1}`}
+                  />
+                ))}
+              </div>
             </div>
           </div>
 
