@@ -221,7 +221,7 @@ export default function RegisterPage() {
                           <SelectValue placeholder={sessionsLoading ? 'Loading sessions...' : 'Select a session'} />
                         </SelectTrigger>
                       </FormControl>
-                      <SelectContent>
+                      <SelectContent className="z-50 bg-white">
                         {sessions?.map((session) => (
                           <SelectItem key={session.id} value={session.id}>
                             {session.session_name}
