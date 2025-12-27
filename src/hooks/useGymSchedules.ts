@@ -374,3 +374,40 @@ export function useDeleteSchedule() {
     },
   });
 }
+
+export function useUpdateSchedule() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ scheduleId, schedule_time }: { scheduleId: string; schedule_time: string }) => {
+      const { data, error } = await supabase
+        .from('gym_schedules')
+        .update({ schedule_time })
+        .eq('id', scheduleId)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data as GymSchedule;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['gym-schedules'] });
+      queryClient.invalidateQueries({ queryKey: ['user-schedules'] });
+      queryClient.invalidateQueries({ queryKey: ['upcoming-schedules'] });
+      queryClient.invalidateQueries({ queryKey: ['today-schedules-count'] });
+      queryClient.invalidateQueries({ queryKey: ['next-schedule'] });
+      toast({
+        title: "Schedule Updated",
+        description: `Schedule updated to ${format(new Date(data.schedule_time), 'MMM d, h:mm a')}.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+}
