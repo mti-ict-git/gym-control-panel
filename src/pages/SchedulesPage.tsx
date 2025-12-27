@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Calendar, Plus, Pencil, Trash2 } from 'lucide-react';
+import { Calendar as CalendarIcon, Plus, Pencil, Trash2 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
@@ -8,12 +8,16 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useGymSessionsList, useCreateGymSession, useUpdateGymSession, useDeleteGymSession, GymSession, GymSessionInsert, formatTime } from '@/hooks/useGymSessions';
 import { SessionDialog } from '@/components/schedules/SessionDialog';
+import { Calendar } from '@/components/ui/calendar';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
 
 export default function SchedulesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<GymSession | null>(null);
   const [deleteSession, setDeleteSession] = useState<GymSession | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
 
   const { data: sessions, isLoading } = useGymSessionsList();
   const createMutation = useCreateGymSession();
@@ -78,6 +82,7 @@ export default function SchedulesPage() {
           </Button>
         </div>
 
+        {/* Sessions Table */}
         {isLoading ? (
           <div className="space-y-4">
             <Skeleton className="h-12 w-full" />
@@ -130,7 +135,7 @@ export default function SchedulesPage() {
           </div>
         ) : (
           <EmptyState
-            icon={Calendar}
+            icon={CalendarIcon}
             title="No sessions found"
             description="Create your first gym session to get started."
             action={
@@ -141,6 +146,31 @@ export default function SchedulesPage() {
             }
           />
         )}
+
+        {/* Large Calendar Display */}
+        <Card>
+          <CardHeader className="pb-2">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <CalendarIcon className="h-5 w-5" />
+                Schedule Calendar
+              </CardTitle>
+              {selectedDate && (
+                <p className="text-sm text-muted-foreground">
+                  Selected: <span className="font-medium text-foreground">{format(selectedDate, 'PPP')}</span>
+                </p>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Calendar
+              mode="single"
+              selected={selectedDate}
+              onSelect={setSelectedDate}
+              className="w-full pointer-events-auto [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full [&_.rdp-head_cell]:w-full [&_.rdp-head_cell]:text-center [&_.rdp-head_cell]:py-2 [&_.rdp-cell]:w-full [&_.rdp-cell]:text-center [&_.rdp-day]:w-full [&_.rdp-day]:h-12 [&_.rdp-day]:text-base"
+            />
+          </CardContent>
+        </Card>
       </div>
 
       <SessionDialog
