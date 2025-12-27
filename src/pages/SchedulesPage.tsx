@@ -1,88 +1,66 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState } from 'react';
 import { Calendar, Plus, Pencil, Trash2 } from 'lucide-react';
-import { format } from 'date-fns';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { useGymSchedules, useAddSchedule, useUpdateSchedule, useDeleteSchedule, FilterType, GymScheduleWithUser } from '@/hooks/useGymSchedules';
-import { GYM_SESSIONS, getSessionByTime, formatSessionTime } from '@/lib/gymSessions';
-import { ScheduleDialog } from '@/components/schedules/ScheduleDialog';
-import { StatusBadge } from '@/components/StatusBadge';
+import { useGymSessionsList, useCreateGymSession, useUpdateGymSession, useDeleteGymSession, GymSession, GymSessionInsert, formatTime } from '@/hooks/useGymSessions';
+import { SessionDialog } from '@/components/schedules/SessionDialog';
 import { toast } from 'sonner';
 
 export default function SchedulesPage() {
-  const [searchParams] = useSearchParams();
-  const initialFilter = (searchParams.get('filter') as FilterType) || 'all';
-  const [filter, setFilter] = useState<FilterType>(initialFilter);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingSchedule, setEditingSchedule] = useState<GymScheduleWithUser | null>(null);
-  const [deleteSchedule, setDeleteSchedule] = useState<GymScheduleWithUser | null>(null);
+  const [editingSession, setEditingSession] = useState<GymSession | null>(null);
+  const [deleteSession, setDeleteSession] = useState<GymSession | null>(null);
 
-  useEffect(() => {
-    const filterParam = searchParams.get('filter') as FilterType;
-    if (filterParam) {
-      setFilter(filterParam);
-    }
-  }, [searchParams]);
-
-  const { data: schedules, isLoading } = useGymSchedules(filter);
-  const createMutation = useAddSchedule();
-  const updateMutation = useUpdateSchedule();
-  const deleteMutation = useDeleteSchedule();
-
-  const filterButtons: { label: string; value: FilterType }[] = [
-    { label: 'All', value: 'all' },
-    { label: 'Today', value: 'today' },
-    { label: 'In Gym', value: 'IN_GYM' },
-    { label: 'Booked', value: 'BOOKED' },
-    { label: 'Out', value: 'OUT' },
-  ];
+  const { data: sessions, isLoading } = useGymSessionsList();
+  const createMutation = useCreateGymSession();
+  const updateMutation = useUpdateGymSession();
+  const deleteMutation = useDeleteGymSession();
 
   const handleCreate = () => {
-    setEditingSchedule(null);
+    setEditingSession(null);
     setDialogOpen(true);
   };
 
-  const handleEdit = (schedule: GymScheduleWithUser) => {
-    setEditingSchedule(schedule);
+  const handleEdit = (session: GymSession) => {
+    setEditingSession(session);
     setDialogOpen(true);
   };
 
-  const handleSubmit = (data: { gym_user_id: string; schedule_time: string }) => {
-    if (editingSchedule) {
+  const handleSubmit = (data: GymSessionInsert) => {
+    if (editingSession) {
       updateMutation.mutate(
-        { scheduleId: editingSchedule.id, schedule_time: data.schedule_time },
+        { id: editingSession.id, ...data },
         {
           onSuccess: () => {
-            toast.success('Schedule updated');
+            toast.success('Session updated');
             setDialogOpen(false);
           },
-          onError: () => toast.error('Failed to update schedule'),
+          onError: () => toast.error('Failed to update session'),
         }
       );
     } else {
       createMutation.mutate(data, {
         onSuccess: () => {
-          toast.success('Schedule created');
+          toast.success('Session created');
           setDialogOpen(false);
         },
-        onError: () => toast.error('Failed to create schedule'),
+        onError: () => toast.error('Failed to create session'),
       });
     }
   };
 
   const handleDelete = () => {
-    if (!deleteSchedule) return;
-    deleteMutation.mutate(deleteSchedule.id, {
+    if (!deleteSession) return;
+    deleteMutation.mutate(deleteSession.id, {
       onSuccess: () => {
-        toast.success('Schedule deleted');
-        setDeleteSchedule(null);
+        toast.success('Session deleted');
+        setDeleteSession(null);
       },
-      onError: () => toast.error('Failed to delete schedule'),
+      onError: () => toast.error('Failed to delete session'),
     });
   };
 
@@ -91,27 +69,13 @@ export default function SchedulesPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Schedules</h1>
-            <p className="text-muted-foreground">View and manage gym session occupancy.</p>
+            <h1 className="text-2xl font-bold">Sessions</h1>
+            <p className="text-muted-foreground">Manage gym session schedules and quotas.</p>
           </div>
           <Button onClick={handleCreate}>
             <Plus className="h-4 w-4 mr-2" />
-            Create Schedule
+            Create Session
           </Button>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {filterButtons.map((btn) => (
-            <Button
-              key={btn.value}
-              variant={filter === btn.value ? 'default' : 'outline'}
-              onClick={() => setFilter(btn.value)}
-              className="touch-target"
-              size="sm"
-            >
-              {btn.label}
-            </Button>
-          ))}
         </div>
 
         {isLoading ? (
@@ -120,67 +84,47 @@ export default function SchedulesPage() {
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
-        ) : schedules && schedules.length > 0 ? (
+        ) : sessions && sessions.length > 0 ? (
           <div className="rounded-lg border bg-card overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-16">No</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Date & Time</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Session</TableHead>
+                  <TableHead>Time Start</TableHead>
+                  <TableHead>Time End</TableHead>
+                  <TableHead>Quota</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {schedules.map((schedule, index) => {
-                  const scheduleDate = new Date(schedule.schedule_time);
-                  const session = getSessionByTime(scheduleDate);
-                  return (
-                    <TableRow key={schedule.id}>
-                      <TableCell className="font-medium">{index + 1}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{schedule.gym_users?.name || 'Unknown'}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {schedule.gym_users?.employee_id}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span>{format(scheduleDate, 'MMM d, yyyy')}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {session ? formatSessionTime(session) : format(scheduleDate, 'HH:mm')}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <StatusBadge status={schedule.status} />
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          {schedule.status === 'BOOKED' && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => handleEdit(schedule)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setDeleteSchedule(schedule)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                {sessions.map((session, index) => (
+                  <TableRow key={session.id}>
+                    <TableCell className="font-medium">{index + 1}</TableCell>
+                    <TableCell className="font-medium">{session.session_name}</TableCell>
+                    <TableCell>{formatTime(session.time_start)}</TableCell>
+                    <TableCell>{formatTime(session.time_end)}</TableCell>
+                    <TableCell>{session.quota}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleEdit(session)}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDeleteSession(session)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </div>
@@ -188,31 +132,31 @@ export default function SchedulesPage() {
           <EmptyState
             icon={Calendar}
             title="No sessions found"
-            description="No gym sessions data available for the selected filter."
+            description="Create your first gym session to get started."
             action={
               <Button onClick={handleCreate}>
                 <Plus className="h-4 w-4 mr-2" />
-                Create Schedule
+                Create Session
               </Button>
             }
           />
         )}
       </div>
 
-      <ScheduleDialog
+      <SessionDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         onSubmit={handleSubmit}
-        schedule={editingSchedule}
+        session={editingSession}
         isLoading={createMutation.isPending || updateMutation.isPending}
       />
 
-      <AlertDialog open={!!deleteSchedule} onOpenChange={() => setDeleteSchedule(null)}>
+      <AlertDialog open={!!deleteSession} onOpenChange={() => setDeleteSession(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Schedule</AlertDialogTitle>
+            <AlertDialogTitle>Delete Session</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this schedule? This action cannot be undone.
+              Are you sure you want to delete "{deleteSession?.session_name}"? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

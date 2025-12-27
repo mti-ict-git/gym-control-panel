@@ -103,6 +103,36 @@ export type Database = {
           },
         ]
       }
+      gym_sessions: {
+        Row: {
+          created_at: string
+          id: string
+          quota: number
+          session_name: string
+          time_end: string
+          time_start: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          quota?: number
+          session_name: string
+          time_end: string
+          time_start: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          quota?: number
+          session_name?: string
+          time_end?: string
+          time_start?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       gym_users: {
         Row: {
           created_at: string
