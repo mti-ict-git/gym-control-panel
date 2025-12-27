@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Clock, Users } from 'lucide-react';
 import { format, startOfWeek, addDays, addWeeks, subWeeks, getWeek, isSameDay } from 'date-fns';
 import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent } from '@/components/ui/card';
@@ -7,6 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { GymSession, formatTime } from '@/hooks/useGymSessions';
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
 
 interface WeeklyCalendarProps {
   sessions: GymSession[];
@@ -194,28 +199,41 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
                     if (startHour < START_HOUR || startHour >= END_HOUR) return null;
 
                     return (
-                      <div
-                        key={`${session.id}-${dayIndex}`}
-                        className={cn(
-                          "absolute left-1 right-1 rounded px-2 py-1 overflow-hidden cursor-pointer hover:opacity-90 transition-opacity",
-                          colorClass
-                        )}
-                        style={{ top: `${top}px`, height: `${height}px` }}
-                      >
-                        <div className="text-xs font-medium truncate">
-                          {session.session_name}
-                        </div>
-                        {height > 40 && (
-                          <div className="text-xs opacity-75 mt-0.5">
-                            {formatTime(session.time_start)} - {formatTime(session.time_end)}
+                      <Popover key={`${session.id}-${dayIndex}`}>
+                        <PopoverTrigger asChild>
+                          <div
+                            className={cn(
+                              "absolute left-1 right-1 rounded px-2 py-1 overflow-hidden cursor-pointer hover:opacity-80 transition-opacity",
+                              colorClass
+                            )}
+                            style={{ top: `${top}px`, height: `${height}px` }}
+                          >
+                            <div className="text-xs font-medium truncate">
+                              {session.session_name}
+                            </div>
                           </div>
-                        )}
-                        {height > 56 && (
-                          <div className="text-xs opacity-75 mt-0.5">
-                            Quota: {session.quota}
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64 p-3" side="right">
+                          <div className="space-y-3">
+                            <div>
+                              <h4 className="font-semibold">{session.session_name}</h4>
+                              <p className="text-xs text-muted-foreground">
+                                {format(day, 'EEEE, MMMM d')}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm">
+                              <Clock className="h-4 w-4 text-muted-foreground" />
+                              <span>
+                                {formatTime(session.time_start)} - {formatTime(session.time_end)}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm">
+                              <Users className="h-4 w-4 text-muted-foreground" />
+                              <span>Quota: {session.quota}</span>
+                            </div>
                           </div>
-                        )}
-                      </div>
+                        </PopoverContent>
+                      </Popover>
                     );
                   })}
                 </div>
