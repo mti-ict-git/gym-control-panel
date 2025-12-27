@@ -7,16 +7,16 @@ const corsHeaders = {
 
 // Mock Vault data - in production, this would call external Vault API
 const mockVaultUsers = [
-  { employee_id: 'EMP001', name: 'Ahmad Rahman', department: 'Engineering', status: 'ACTIVE' },
-  { employee_id: 'EMP002', name: 'Sarah Lee', department: 'Marketing', status: 'ACTIVE' },
-  { employee_id: 'EMP003', name: 'Budi Santoso', department: 'Finance', status: 'ACTIVE' },
-  { employee_id: 'EMP004', name: 'Maya Chen', department: 'HR', status: 'INACTIVE' },
-  { employee_id: 'EMP005', name: 'Ravi Kumar', department: 'Engineering', status: 'ACTIVE' },
-  { employee_id: 'EMP006', name: 'Lisa Wong', department: 'Operations', status: 'ACTIVE' },
-  { employee_id: 'EMP007', name: 'John Smith', department: 'Sales', status: 'INACTIVE' },
-  { employee_id: 'EMP008', name: 'Dewi Putri', department: 'Engineering', status: 'ACTIVE' },
-  { employee_id: 'EMP009', name: 'Michael Tan', department: 'Finance', status: 'ACTIVE' },
-  { employee_id: 'EMP010', name: 'Anita Sari', department: 'Marketing', status: 'ACTIVE' },
+  { employee_id: 'EMP001', name: 'Ahmad Rahman', department: 'Engineering', status: 'ACTIVE', card_no: 'CN001' },
+  { employee_id: 'EMP002', name: 'Sarah Lee', department: 'Marketing', status: 'ACTIVE', card_no: 'CN002' },
+  { employee_id: 'EMP003', name: 'Budi Santoso', department: 'Finance', status: 'ACTIVE', card_no: 'CN003' },
+  { employee_id: 'EMP004', name: 'Maya Chen', department: 'HR', status: 'INACTIVE', card_no: 'CN004' },
+  { employee_id: 'EMP005', name: 'Ravi Kumar', department: 'Engineering', status: 'ACTIVE', card_no: 'CN005' },
+  { employee_id: 'EMP006', name: 'Lisa Wong', department: 'Operations', status: 'ACTIVE', card_no: 'CN006' },
+  { employee_id: 'EMP007', name: 'John Smith', department: 'Sales', status: 'INACTIVE', card_no: 'CN007' },
+  { employee_id: 'EMP008', name: 'Dewi Putri', department: 'Engineering', status: 'ACTIVE', card_no: 'CN008' },
+  { employee_id: 'EMP009', name: 'Michael Tan', department: 'Finance', status: 'ACTIVE', card_no: 'CN009' },
+  { employee_id: 'EMP010', name: 'Anita Sari', department: 'Marketing', status: 'ACTIVE', card_no: 'CN010' },
 ];
 
 serve(async (req) => {

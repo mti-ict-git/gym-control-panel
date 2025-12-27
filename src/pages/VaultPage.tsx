@@ -13,20 +13,24 @@ function VaultUserRow({
   user, 
   isAdded, 
   onAdd,
-  isAdding 
+  isAdding,
+  index
 }: { 
   user: VaultUser; 
   isAdded: boolean;
   onAdd: () => void;
   isAdding: boolean;
+  index: number;
 }) {
   const isInactive = user.status === 'INACTIVE';
   const isDisabled = isAdded || isInactive || isAdding;
   
   return (
     <TableRow>
+      <TableCell className="w-12 text-right">{index + 1}</TableCell>
       <TableCell className="font-medium">{user.name}</TableCell>
       <TableCell>{user.employee_id}</TableCell>
+      <TableCell className="hidden md:table-cell">{user.card_no || '-'}</TableCell>
       <TableCell className="hidden md:table-cell">{user.department}</TableCell>
       <TableCell>
         <Badge variant={user.status === 'ACTIVE' ? 'default' : 'secondary'}>
@@ -113,18 +117,21 @@ export default function VaultPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-12 text-right">No</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Employee ID</TableHead>
+                  <TableHead className="hidden md:table-cell">Card No</TableHead>
                   <TableHead className="hidden md:table-cell">Department</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {vaultUsers.map((user) => (
+                {vaultUsers.map((user, index) => (
                   <VaultUserRow
                     key={user.employee_id}
                     user={user}
+                    index={index}
                     isAdded={gymUserEmployeeIds.has(user.employee_id)}
                     onAdd={() => handleAddToGym(user)}
                     isAdding={addFromVaultMutation.isPending}

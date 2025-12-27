@@ -1,14 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Calendar } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, isSameDay, parseISO } from 'date-fns';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
-import { StatusBadge } from '@/components/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useGymSchedules, FilterType } from '@/hooks/useGymSchedules';
+import { GYM_SESSIONS, getSessionByTime, formatSessionTime, GymSession } from '@/lib/gymSessions';
+
+interface SessionRowData {
+  id: string;
+  date: Date;
+  session: GymSession;
+  count: number;
+}
 
 export default function SchedulesPage() {
   const navigate = useNavigate();
@@ -33,12 +40,62 @@ export default function SchedulesPage() {
     { label: 'Out', value: 'OUT' },
   ];
 
+  const sessionRows = useMemo(() => {
+    if (!schedules) return [];
+
+    const rowsMap = new Map<string, SessionRowData>();
+
+    // If filter is 'today', pre-fill with empty sessions for today
+    if (filter === 'today') {
+      const today = new Date();
+      GYM_SESSIONS.forEach(session => {
+        const key = `${format(today, 'yyyy-MM-dd')}_${session.id}`;
+        rowsMap.set(key, {
+          id: key,
+          date: today,
+          session,
+          count: 0
+        });
+      });
+    }
+
+    schedules.forEach(schedule => {
+      const date = new Date(schedule.schedule_time);
+      const session = getSessionByTime(date);
+      
+      if (session) {
+        const key = `${format(date, 'yyyy-MM-dd')}_${session.id}`;
+        const existing = rowsMap.get(key);
+        
+        if (existing) {
+          existing.count++;
+        } else {
+          // Only add if not pre-filled (which implies filter !== 'today')
+          // Or if pre-fill missed it (shouldn't happen for 'today')
+          rowsMap.set(key, {
+            id: key,
+            date: date,
+            session,
+            count: 1
+          });
+        }
+      }
+    });
+
+    return Array.from(rowsMap.values()).sort((a, b) => {
+      // Sort by date then by session start time
+      const dateCompare = b.date.getTime() - a.date.getTime(); // Newest dates first
+      if (dateCompare !== 0) return dateCompare;
+      return a.session.startTime.localeCompare(b.session.startTime);
+    });
+  }, [schedules, filter]);
+
   return (
     <AppLayout>
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Schedules</h1>
-          <p className="text-muted-foreground">View and manage all gym schedules.</p>
+          <p className="text-muted-foreground">View and manage gym session occupancy.</p>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -61,58 +118,46 @@ export default function SchedulesPage() {
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
-        ) : schedules && schedules.length > 0 ? (
+        ) : sessionRows.length > 0 ? (
           <div className="rounded-lg border bg-card overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Date & Time</TableHead>
-                  <TableHead>User</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="hidden md:table-cell">Employee ID</TableHead>
+                  <TableHead className="w-16">No</TableHead>
+                  <TableHead>Session</TableHead>
+                  <TableHead>Time Range</TableHead>
+                  <TableHead>Occupancy</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {schedules.map((schedule) => {
-                  const scheduleDate = new Date(schedule.schedule_time);
-                  return (
-                    <TableRow 
-                      key={schedule.id}
-                      className="row-interactive"
-                      onClick={() => navigate(`/users/${schedule.gym_user_id}`)}
-                    >
-                      <TableCell>
-                        <div>
-                          <p className="font-medium">{format(scheduleDate, 'MMM d, yyyy')}</p>
-                          <p className="text-sm text-muted-foreground">{format(scheduleDate, 'h:mm a')}</p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-medium">{schedule.gym_users?.name || 'Unknown'}</TableCell>
-                      <TableCell>
-                        <StatusBadge status={schedule.status} />
-                      </TableCell>
-                      <TableCell className="hidden md:table-cell">{schedule.gym_users?.employee_id || '-'}</TableCell>
-                    </TableRow>
-                  );
-                })}
+                {sessionRows.map((row, index) => (
+                  <TableRow key={row.id}>
+                    <TableCell className="font-medium">{index + 1}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{row.session.nameId}</span>
+                        {filter !== 'today' && (
+                          <span className="text-xs text-muted-foreground">
+                            {format(row.date, 'MMM d, yyyy')}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>{formatSessionTime(row.session)}</TableCell>
+                    <TableCell>
+                      <span className="font-medium">{row.count}</span>
+                      <span className="text-muted-foreground text-xs ml-1">/ 15</span>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </div>
         ) : (
           <EmptyState
             icon={Calendar}
-            title="No schedules found"
-            description={
-              filter === 'today' 
-                ? "No schedules for today." 
-                : filter === 'IN_GYM'
-                ? "No one is currently in the gym."
-                : filter === 'BOOKED'
-                ? "No booked schedules."
-                : filter === 'OUT'
-                ? "No completed sessions."
-                : "No schedules have been created yet."
-            }
+            title="No sessions found"
+            description="No gym sessions data available for the selected filter."
           />
         )}
       </div>
