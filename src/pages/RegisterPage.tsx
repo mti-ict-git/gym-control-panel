@@ -3,7 +3,8 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format, addDays, startOfDay } from 'date-fns';
-import { CalendarIcon, Dumbbell, Loader2 } from 'lucide-react';
+import { CalendarIcon, Loader2 } from 'lucide-react';
+import gymIcon from '@/assets/gym-icon.png';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -108,9 +109,7 @@ export default function RegisterPage() {
           </div>
 
           <div className="relative z-10 flex items-center justify-center mb-16">
-            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-primary shadow-lg">
-              <Dumbbell className="h-10 w-10 text-primary-foreground" />
-            </div>
+            <img src={gymIcon} alt="Gym" className="w-40 h-40 object-contain" />
           </div>
 
           <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
@@ -149,9 +148,7 @@ export default function RegisterPage() {
       <div className="w-full lg:w-1/2 p-6 flex items-center justify-center">
         <div className="w-full max-w-md bg-white rounded-3xl p-8 lg:p-12 shadow-xl">
           <div className="flex lg:hidden justify-center mb-6">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary">
-              <Dumbbell className="h-7 w-7 text-primary-foreground" />
-            </div>
+            <img src={gymIcon} alt="Gym" className="w-20 h-20 object-contain" />
           </div>
 
           <div className="text-center mb-8">
