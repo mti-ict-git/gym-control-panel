@@ -136,13 +136,13 @@ export default function LoginPage() {
           {/* Carousel - Centered on circles */}
           <div className="absolute inset-0 flex items-center justify-center z-10">
             <div className="flex flex-col items-center">
-              <div className="w-48 h-48 flex items-center justify-center relative">
+              <div className="w-72 h-72 flex items-center justify-center relative">
                 {carouselImages.map((img, idx) => (
                   <img
                     key={idx}
                     src={img}
                     alt={`Fitness ${idx + 1}`}
-                    className={`absolute w-40 h-40 object-contain transition-all duration-500 ${
+                    className={`absolute w-64 h-64 object-contain transition-all duration-500 ${
                       idx === currentSlide
                         ? 'opacity-100 scale-100'
                         : 'opacity-0 scale-95'
