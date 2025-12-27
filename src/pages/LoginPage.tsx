@@ -1,12 +1,17 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
-import { Dumbbell, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
+import gymIcon from '@/assets/gym-icon.png';
+import treadmillImg from '@/assets/treadmill.png';
+import benchPressImg from '@/assets/bench-press.png';
+
+const carouselImages = [treadmillImg, benchPressImg, gymIcon];
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -14,9 +19,18 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [currentSlide, setCurrentSlide] = useState(0);
   const { user, login, signUp } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  // Auto-swipe carousel
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % carouselImages.length);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   if (user) {
     return <Navigate to="/dashboard" replace />;
@@ -96,22 +110,13 @@ export default function LoginPage() {
     <div className="min-h-screen flex bg-slate-400/80">
       {/* Left Panel - Decorative */}
       <div className="hidden lg:flex lg:w-1/2 p-6">
-        <div className="w-full bg-slate-100 rounded-3xl flex flex-col items-center justify-center p-12 relative overflow-hidden">
-          {/* Decorative circles */}
+        <div className="w-full bg-slate-100 rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden">
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-72 h-72 border border-slate-300 rounded-full absolute"></div>
-            <div className="w-96 h-96 border border-slate-300 rounded-full absolute"></div>
-            <div className="w-[28rem] h-[28rem] border border-slate-200 rounded-full absolute"></div>
+            <div className="w-72 h-72 border border-slate-300 rounded-full absolute" />
+            <div className="w-96 h-96 border border-slate-300 rounded-full absolute" />
+            <div className="w-[28rem] h-[28rem] border border-slate-200 rounded-full absolute" />
           </div>
-          
-          {/* Logo in center */}
-          <div className="relative z-10 flex items-center justify-center mb-16">
-            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-primary shadow-lg">
-              <Dumbbell className="h-10 w-10 text-primary-foreground" />
-            </div>
-          </div>
-          
-          {/* Floating decorative elements */}
+
           <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
             💪
           </div>
@@ -124,9 +129,34 @@ export default function LoginPage() {
           <div className="absolute bottom-40 right-28 w-10 h-10 bg-purple-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
             🎯
           </div>
-          
-          {/* Text content */}
-          <div className="relative z-10 text-center mt-auto">
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Carousel - Centered on circles */}
+          <div className="absolute inset-0 flex items-center justify-center z-10">
+            <div className="flex flex-col items-center">
+              <div className="w-48 h-48 flex items-center justify-center relative">
+                {carouselImages.map((img, idx) => (
+                  <img
+                    key={idx}
+                    src={img}
+                    alt={`Fitness ${idx + 1}`}
+                    className={`absolute w-40 h-40 object-contain transition-all duration-500 ${
+                      idx === currentSlide
+                        ? 'opacity-100 scale-100'
+                        : 'opacity-0 scale-95'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          <div className="relative z-10 text-center">
             <h2 className="text-2xl font-semibold text-slate-800 mb-3">
               Manage your gym sessions
               <br />
@@ -135,12 +165,20 @@ export default function LoginPage() {
             <p className="text-slate-500 text-sm max-w-xs mx-auto">
               Track attendance, manage schedules, and keep your members engaged with our admin platform.
             </p>
-            
-            {/* Dots indicator */}
+
             <div className="flex justify-center gap-2 mt-8">
-              <div className="w-2 h-2 rounded-full bg-slate-800"></div>
-              <div className="w-2 h-2 rounded-full bg-slate-300"></div>
-              <div className="w-2 h-2 rounded-full bg-slate-300"></div>
+              {carouselImages.map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentSlide(idx)}
+                  className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                    idx === currentSlide
+                      ? 'bg-slate-800'
+                      : 'bg-slate-300 hover:bg-slate-400'
+                  }`}
+                  aria-label={`Go to slide ${idx + 1}`}
+                />
+              ))}
             </div>
           </div>
         </div>
@@ -151,9 +189,7 @@ export default function LoginPage() {
         <div className="w-full max-w-md bg-white rounded-3xl p-8 lg:p-12 shadow-xl">
           {/* Mobile logo */}
           <div className="flex lg:hidden justify-center mb-6">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary">
-              <Dumbbell className="h-7 w-7 text-primary-foreground" />
-            </div>
+            <img src={gymIcon} alt="Gym" className="w-14 h-14 object-contain" />
           </div>
 
           <Tabs defaultValue="login" className="w-full">
