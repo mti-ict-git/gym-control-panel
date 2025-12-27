@@ -13,8 +13,10 @@ interface WeeklyCalendarProps {
   onCreateSession?: () => void;
 }
 
-const TIME_SLOTS = Array.from({ length: 12 }, (_, i) => {
-  const hour = i + 6; // Start from 6 AM
+const START_HOUR = 5;
+const END_HOUR = 23;
+const TIME_SLOTS = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => {
+  const hour = i + START_HOUR;
   return `${hour.toString().padStart(2, '0')}:00`;
 });
 
@@ -49,7 +51,7 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
     const [startHour, startMin] = session.time_start.split(':').map(Number);
     const [endHour, endMin] = session.time_end.split(':').map(Number);
     
-    const startOffset = (startHour - 6) * 64 + (startMin / 60) * 64; // 64px per hour
+    const startOffset = (startHour - START_HOUR) * 64 + (startMin / 60) * 64; // 64px per hour
     const duration = ((endHour - startHour) * 60 + (endMin - startMin)) / 60 * 64;
     
     return { top: startOffset, height: Math.max(duration, 32) };
@@ -189,7 +191,7 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
                     
                     // Only show if within visible time range
                     const [startHour] = session.time_start.split(':').map(Number);
-                    if (startHour < 6 || startHour >= 18) return null;
+                    if (startHour < START_HOUR || startHour >= END_HOUR) return null;
 
                     return (
                       <div
