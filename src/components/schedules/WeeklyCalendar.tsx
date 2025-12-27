@@ -210,6 +210,11 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
                             {formatTime(session.time_start)} - {formatTime(session.time_end)}
                           </div>
                         )}
+                        {height > 56 && (
+                          <div className="text-xs opacity-75 mt-0.5">
+                            Quota: {session.quota}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
