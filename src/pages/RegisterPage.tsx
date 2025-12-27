@@ -137,9 +137,9 @@ export default function RegisterPage() {
           {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Carousel - Centered */}
-          <div className="relative z-10 flex items-center justify-center">
-            <div className="w-48 h-48 flex items-center justify-center overflow-hidden">
+          {/* Carousel - Centered on circles */}
+          <div className="absolute inset-0 flex items-center justify-center z-10">
+            <div className="w-48 h-48 flex items-center justify-center">
               {carouselImages.map((img, idx) => (
                 <img
                   key={idx}
