@@ -1,26 +1,26 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Calendar } from 'lucide-react';
+import { Calendar, Plus, Pencil, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useGymSchedules, FilterType } from '@/hooks/useGymSchedules';
-import { GYM_SESSIONS, getSessionByTime, formatSessionTime, GymSession } from '@/lib/gymSessions';
-
-interface SessionRowData {
-  id: string;
-  date: Date;
-  session: GymSession;
-  count: number;
-}
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { useGymSchedules, useAddSchedule, useUpdateSchedule, useDeleteSchedule, FilterType, GymScheduleWithUser } from '@/hooks/useGymSchedules';
+import { GYM_SESSIONS, getSessionByTime, formatSessionTime } from '@/lib/gymSessions';
+import { ScheduleDialog } from '@/components/schedules/ScheduleDialog';
+import { StatusBadge } from '@/components/StatusBadge';
+import { toast } from 'sonner';
 
 export default function SchedulesPage() {
   const [searchParams] = useSearchParams();
   const initialFilter = (searchParams.get('filter') as FilterType) || 'all';
   const [filter, setFilter] = useState<FilterType>(initialFilter);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingSchedule, setEditingSchedule] = useState<GymScheduleWithUser | null>(null);
+  const [deleteSchedule, setDeleteSchedule] = useState<GymScheduleWithUser | null>(null);
 
   useEffect(() => {
     const filterParam = searchParams.get('filter') as FilterType;
@@ -30,6 +30,9 @@ export default function SchedulesPage() {
   }, [searchParams]);
 
   const { data: schedules, isLoading } = useGymSchedules(filter);
+  const createMutation = useAddSchedule();
+  const updateMutation = useUpdateSchedule();
+  const deleteMutation = useDeleteSchedule();
 
   const filterButtons: { label: string; value: FilterType }[] = [
     { label: 'All', value: 'all' },
@@ -39,62 +42,62 @@ export default function SchedulesPage() {
     { label: 'Out', value: 'OUT' },
   ];
 
-  const sessionRows = useMemo(() => {
-    if (!schedules) return [];
+  const handleCreate = () => {
+    setEditingSchedule(null);
+    setDialogOpen(true);
+  };
 
-    const rowsMap = new Map<string, SessionRowData>();
+  const handleEdit = (schedule: GymScheduleWithUser) => {
+    setEditingSchedule(schedule);
+    setDialogOpen(true);
+  };
 
-    // If filter is 'today', pre-fill with empty sessions for today
-    if (filter === 'today') {
-      const today = new Date();
-      GYM_SESSIONS.forEach(session => {
-        const key = `${format(today, 'yyyy-MM-dd')}_${session.id}`;
-        rowsMap.set(key, {
-          id: key,
-          date: today,
-          session,
-          count: 0
-        });
+  const handleSubmit = (data: { gym_user_id: string; schedule_time: string }) => {
+    if (editingSchedule) {
+      updateMutation.mutate(
+        { scheduleId: editingSchedule.id, schedule_time: data.schedule_time },
+        {
+          onSuccess: () => {
+            toast.success('Schedule updated');
+            setDialogOpen(false);
+          },
+          onError: () => toast.error('Failed to update schedule'),
+        }
+      );
+    } else {
+      createMutation.mutate(data, {
+        onSuccess: () => {
+          toast.success('Schedule created');
+          setDialogOpen(false);
+        },
+        onError: () => toast.error('Failed to create schedule'),
       });
     }
+  };
 
-    schedules.forEach(schedule => {
-      const date = new Date(schedule.schedule_time);
-      const session = getSessionByTime(date);
-      
-      if (session) {
-        const key = `${format(date, 'yyyy-MM-dd')}_${session.id}`;
-        const existing = rowsMap.get(key);
-        
-        if (existing) {
-          existing.count++;
-        } else {
-          // Only add if not pre-filled (which implies filter !== 'today')
-          // Or if pre-fill missed it (shouldn't happen for 'today')
-          rowsMap.set(key, {
-            id: key,
-            date: date,
-            session,
-            count: 1
-          });
-        }
-      }
+  const handleDelete = () => {
+    if (!deleteSchedule) return;
+    deleteMutation.mutate(deleteSchedule.id, {
+      onSuccess: () => {
+        toast.success('Schedule deleted');
+        setDeleteSchedule(null);
+      },
+      onError: () => toast.error('Failed to delete schedule'),
     });
-
-    return Array.from(rowsMap.values()).sort((a, b) => {
-      // Sort by date then by session start time
-      const dateCompare = b.date.getTime() - a.date.getTime(); // Newest dates first
-      if (dateCompare !== 0) return dateCompare;
-      return a.session.startTime.localeCompare(b.session.startTime);
-    });
-  }, [schedules, filter]);
+  };
 
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Schedules</h1>
-          <p className="text-muted-foreground">View and manage gym session occupancy.</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Schedules</h1>
+            <p className="text-muted-foreground">View and manage gym session occupancy.</p>
+          </div>
+          <Button onClick={handleCreate}>
+            <Plus className="h-4 w-4 mr-2" />
+            Create Schedule
+          </Button>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -117,38 +120,67 @@ export default function SchedulesPage() {
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
-        ) : sessionRows.length > 0 ? (
+        ) : schedules && schedules.length > 0 ? (
           <div className="rounded-lg border bg-card overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-16">No</TableHead>
-                  <TableHead>Session</TableHead>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Occupancy</TableHead>
+                  <TableHead>User</TableHead>
+                  <TableHead>Date & Time</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sessionRows.map((row, index) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="font-medium">{index + 1}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{row.session.nameId}</span>
-                        {filter !== 'today' && (
+                {schedules.map((schedule, index) => {
+                  const scheduleDate = new Date(schedule.schedule_time);
+                  const session = getSessionByTime(scheduleDate);
+                  return (
+                    <TableRow key={schedule.id}>
+                      <TableCell className="font-medium">{index + 1}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{schedule.gym_users?.name || 'Unknown'}</span>
                           <span className="text-xs text-muted-foreground">
-                            {format(row.date, 'MMM d, yyyy')}
+                            {schedule.gym_users?.employee_id}
                           </span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>{formatSessionTime(row.session)}</TableCell>
-                    <TableCell>
-                      <span className="font-medium">{row.count}</span>
-                      <span className="text-muted-foreground text-xs ml-1">/ 15</span>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span>{format(scheduleDate, 'MMM d, yyyy')}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {session ? formatSessionTime(session) : format(scheduleDate, 'HH:mm')}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={schedule.status} />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          {schedule.status === 'BOOKED' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleEdit(schedule)}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setDeleteSchedule(schedule)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -157,9 +189,40 @@ export default function SchedulesPage() {
             icon={Calendar}
             title="No sessions found"
             description="No gym sessions data available for the selected filter."
+            action={
+              <Button onClick={handleCreate}>
+                <Plus className="h-4 w-4 mr-2" />
+                Create Schedule
+              </Button>
+            }
           />
         )}
       </div>
+
+      <ScheduleDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onSubmit={handleSubmit}
+        schedule={editingSchedule}
+        isLoading={createMutation.isPending || updateMutation.isPending}
+      />
+
+      <AlertDialog open={!!deleteSchedule} onOpenChange={() => setDeleteSchedule(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Schedule</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this schedule? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }
