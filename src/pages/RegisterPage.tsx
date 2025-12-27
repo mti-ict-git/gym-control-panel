@@ -181,41 +181,6 @@ export default function RegisterPage() {
 
               <FormField
                 control={form.control}
-                name="sessionId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-slate-700">Session</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors">
-                          <SelectValue placeholder={sessionsLoading ? 'Loading sessions...' : 'Select a session'} />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent className="z-[9999] bg-white">
-                        {sessionsLoading ? (
-                          <SelectItem value="__loading__" disabled>
-                            Loading...
-                          </SelectItem>
-                        ) : hasSessions ? (
-                          sessions!.map((session) => (
-                            <SelectItem key={session.id} value={session.id}>
-                              {session.session_name}
-                            </SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="__empty__" disabled>
-                            No sessions available
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
                 name="date"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
@@ -251,6 +216,41 @@ export default function RegisterPage() {
                         />
                       </PopoverContent>
                     </Popover>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="sessionId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-slate-700">Session</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors">
+                          <SelectValue placeholder={sessionsLoading ? 'Loading sessions...' : 'Select a session'} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent className="z-[9999] bg-white">
+                        {sessionsLoading ? (
+                          <SelectItem value="__loading__" disabled>
+                            Loading...
+                          </SelectItem>
+                        ) : hasSessions ? (
+                          sessions!.map((session) => (
+                            <SelectItem key={session.id} value={session.id}>
+                              {session.session_name}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value="__empty__" disabled>
+                            No sessions available
+                          </SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
                     <FormMessage />
                   </FormItem>
                 )}
