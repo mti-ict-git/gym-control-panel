@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { format } from 'date-fns';
+import { format, addDays, startOfDay } from 'date-fns';
 import { CalendarIcon, Dumbbell, Loader2 } from 'lucide-react';
 import { useGymSessionsList } from '@/hooks/useGymSessions';
 import { supabase } from '@/integrations/supabase/client';
@@ -203,7 +203,12 @@ export default function RegisterPage() {
                           mode="single"
                           selected={field.value}
                           onSelect={field.onChange}
-                          disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                          disabled={(date) => {
+                            const tomorrow = startOfDay(addDays(new Date(), 1));
+                            const dayAfterTomorrow = startOfDay(addDays(new Date(), 2));
+                            const dateToCheck = startOfDay(date);
+                            return dateToCheck < tomorrow || dateToCheck > dayAfterTomorrow;
+                          }}
                           initialFocus
                           className="pointer-events-auto"
                         />
