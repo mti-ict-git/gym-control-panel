@@ -33,9 +33,15 @@ export function AppLayout({ children }: AppLayoutProps) {
         </div>
         
         <main className="flex-1 flex flex-col min-h-screen">
+          {/* Desktop header with sidebar trigger */}
+          <header className="sticky top-0 z-40 hidden md:flex h-14 items-center gap-4 border-b border-border bg-card px-4">
+            <SidebarTrigger />
+          </header>
+          
+          {/* Mobile header */}
           <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-4 border-b border-border bg-card px-4 md:hidden">
             <div className="flex items-center gap-3">
-              <SidebarTrigger className="md:hidden" />
+              <SidebarTrigger />
               <h1 className="font-semibold">Gym Admin</h1>
             </div>
             <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
