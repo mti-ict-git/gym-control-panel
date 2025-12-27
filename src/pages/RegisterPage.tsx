@@ -4,7 +4,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format, addDays, startOfDay } from 'date-fns';
 import { CalendarIcon, Dumbbell, Loader2 } from 'lucide-react';
-import { useGymSessionsList } from '@/hooks/useGymSessions';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,6 +30,7 @@ import {
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
+import { usePublicGymSessionsList } from '@/hooks/usePublicGymSessions';
 
 const formSchema = z.object({
   employeeId: z.string().trim().min(1, 'Employee ID is required').max(50, 'Employee ID is too long'),
@@ -42,7 +42,7 @@ type FormData = z.infer<typeof formSchema>;
 
 export default function RegisterPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { data: sessions, isLoading: sessionsLoading } = useGymSessionsList();
+  const { data: sessions, isLoading: sessionsLoading } = usePublicGymSessionsList();
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -55,64 +55,38 @@ export default function RegisterPage() {
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
-      // First, find or create the gym user by employee_id
-      const { data: existingUser, error: userError } = await supabase
-        .from('gym_users')
-        .select('id')
-        .eq('employee_id', data.employeeId)
-        .maybeSingle();
+      const { data: res, error } = await supabase.functions.invoke('public-register', {
+        body: {
+          employeeId: data.employeeId,
+          sessionId: data.sessionId,
+          date: format(data.date, 'yyyy-MM-dd'),
+        },
+      });
 
-      if (userError) throw userError;
+      if (error) throw error;
 
-      if (!existingUser) {
+      const payload = res as any;
+      if (!payload?.ok) {
         toast({
-          title: 'Employee not found',
-          description: 'Please check your Employee ID and try again.',
+          title: 'Registration failed',
+          description: payload?.error || 'An error occurred. Please try again.',
           variant: 'destructive',
         });
-        setIsSubmitting(false);
         return;
       }
 
-      // Get the selected session to create schedule_time
-      const selectedSession = sessions?.find(s => s.id === data.sessionId);
-      if (!selectedSession) {
-        toast({
-          title: 'Session not found',
-          description: 'Please select a valid session.',
-          variant: 'destructive',
-        });
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Create schedule_time by combining date with session start time
-      const [hours, minutes] = selectedSession.time_start.split(':').map(Number);
-      const scheduleTime = new Date(data.date);
-      scheduleTime.setHours(hours, minutes, 0, 0);
-
-      // Create the schedule
-      const { error: scheduleError } = await supabase
-        .from('gym_schedules')
-        .insert({
-          gym_user_id: existingUser.id,
-          schedule_time: scheduleTime.toISOString(),
-          status: 'BOOKED',
-        });
-
-      if (scheduleError) throw scheduleError;
+      const selectedSession = sessions?.find((s) => s.id === data.sessionId);
 
       toast({
         title: 'Registration successful!',
-        description: `You have been registered for ${selectedSession.session_name} on ${format(data.date, 'MMMM d, yyyy')}.`,
+        description: `You have been registered for ${selectedSession?.session_name ?? payload.sessionName} on ${format(data.date, 'MMMM d, yyyy')}.`,
       });
 
       form.reset();
     } catch (error: any) {
-      console.error('Registration error:', error);
       toast({
         title: 'Registration failed',
-        description: error.message || 'An error occurred. Please try again.',
+        description: error?.message || 'An error occurred. Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -120,26 +94,25 @@ export default function RegisterPage() {
     }
   };
 
+  const hasSessions = (sessions?.length ?? 0) > 0;
+
   return (
     <div className="min-h-screen flex bg-slate-400/80">
       {/* Left Panel - Decorative */}
       <div className="hidden lg:flex lg:w-1/2 p-6">
         <div className="w-full bg-slate-100 rounded-3xl flex flex-col items-center justify-center p-12 relative overflow-hidden">
-          {/* Decorative circles */}
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-72 h-72 border border-slate-300 rounded-full absolute"></div>
-            <div className="w-96 h-96 border border-slate-300 rounded-full absolute"></div>
-            <div className="w-[28rem] h-[28rem] border border-slate-200 rounded-full absolute"></div>
+            <div className="w-72 h-72 border border-slate-300 rounded-full absolute" />
+            <div className="w-96 h-96 border border-slate-300 rounded-full absolute" />
+            <div className="w-[28rem] h-[28rem] border border-slate-200 rounded-full absolute" />
           </div>
-          
-          {/* Logo in center */}
+
           <div className="relative z-10 flex items-center justify-center mb-16">
             <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-primary shadow-lg">
               <Dumbbell className="h-10 w-10 text-primary-foreground" />
             </div>
           </div>
-          
-          {/* Floating decorative elements */}
+
           <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
             💪
           </div>
@@ -152,23 +125,21 @@ export default function RegisterPage() {
           <div className="absolute bottom-40 right-28 w-10 h-10 bg-purple-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
             🎯
           </div>
-          
-          {/* Text content */}
+
           <div className="relative z-10 text-center mt-auto">
-            <h2 className="text-2xl font-semibold text-slate-800 mb-3">
+            <h1 className="text-2xl font-semibold text-slate-800 mb-3">
               Book your gym session
               <br />
               quick and easy.
-            </h2>
+            </h1>
             <p className="text-slate-500 text-sm max-w-xs mx-auto">
               Reserve your spot for tomorrow or the next day. Stay fit, stay healthy!
             </p>
-            
-            {/* Dots indicator */}
+
             <div className="flex justify-center gap-2 mt-8">
-              <div className="w-2 h-2 rounded-full bg-slate-800"></div>
-              <div className="w-2 h-2 rounded-full bg-slate-300"></div>
-              <div className="w-2 h-2 rounded-full bg-slate-300"></div>
+              <div className="w-2 h-2 rounded-full bg-slate-800" />
+              <div className="w-2 h-2 rounded-full bg-slate-300" />
+              <div className="w-2 h-2 rounded-full bg-slate-300" />
             </div>
           </div>
         </div>
@@ -177,7 +148,6 @@ export default function RegisterPage() {
       {/* Right Panel - Form */}
       <div className="w-full lg:w-1/2 p-6 flex items-center justify-center">
         <div className="w-full max-w-md bg-white rounded-3xl p-8 lg:p-12 shadow-xl">
-          {/* Mobile logo */}
           <div className="flex lg:hidden justify-center mb-6">
             <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary">
               <Dumbbell className="h-7 w-7 text-primary-foreground" />
@@ -185,7 +155,7 @@ export default function RegisterPage() {
           </div>
 
           <div className="text-center mb-8">
-            <h1 className="text-2xl font-semibold text-slate-900">Session Registration</h1>
+            <h2 className="text-2xl font-semibold text-slate-900">Session Registration</h2>
             <p className="text-slate-500 text-sm mt-1">Register for a gym session</p>
           </div>
 
@@ -198,9 +168,9 @@ export default function RegisterPage() {
                   <FormItem>
                     <FormLabel className="text-slate-700">Employee ID</FormLabel>
                     <FormControl>
-                      <Input 
-                        placeholder="Enter your Employee ID" 
-                        {...field} 
+                      <Input
+                        placeholder="Enter your Employee ID"
+                        {...field}
                         className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors"
                       />
                     </FormControl>
@@ -221,12 +191,22 @@ export default function RegisterPage() {
                           <SelectValue placeholder={sessionsLoading ? 'Loading sessions...' : 'Select a session'} />
                         </SelectTrigger>
                       </FormControl>
-                      <SelectContent className="z-50 bg-white">
-                        {sessions?.map((session) => (
-                          <SelectItem key={session.id} value={session.id}>
-                            {session.session_name}
+                      <SelectContent className="z-[9999] bg-white">
+                        {sessionsLoading ? (
+                          <SelectItem value="__loading__" disabled>
+                            Loading...
                           </SelectItem>
-                        ))}
+                        ) : hasSessions ? (
+                          sessions!.map((session) => (
+                            <SelectItem key={session.id} value={session.id}>
+                              {session.session_name}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value="__empty__" disabled>
+                            No sessions available
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -276,9 +256,9 @@ export default function RegisterPage() {
                 )}
               />
 
-              <Button 
-                type="submit" 
-                className="w-full h-12 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-900 font-semibold shadow-md" 
+              <Button
+                type="submit"
+                className="w-full h-12 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-900 font-semibold shadow-md"
                 disabled={isSubmitting}
               >
                 {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
