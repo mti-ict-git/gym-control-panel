@@ -114,14 +114,31 @@ export default function RegisterPage() {
     <div className="min-h-screen flex bg-slate-400/80">
       {/* Left Panel - Decorative */}
       <div className="hidden lg:flex lg:w-1/2 p-6">
-        <div className="w-full bg-slate-100 rounded-3xl flex flex-col items-center justify-center p-12 relative overflow-hidden">
+        <div className="w-full bg-slate-100 rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden">
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-72 h-72 border border-slate-300 rounded-full absolute" />
             <div className="w-96 h-96 border border-slate-300 rounded-full absolute" />
             <div className="w-[28rem] h-[28rem] border border-slate-200 rounded-full absolute" />
           </div>
 
-          <div className="relative z-10 flex items-center justify-center mb-8">
+          <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
+            💪
+          </div>
+          <div className="absolute bottom-32 left-20 w-10 h-10 bg-blue-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
+            🏋️
+          </div>
+          <div className="absolute top-40 left-28 w-10 h-10 bg-green-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
+            ⚡
+          </div>
+          <div className="absolute bottom-40 right-28 w-10 h-10 bg-purple-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
+            🎯
+          </div>
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Carousel - Centered */}
+          <div className="relative z-10 flex items-center justify-center">
             <div className="w-48 h-48 flex items-center justify-center overflow-hidden">
               {carouselImages.map((img, idx) => (
                 <img
@@ -138,20 +155,10 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
-            💪
-          </div>
-          <div className="absolute bottom-32 left-20 w-10 h-10 bg-blue-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-            🏋️
-          </div>
-          <div className="absolute top-40 left-28 w-10 h-10 bg-green-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-            ⚡
-          </div>
-          <div className="absolute bottom-40 right-28 w-10 h-10 bg-purple-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-            🎯
-          </div>
+          {/* Spacer */}
+          <div className="flex-1" />
 
-          <div className="relative z-10 text-center mt-auto">
+          <div className="relative z-10 text-center">
             <h1 className="text-2xl font-semibold text-slate-800 mb-3">
               Book your gym session
               <br />
