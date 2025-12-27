@@ -29,7 +29,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 
@@ -122,30 +121,88 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <div className="p-3 rounded-full bg-primary/10">
-              <Dumbbell className="h-8 w-8 text-primary" />
+    <div className="min-h-screen flex bg-slate-400/80">
+      {/* Left Panel - Decorative */}
+      <div className="hidden lg:flex lg:w-1/2 p-6">
+        <div className="w-full bg-slate-100 rounded-3xl flex flex-col items-center justify-center p-12 relative overflow-hidden">
+          {/* Decorative circles */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-72 h-72 border border-slate-300 rounded-full absolute"></div>
+            <div className="w-96 h-96 border border-slate-300 rounded-full absolute"></div>
+            <div className="w-[28rem] h-[28rem] border border-slate-200 rounded-full absolute"></div>
+          </div>
+          
+          {/* Logo in center */}
+          <div className="relative z-10 flex items-center justify-center mb-16">
+            <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-primary shadow-lg">
+              <Dumbbell className="h-10 w-10 text-primary-foreground" />
             </div>
           </div>
-          <CardTitle className="text-2xl">Gym Session Registration</CardTitle>
-          <CardDescription>
-            Register for a gym session by filling in the form below
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+          
+          {/* Floating decorative elements */}
+          <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
+            💪
+          </div>
+          <div className="absolute bottom-32 left-20 w-10 h-10 bg-blue-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
+            🏋️
+          </div>
+          <div className="absolute top-40 left-28 w-10 h-10 bg-green-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
+            ⚡
+          </div>
+          <div className="absolute bottom-40 right-28 w-10 h-10 bg-purple-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
+            🎯
+          </div>
+          
+          {/* Text content */}
+          <div className="relative z-10 text-center mt-auto">
+            <h2 className="text-2xl font-semibold text-slate-800 mb-3">
+              Book your gym session
+              <br />
+              quick and easy.
+            </h2>
+            <p className="text-slate-500 text-sm max-w-xs mx-auto">
+              Reserve your spot for tomorrow or the next day. Stay fit, stay healthy!
+            </p>
+            
+            {/* Dots indicator */}
+            <div className="flex justify-center gap-2 mt-8">
+              <div className="w-2 h-2 rounded-full bg-slate-800"></div>
+              <div className="w-2 h-2 rounded-full bg-slate-300"></div>
+              <div className="w-2 h-2 rounded-full bg-slate-300"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Right Panel - Form */}
+      <div className="w-full lg:w-1/2 p-6 flex items-center justify-center">
+        <div className="w-full max-w-md bg-white rounded-3xl p-8 lg:p-12 shadow-xl">
+          {/* Mobile logo */}
+          <div className="flex lg:hidden justify-center mb-6">
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary">
+              <Dumbbell className="h-7 w-7 text-primary-foreground" />
+            </div>
+          </div>
+
+          <div className="text-center mb-8">
+            <h1 className="text-2xl font-semibold text-slate-900">Session Registration</h1>
+            <p className="text-slate-500 text-sm mt-1">Register for a gym session</p>
+          </div>
+
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
               <FormField
                 control={form.control}
                 name="employeeId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Employee ID</FormLabel>
+                    <FormLabel className="text-slate-700">Employee ID</FormLabel>
                     <FormControl>
-                      <Input placeholder="Enter your Employee ID" {...field} />
+                      <Input 
+                        placeholder="Enter your Employee ID" 
+                        {...field} 
+                        className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors"
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -157,10 +214,10 @@ export default function RegisterPage() {
                 name="sessionId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Session</FormLabel>
+                    <FormLabel className="text-slate-700">Session</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
-                        <SelectTrigger>
+                        <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors">
                           <SelectValue placeholder={sessionsLoading ? 'Loading sessions...' : 'Select a session'} />
                         </SelectTrigger>
                       </FormControl>
@@ -182,14 +239,14 @@ export default function RegisterPage() {
                 name="date"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
-                    <FormLabel>Date</FormLabel>
+                    <FormLabel className="text-slate-700">Date</FormLabel>
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
                           <Button
                             variant="outline"
                             className={cn(
-                              'w-full pl-3 text-left font-normal',
+                              'h-12 w-full rounded-xl border-slate-200 bg-slate-50 hover:bg-white pl-3 text-left font-normal transition-colors',
                               !field.value && 'text-muted-foreground'
                             )}
                           >
@@ -219,14 +276,18 @@ export default function RegisterPage() {
                 )}
               />
 
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
+              <Button 
+                type="submit" 
+                className="w-full h-12 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-900 font-semibold shadow-md" 
+                disabled={isSubmitting}
+              >
                 {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Register
               </Button>
             </form>
           </Form>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
