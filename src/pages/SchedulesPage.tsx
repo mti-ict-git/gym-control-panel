@@ -8,17 +8,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useGymSessionsList, useCreateGymSession, useUpdateGymSession, useDeleteGymSession, GymSession, GymSessionInsert, formatTime } from '@/hooks/useGymSessions';
 import { SessionDialog } from '@/components/schedules/SessionDialog';
-import { Calendar } from '@/components/ui/calendar';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { WeeklyCalendar } from '@/components/schedules/WeeklyCalendar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { format } from 'date-fns';
 
 export default function SchedulesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<GymSession | null>(null);
   const [deleteSession, setDeleteSession] = useState<GymSession | null>(null);
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
 
   const { data: sessions, isLoading } = useGymSessionsList();
   const createMutation = useCreateGymSession();
@@ -165,29 +162,10 @@ export default function SchedulesPage() {
           </TabsContent>
 
           <TabsContent value="calendar" className="mt-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <CalendarIcon className="h-5 w-5" />
-                    Schedule Calendar
-                  </CardTitle>
-                  {selectedDate && (
-                    <p className="text-sm text-muted-foreground">
-                      Selected: <span className="font-medium text-foreground">{format(selectedDate, 'PPP')}</span>
-                    </p>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                <Calendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={setSelectedDate}
-                  className="w-full pointer-events-auto [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full [&_.rdp-head_cell]:w-full [&_.rdp-head_cell]:text-center [&_.rdp-head_cell]:py-2 [&_.rdp-cell]:w-full [&_.rdp-cell]:text-center [&_.rdp-day]:w-full [&_.rdp-day]:h-12 [&_.rdp-day]:text-base"
-                />
-              </CardContent>
-            </Card>
+            <WeeklyCalendar 
+              sessions={sessions || []} 
+              onCreateSession={handleCreate}
+            />
           </TabsContent>
         </Tabs>
       </div>
