@@ -196,7 +196,7 @@ export default function RegisterPage() {
           </div>
 
           <div className="text-center mb-8">
-            <h2 className="text-2xl font-semibold text-slate-900">Session Registration</h2>
+            <h2 className="text-2xl font-semibold text-slate-900">Gym Booking</h2>
             <p className="text-slate-500 text-sm mt-1">Register for a gym session</p>
           </div>
 
