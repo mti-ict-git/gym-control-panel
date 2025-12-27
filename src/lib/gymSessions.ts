@@ -15,8 +15,8 @@ export const GYM_SESSIONS: GymSession[] = [
     endTime: '06:30',
   },
   {
-    id: 'evening',
-    name: 'Evening',
+    id: 'afternoon',
+    name: 'Afternoon',
     nameId: 'Sore',
     startTime: '18:00',
     endTime: '20:00',
