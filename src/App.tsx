@@ -12,7 +12,6 @@ import GymUsersPage from "./pages/GymUsersPage";
 import UserDetailPage from "./pages/UserDetailPage";
 import SchedulesPage from "./pages/SchedulesPage";
 import VaultPage from "./pages/VaultPage";
-import EntryModePage from "./pages/EntryModePage";
 import ReportsPage from "./pages/ReportsPage";
 import NotFound from "./pages/NotFound";
 
@@ -74,14 +73,6 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <SchedulesPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/entry"
-              element={
-                <ProtectedRoute>
-                  <EntryModePage />
                 </ProtectedRoute>
               }
             />

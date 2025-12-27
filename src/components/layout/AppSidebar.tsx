@@ -8,7 +8,6 @@ import {
   LogOut,
   Dumbbell,
   Database,
-  Scan,
   FileText
 } from 'lucide-react';
 import {
@@ -33,7 +32,6 @@ const menuItems = [
   { title: 'Vault', url: '/vault', icon: Database },
   { title: 'Schedules', url: '/schedules', icon: Calendar },
   { title: 'Reports', url: '/reports', icon: FileText },
-  { title: 'Entry Mode', url: '/entry', icon: Scan },
   { title: 'Settings', url: '/settings', icon: Settings },
 ];
 
