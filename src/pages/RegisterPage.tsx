@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format, addDays, startOfDay } from 'date-fns';
 import { CalendarIcon, Loader2 } from 'lucide-react';
 import gymIcon from '@/assets/gym-icon.png';
+import treadmillImg from '@/assets/treadmill.png';
+import benchPressImg from '@/assets/bench-press.png';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,9 +43,20 @@ const formSchema = z.object({
 
 type FormData = z.infer<typeof formSchema>;
 
+const carouselImages = [treadmillImg, benchPressImg, gymIcon];
+
 export default function RegisterPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [currentSlide, setCurrentSlide] = useState(0);
   const { data: sessions, isLoading: sessionsLoading } = usePublicGymSessionsList();
+
+  // Auto-swipe carousel
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % carouselImages.length);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -108,8 +121,21 @@ export default function RegisterPage() {
             <div className="w-[28rem] h-[28rem] border border-slate-200 rounded-full absolute" />
           </div>
 
-          <div className="relative z-10 flex items-center justify-center mb-16">
-            <img src={gymIcon} alt="Gym" className="w-40 h-40 object-contain" />
+          <div className="relative z-10 flex items-center justify-center mb-8">
+            <div className="w-48 h-48 flex items-center justify-center overflow-hidden">
+              {carouselImages.map((img, idx) => (
+                <img
+                  key={idx}
+                  src={img}
+                  alt={`Fitness ${idx + 1}`}
+                  className={`absolute w-40 h-40 object-contain transition-all duration-500 ${
+                    idx === currentSlide
+                      ? 'opacity-100 scale-100'
+                      : 'opacity-0 scale-95'
+                  }`}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
