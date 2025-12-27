@@ -1,4 +1,4 @@
-import { Database, UserPlus, AlertCircle } from 'lucide-react';
+import { Database, UserPlus, AlertCircle, Check, X } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -28,35 +28,46 @@ function VaultUserRow({
   return (
     <TableRow>
       <TableCell className="w-12 text-right">{index + 1}</TableCell>
+      <TableCell className="hidden md:table-cell">{user.card_no || '-'}</TableCell>
       <TableCell className="font-medium">{user.name}</TableCell>
       <TableCell>{user.employee_id}</TableCell>
-      <TableCell className="hidden md:table-cell">{user.card_no || '-'}</TableCell>
       <TableCell className="hidden md:table-cell">{user.department}</TableCell>
+      <TableCell className="hidden md:table-cell">{user.session || '-'}</TableCell>
       <TableCell>
-        <Badge variant={user.status === 'ACTIVE' ? 'default' : 'secondary'}>
-          {user.status}
-        </Badge>
-      </TableCell>
-      <TableCell>
-        {isAdded ? (
-          <Badge variant="outline" className="text-muted-foreground">
-            Already Added
-          </Badge>
-        ) : isInactive ? (
-          <Badge variant="outline" className="text-muted-foreground">
-            Inactive
-          </Badge>
-        ) : (
-          <Button 
-            size="sm" 
-            onClick={onAdd}
-            disabled={isDisabled}
-            className="touch-target"
-          >
-            <UserPlus className="h-4 w-4 mr-1" />
-            {isAdding ? 'Adding...' : 'Add to Gym'}
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {isAdded ? (
+            <Badge variant="outline" className="text-green-600 border-green-600">
+              Approved
+            </Badge>
+          ) : isInactive ? (
+            <Badge variant="secondary">
+              Inactive
+            </Badge>
+          ) : (
+            <>
+              <Button 
+                size="icon" 
+                variant="ghost"
+                className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-100" 
+                onClick={onAdd}
+                disabled={isDisabled}
+                title="Approve"
+              >
+                <Check className="h-4 w-4" />
+              </Button>
+              <Button 
+                size="icon" 
+                variant="ghost" 
+                className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-100"
+                onClick={() => {}} 
+                disabled={isAdding}
+                title="Decline"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+        </div>
       </TableCell>
     </TableRow>
   );
@@ -118,12 +129,12 @@ export default function VaultPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-12 text-right">No</TableHead>
+                  <TableHead className="hidden md:table-cell">ID Card</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Employee ID</TableHead>
-                  <TableHead className="hidden md:table-cell">Card No</TableHead>
                   <TableHead className="hidden md:table-cell">Department</TableHead>
+                  <TableHead className="hidden md:table-cell">Session</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

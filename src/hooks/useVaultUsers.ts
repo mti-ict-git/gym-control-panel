@@ -7,6 +7,7 @@ export interface VaultUser {
   department: string;
   status: 'ACTIVE' | 'INACTIVE';
   card_no?: string;
+  session?: string;
 }
 
 export function useVaultUsers() {
@@ -24,7 +25,8 @@ export function useVaultUsers() {
       // In production, this data should come directly from the API/Edge Function
       return (data.users || []).map((u: any, i: number) => ({
         ...u,
-        card_no: u.card_no || `CN${String(i + 1).padStart(3, '0')}`
+        card_no: u.card_no || `CN${String(i + 1).padStart(3, '0')}`,
+        session: u.session || (i % 2 === 0 ? 'Morning' : 'Afternoon')
       })) as VaultUser[];
     },
   });
