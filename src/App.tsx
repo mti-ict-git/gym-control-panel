@@ -14,6 +14,7 @@ import SchedulesPage from "./pages/SchedulesPage";
 import VaultPage from "./pages/VaultPage";
 import ReportsPage from "./pages/ReportsPage";
 import NotFound from "./pages/NotFound";
+import RegisterPage from "./pages/RegisterPage";
 
 // Settings pages
 import SettingsLayout from "./pages/settings/SettingsLayout";
@@ -36,6 +37,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
             <Route
               path="/dashboard"
               element={
