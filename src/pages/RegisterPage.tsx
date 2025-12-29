@@ -48,7 +48,18 @@ const carouselImages = [treadmillImg, benchPressImg, gymIcon];
 export default function RegisterPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
-  const { data: sessions, isLoading: sessionsLoading } = usePublicGymSessionsList();
+  const form = useForm<FormData>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      employeeId: '',
+      sessionId: '',
+    },
+  });
+
+  const selectedDate = form.watch('date');
+  const selectedSessionId = form.watch('sessionId');
+  const { data: sessions, isLoading: sessionsLoading } = usePublicGymSessionsList(selectedDate);
+  const selectedSession = sessions?.find((s) => s.id === selectedSessionId);
 
   // Auto-swipe carousel
   useEffect(() => {
@@ -57,14 +68,6 @@ export default function RegisterPage() {
     }, 2000);
     return () => clearInterval(interval);
   }, []);
-
-  const form = useForm<FormData>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      employeeId: '',
-      sessionId: '',
-    },
-  });
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
@@ -262,40 +265,60 @@ export default function RegisterPage() {
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="sessionId"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="text-slate-700">Session</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors">
-                          <SelectValue placeholder={sessionsLoading ? 'Loading sessions...' : 'Select a session'} />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent className="z-[9999] bg-white">
-                        {sessionsLoading ? (
-                          <SelectItem value="__loading__" disabled>
-                            Loading...
-                          </SelectItem>
-                        ) : hasSessions ? (
-                          sessions!.map((session) => (
-                            <SelectItem key={session.id} value={session.id}>
-                              {session.session_name}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <FormField
+                  control={form.control}
+                  name="sessionId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-slate-700">Session</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors">
+                            <SelectValue placeholder={sessionsLoading ? 'Loading...' : 'Select'} />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent className="z-[9999] bg-white">
+                          {sessionsLoading ? (
+                            <SelectItem value="__loading__" disabled>
+                              Loading...
                             </SelectItem>
-                          ))
-                        ) : (
-                          <SelectItem value="__empty__" disabled>
-                            No sessions available
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                          ) : hasSessions ? (
+                            sessions!.map((session) => (
+                              <SelectItem key={session.id} value={session.id}>
+                                {session.session_name}
+                              </SelectItem>
+                            ))
+                          ) : (
+                            <SelectItem value="__empty__" disabled>
+                              No sessions available
+                            </SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Time</div>
+                  <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
+                    {selectedSession
+                      ? `${selectedSession.time_start.slice(0, 5)} - ${selectedSession.time_end.slice(0, 5)}`
+                      : '-'}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Available</div>
+                  <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
+                    {selectedSession
+                      ? `${(selectedSession.quota ?? 0) - (selectedSession.booked_count ?? 0)} / ${selectedSession.quota}`
+                      : '-'}
+                  </div>
+                </div>
+              </div>
 
               <Button
                 type="submit"
