@@ -190,7 +190,7 @@ export default function RegisterPage() {
       });
 
       form.reset();
-      navigate('/vault');
+      navigate('/gym_booking');
     } catch (error: unknown) {
       toast({
         title: 'Registration failed',

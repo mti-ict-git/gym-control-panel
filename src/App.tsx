@@ -63,13 +63,15 @@ const App = () => (
               }
             />
             <Route
-              path="/vault"
+              path="/gym_booking"
               element={
                 <ProtectedRoute>
                   <VaultPage />
                 </ProtectedRoute>
               }
             />
+
+            <Route path="/vault" element={<Navigate to="/gym_booking" replace />} />
             <Route
               path="/schedules"
               element={
