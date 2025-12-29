@@ -4,6 +4,12 @@ import sql from 'mssql';
 import dotenv from 'dotenv';
 dotenv.config();
 
+function envTrim(value) {
+  const s = value == null ? '' : String(value);
+  const t = s.trim();
+  return t.length > 0 ? t : '';
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -56,16 +62,21 @@ app.get('/employees', async (req, res) => {
 
   const q = String(req.query.q || '').trim();
 
-  if (!MASTER_DB_SERVER || !MASTER_DB_DATABASE || !MASTER_DB_USER || !MASTER_DB_PASSWORD) {
+  const masterServer = envTrim(MASTER_DB_SERVER);
+  const masterDatabase = envTrim(MASTER_DB_DATABASE);
+  const masterUser = envTrim(MASTER_DB_USER);
+  const masterPassword = envTrim(MASTER_DB_PASSWORD);
+
+  if (!masterServer || !masterDatabase || !masterUser || !masterPassword) {
     return res.status(500).json({ success: false, error: 'Master DB env is not configured' });
   }
 
   const config = {
-    server: MASTER_DB_SERVER,
+    server: masterServer,
     port: Number(MASTER_DB_PORT || 1433),
-    database: MASTER_DB_DATABASE,
-    user: MASTER_DB_USER,
-    password: MASTER_DB_PASSWORD,
+    database: masterDatabase,
+    user: masterUser,
+    password: masterPassword,
     options: {
       encrypt: String(MASTER_DB_ENCRYPT || 'false').toLowerCase() === 'true',
       trustServerCertificate: String(MASTER_DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
@@ -120,16 +131,21 @@ app.get('/employee-core', async (req, res) => {
         .slice(0, 200)
     : [];
 
-  if (!MASTER_DB_SERVER || !MASTER_DB_DATABASE || !MASTER_DB_USER || !MASTER_DB_PASSWORD) {
+  const masterServer = envTrim(MASTER_DB_SERVER);
+  const masterDatabase = envTrim(MASTER_DB_DATABASE);
+  const masterUser = envTrim(MASTER_DB_USER);
+  const masterPassword = envTrim(MASTER_DB_PASSWORD);
+
+  if (!masterServer || !masterDatabase || !masterUser || !masterPassword) {
     return res.status(500).json({ ok: false, error: 'Master DB env is not configured', employees: [] });
   }
 
   const config = {
-    server: MASTER_DB_SERVER,
+    server: masterServer,
     port: Number(MASTER_DB_PORT || 1433),
-    database: MASTER_DB_DATABASE,
-    user: MASTER_DB_USER,
-    password: MASTER_DB_PASSWORD,
+    database: masterDatabase,
+    user: masterUser,
+    password: masterPassword,
     options: {
       encrypt: String(MASTER_DB_ENCRYPT || 'false').toLowerCase() === 'true',
       trustServerCertificate: String(MASTER_DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
@@ -676,6 +692,224 @@ app.post('/gym-schedule-create', async (req, res) => {
 
     await pool.close();
     return res.json({ ok: true });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+app.post('/gym-booking-init', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  const gymServer = envTrim(DB_SERVER);
+  const gymDatabase = envTrim(DB_DATABASE);
+  const gymUser = envTrim(DB_USER);
+  const gymPassword = envTrim(DB_PASSWORD);
+
+  if (!gymServer || !gymDatabase || !gymUser || !gymPassword) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const config = {
+    server: gymServer,
+    port: Number(DB_PORT || 1433),
+    database: gymDatabase,
+    user: gymUser,
+    password: gymPassword,
+    options: {
+      encrypt: String(DB_ENCRYPT || 'false').toLowerCase() === 'true',
+      trustServerCertificate: String(DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    const exec = async (q) => tx.request().query(q);
+
+    try {
+      await exec('SET NOCOUNT ON;');
+
+      const scheduleExists = await exec("SELECT OBJECT_ID('dbo.gym_schedule', 'U') AS id;");
+      if (!scheduleExists?.recordset?.[0]?.id) {
+        throw new Error('Missing table dbo.gym_schedule');
+      }
+
+      await exec(`
+        IF COL_LENGTH('dbo.gym_schedule', 'ScheduleID') IS NULL
+        BEGIN
+          ALTER TABLE dbo.gym_schedule
+            ADD ScheduleID INT IDENTITY(1,1) NOT NULL;
+        END
+      `);
+
+      await exec(`
+        IF NOT EXISTS (
+          SELECT 1
+          FROM sys.key_constraints kc
+          JOIN sys.tables t ON t.object_id = kc.parent_object_id
+          WHERE kc.[type] = 'UQ'
+            AND kc.name = 'UQ_gym_schedule_ScheduleID'
+            AND t.name = 'gym_schedule'
+            AND SCHEMA_NAME(t.schema_id) = 'dbo'
+        )
+        BEGIN
+          ALTER TABLE dbo.gym_schedule
+            ADD CONSTRAINT UQ_gym_schedule_ScheduleID UNIQUE (ScheduleID);
+        END
+      `);
+
+      const bookingExists = await exec("SELECT OBJECT_ID('dbo.gym_booking', 'U') AS id;");
+      if (!bookingExists?.recordset?.[0]?.id) {
+        await exec(`
+          CREATE TABLE dbo.gym_booking (
+            BookingID INT IDENTITY(1,1) PRIMARY KEY,
+            EmployeeID VARCHAR(20) NOT NULL,
+            CardNo VARCHAR(50) NULL,
+            EmployeeName VARCHAR(100) NOT NULL,
+            Department VARCHAR(100) NOT NULL,
+            Gender VARCHAR(10) NOT NULL,
+            SessionName VARCHAR(50) NOT NULL,
+            ScheduleID INT NOT NULL,
+            BookingDate DATE NOT NULL,
+            Status VARCHAR(20) NOT NULL
+              CONSTRAINT CK_gym_booking_Status
+              CHECK (Status IN ('BOOKED','CHECKIN','COMPLETED','CANCELLED','EXPIRED')),
+            ApprovalStatus VARCHAR(20) NOT NULL
+              CONSTRAINT DF_gym_booking_ApprovalDefault DEFAULT ('PENDING')
+              CONSTRAINT CK_gym_booking_ApprovalStatus CHECK (ApprovalStatus IN ('PENDING','APPROVED','REJECTED')),
+            ApprovedBy VARCHAR(50) NULL,
+            ApprovedAt DATETIME NULL,
+            RejectedReason VARCHAR(255) NULL,
+            CreatedAt DATETIME NOT NULL
+              CONSTRAINT DF_gym_booking_CreatedAt DEFAULT GETDATE(),
+            CONSTRAINT FK_gym_booking_schedule
+              FOREIGN KEY (ScheduleID)
+              REFERENCES dbo.gym_schedule(ScheduleID)
+          );
+        `);
+      } else {
+        const columnsRaw = await exec(`
+          SELECT c.name
+          FROM sys.columns c
+          WHERE c.object_id = OBJECT_ID('dbo.gym_booking')
+        `);
+        const columnNames = new Set((columnsRaw?.recordset || []).map((r) => String(r.name)));
+        const findColumn = (target) => {
+          const lower = String(target).toLowerCase();
+          for (const name of columnNames) {
+            if (String(name).toLowerCase() === lower) return name;
+          }
+          return null;
+        };
+
+        if (!findColumn('ApprovedBy')) {
+          await exec('ALTER TABLE dbo.gym_booking ADD ApprovedBy VARCHAR(50) NULL;');
+        }
+        if (!findColumn('ApprovedAt')) {
+          await exec('ALTER TABLE dbo.gym_booking ADD ApprovedAt DATETIME NULL;');
+        }
+        if (!findColumn('RejectedReason')) {
+          await exec('ALTER TABLE dbo.gym_booking ADD RejectedReason VARCHAR(255) NULL;');
+        }
+
+        const approvalCol = findColumn('ApprovalStatus');
+        if (!approvalCol) {
+          await exec('ALTER TABLE dbo.gym_booking ADD ApprovalStatus VARCHAR(20) NULL;');
+          await exec("UPDATE dbo.gym_booking SET ApprovalStatus = 'PENDING' WHERE ApprovalStatus IS NULL;");
+          await exec('ALTER TABLE dbo.gym_booking ALTER COLUMN ApprovalStatus VARCHAR(20) NOT NULL;');
+        }
+        const approvalColName = findColumn('ApprovalStatus') || 'ApprovalStatus';
+
+        await exec(`
+          IF NOT EXISTS (
+            SELECT 1
+            FROM sys.default_constraints
+            WHERE name = 'DF_gym_booking_ApprovalDefault'
+              AND parent_object_id = OBJECT_ID('dbo.gym_booking')
+          )
+          BEGIN
+            ALTER TABLE dbo.gym_booking
+              ADD CONSTRAINT DF_gym_booking_ApprovalDefault
+              DEFAULT ('PENDING') FOR [${approvalColName}];
+          END
+        `);
+
+        await exec(`
+          IF NOT EXISTS (
+            SELECT 1
+            FROM sys.check_constraints
+            WHERE name = 'CK_gym_booking_Status'
+              AND parent_object_id = OBJECT_ID('dbo.gym_booking')
+          )
+          BEGIN
+            ALTER TABLE dbo.gym_booking
+              ADD CONSTRAINT CK_gym_booking_Status
+              CHECK ([Status] IN ('BOOKED','CHECKIN','COMPLETED','CANCELLED','EXPIRED'));
+          END
+        `);
+
+        await exec(`
+          IF NOT EXISTS (
+            SELECT 1
+            FROM sys.check_constraints
+            WHERE name = 'CK_gym_booking_ApprovalStatus'
+              AND parent_object_id = OBJECT_ID('dbo.gym_booking')
+          )
+          BEGIN
+            ALTER TABLE dbo.gym_booking
+              ADD CONSTRAINT CK_gym_booking_ApprovalStatus
+              CHECK ([${approvalColName}] IN ('PENDING','APPROVED','REJECTED'));
+          END
+        `);
+
+        await exec(`
+          IF NOT EXISTS (
+            SELECT 1
+            FROM sys.foreign_keys
+            WHERE name = 'FK_gym_booking_schedule'
+              AND parent_object_id = OBJECT_ID('dbo.gym_booking')
+          )
+          BEGIN
+            ALTER TABLE dbo.gym_booking
+              ADD CONSTRAINT FK_gym_booking_schedule
+              FOREIGN KEY (ScheduleID) REFERENCES dbo.gym_schedule(ScheduleID);
+          END
+        `);
+      }
+
+      await tx.commit();
+    } catch (e) {
+      try {
+        await tx.rollback();
+      } catch (_) {
+      }
+      throw e;
+    }
+
+    const schemaResult = await pool.request().query(`
+      SELECT
+        COLUMN_NAME AS name,
+        DATA_TYPE AS type,
+        IS_NULLABLE AS is_nullable
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_booking'
+      ORDER BY ORDINAL_POSITION
+    `);
+
+    await pool.close();
+    const columns = Array.isArray(schemaResult?.recordset) ? schemaResult.recordset : [];
+    return res.json({ ok: true, columns });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
