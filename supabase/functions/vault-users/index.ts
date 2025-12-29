@@ -122,12 +122,15 @@ serve(async (req) => {
         : null;
     }).filter(Boolean) as VaultUserDto[];
 
-    // Merge mock vault users with registered users (prefer registered session info)
+// Merge mock vault users with registered users (prefer registered session info)
     const map = new Map<string, VaultUserDto>();
-    for (const v of mockVaultUsers) map.set(v.employee_id, { ...v });
+    for (const v of mockVaultUsers) {
+      map.set(v.employee_id, { ...v, status: v.status as 'ACTIVE' | 'INACTIVE' });
+    }
     for (const r of registeredUsers) {
-      if (map.has(r.employee_id)) {
-        map.set(r.employee_id, { ...map.get(r.employee_id), session: r.session ?? map.get(r.employee_id)?.session });
+      const existing = map.get(r.employee_id);
+      if (existing) {
+        map.set(r.employee_id, { ...existing, session: r.session ?? existing.session });
       } else {
         // Unknown in vault; still include as new row
         map.set(r.employee_id, { ...r, card_no: r.card_no ?? "" });
