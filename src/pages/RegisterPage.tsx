@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -48,6 +49,10 @@ const carouselImages = [treadmillImg, benchPressImg, gymIcon];
 export default function RegisterPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const [empSuggestions, setEmpSuggestions] = useState<string[]>([]);
+  const [empLoading, setEmpLoading] = useState(false);
+  const [showEmpDropdown, setShowEmpDropdown] = useState(false);
+  const navigate = useNavigate();
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -58,8 +63,25 @@ export default function RegisterPage() {
 
   const selectedDate = form.watch('date');
   const selectedSessionId = form.watch('sessionId');
+  const employeeIdInput = form.watch('employeeId');
   const { data: sessions, isLoading: sessionsLoading } = usePublicGymSessionsList(selectedDate);
   const selectedSession = sessions?.find((s) => s.id === selectedSessionId);
+  const [availabilities, setAvailabilities] = useState<Array<{ session_label: string; time_start: string; quota: number; booked_count: number; available: number }>>([]);
+  const [availLoading, setAvailLoading] = useState(false);
+  const [selectedAvailTime, setSelectedAvailTime] = useState<string | null>(null);
+
+  const endFor = (label: string): string | null => {
+    switch (label) {
+      case 'Morning':
+        return '06:30';
+      case 'Night 1':
+        return '20:00';
+      case 'Night 2':
+        return '22:00';
+      default:
+        return null;
+    }
+  };
 
   // Auto-swipe carousel
   useEffect(() => {
@@ -68,6 +90,75 @@ export default function RegisterPage() {
     }, 2000);
     return () => clearInterval(interval);
   }, []);
+
+  // Employee ID suggestions from Master Employee DB via local tester service
+  useEffect(() => {
+    const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
+    if (!endpoint) return;
+
+    const q = (employeeIdInput || '').trim();
+    if (q.length === 0) {
+      setEmpSuggestions([]);
+      return;
+    }
+
+    setEmpLoading(true);
+    const ctrl = new AbortController();
+    const t = setTimeout(async () => {
+      try {
+        const url = `${endpoint}/employees?q=${encodeURIComponent(q)}`;
+        const resp = await fetch(url, { signal: ctrl.signal });
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json?.success) {
+            setEmpSuggestions(Array.isArray(json.employees) ? json.employees : []);
+            setShowEmpDropdown(true);
+          } else {
+            setEmpSuggestions([]);
+          }
+        } else {
+          setEmpSuggestions([]);
+        }
+      } catch (_) {
+        setEmpSuggestions([]);
+      } finally {
+        setEmpLoading(false);
+      }
+    }, 250);
+
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [employeeIdInput]);
+
+  // Fetch GymDB availability for selected date
+  useEffect(() => {
+    const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
+    if (!endpoint || !selectedDate) {
+      setAvailabilities([]);
+      return;
+    }
+    setAvailLoading(true);
+    const ctrl = new AbortController();
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    (async () => {
+      try {
+        const resp = await fetch(`${endpoint}/gym-availability?date=${encodeURIComponent(dateStr)}`, { signal: ctrl.signal });
+        if (resp.ok) {
+          const json: { success: boolean; sessions?: Array<{ session_label: string; time_start: string; quota: number; booked_count: number; available: number }> } = await resp.json();
+          setAvailabilities(Array.isArray(json.sessions) ? json.sessions : []);
+        } else {
+          setAvailabilities([]);
+        }
+      } catch (_) {
+        setAvailabilities([]);
+      } finally {
+        setAvailLoading(false);
+      }
+    })();
+    return () => ctrl.abort();
+  }, [selectedDate]);
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
@@ -82,8 +173,8 @@ export default function RegisterPage() {
 
       if (error) throw error;
 
-      const payload = res as any;
-      if (!payload?.ok) {
+      const payload = res as { ok: boolean; error?: string; sessionName?: string } | null;
+      if (!payload || !payload.ok) {
         toast({
           title: 'Registration failed',
           description: payload?.error || 'An error occurred. Please try again.',
@@ -100,10 +191,11 @@ export default function RegisterPage() {
       });
 
       form.reset();
-    } catch (error: any) {
+      navigate('/vault');
+    } catch (error: unknown) {
       toast({
         title: 'Registration failed',
-        description: error?.message || 'An error occurred. Please try again.',
+        description: error instanceof Error ? error.message : 'An error occurred. Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -215,9 +307,36 @@ export default function RegisterPage() {
                       <Input
                         placeholder="Enter your Employee ID"
                         {...field}
+                        onFocus={() => setShowEmpDropdown(true)}
+                        onBlur={() => setTimeout(() => setShowEmpDropdown(false), 150)}
                         className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors"
                       />
                     </FormControl>
+                    {showEmpDropdown && (empLoading || empSuggestions.length > 0) && (
+                      <div className="mt-2 border border-slate-200 rounded-xl bg-white shadow-sm max-h-48 overflow-auto">
+                        {empLoading ? (
+                          <div className="px-3 py-2 text-sm text-slate-500">Searching...</div>
+                        ) : (
+                          empSuggestions.map((id) => (
+                            <button
+                              type="button"
+                              key={id}
+                              className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                field.onChange(id);
+                                setShowEmpDropdown(false);
+                              }}
+                            >
+                              {id}
+                            </button>
+                          ))
+                        )}
+                        {!empLoading && empSuggestions.length === 0 && (
+                          <div className="px-3 py-2 text-sm text-slate-500">No matches</div>
+                        )}
+                      </div>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )}
@@ -275,18 +394,24 @@ export default function RegisterPage() {
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors">
-                            <SelectValue placeholder={sessionsLoading ? 'Loading...' : 'Select'} />
+                            <SelectValue placeholder={availLoading ? 'Loading...' : 'Select'} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent className="z-[9999] bg-white">
-                          {sessionsLoading ? (
+                          {availLoading ? (
                             <SelectItem value="__loading__" disabled>
                               Loading...
                             </SelectItem>
-                          ) : hasSessions ? (
-                            sessions!.map((session) => (
-                              <SelectItem key={session.id} value={session.id}>
-                                {session.session_name}
+                          ) : availabilities.length > 0 ? (
+                            availabilities.map((av) => (
+                              <SelectItem
+                                key={av.time_start}
+                                value={String(
+                                  sessions?.find((s) => s.time_start.slice(0, 5) === av.time_start)?.id || ''
+                                )}
+                                onClick={() => setSelectedAvailTime(av.time_start)}
+                              >
+                                {av.session_label}
                               </SelectItem>
                             ))
                           ) : (
@@ -304,18 +429,29 @@ export default function RegisterPage() {
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Time</div>
                   <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
-                    {selectedSession
-                      ? `${selectedSession.time_start.slice(0, 5)} - ${selectedSession.time_end.slice(0, 5)}`
-                      : '-'}
+                    {selectedAvailTime
+                      ? (() => {
+                          const av = availabilities.find((a) => a.time_start === selectedAvailTime);
+                          const end = av ? endFor(av.session_label) : null;
+                          return end ? `${selectedAvailTime} - ${end}` : selectedAvailTime;
+                        })()
+                      : selectedSession
+                        ? `${selectedSession.time_start.slice(0, 5)} - ${selectedSession.time_end.slice(0, 5)}`
+                        : '-'}
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Available</div>
                   <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
-                    {selectedSession
-                      ? `${(selectedSession.quota ?? 0) - (selectedSession.booked_count ?? 0)} / ${selectedSession.quota}`
-                      : '-'}
+                    {selectedAvailTime
+                      ? (() => {
+                          const av = availabilities.find((a) => a.time_start === selectedAvailTime);
+                          return av ? `${av.available} / ${av.quota}` : '-';
+                        })()
+                      : selectedSession
+                        ? `${(selectedSession.quota ?? 0) - (selectedSession.booked_count ?? 0)} / ${selectedSession.quota}`
+                        : '-'}
                   </div>
                 </div>
               </div>

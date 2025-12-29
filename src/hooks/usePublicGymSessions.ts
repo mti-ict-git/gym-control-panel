@@ -19,12 +19,12 @@ export function usePublicGymSessionsList(date?: Date) {
       });
       if (error) throw error;
 
-      const payload = data as any;
-      if (!payload?.ok) {
+      const payload = data as { ok: boolean; error?: string; sessions?: PublicGymSession[] } | null;
+      if (!payload || !payload.ok) {
         throw new Error(payload?.error || "Failed to load sessions");
       }
 
-      return (payload.sessions ?? []) as PublicGymSession[];
+      return Array.isArray(payload.sessions) ? payload.sessions : [];
     },
     staleTime: 60_000,
   });

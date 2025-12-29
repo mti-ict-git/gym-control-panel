@@ -10,24 +10,24 @@ export interface VaultUser {
   session?: string;
 }
 
+type VaultUsersResponse = { users?: VaultUser[]; error?: string } | null;
+
 export function useVaultUsers() {
   return useQuery({
     queryKey: ['vault-users'],
-    queryFn: async () => {
+    queryFn: async (): Promise<VaultUser[]> => {
       const { data, error } = await supabase.functions.invoke('vault-users');
-      
-      if (error) {
-        console.error('Error fetching vault users:', error);
-        throw error;
-      }
+      if (error) throw error;
 
-      // Enrich with card_no if missing (since cloud function might not be deployed yet)
-      // In production, this data should come directly from the API/Edge Function
-      return (data.users || []).map((u: any, i: number) => ({
+      const payload = data as VaultUsersResponse;
+      const users = Array.isArray(payload?.users) ? payload!.users! : [];
+
+      // Ensure card numbers are present for display purposes
+      return users.map((u, i) => ({
         ...u,
         card_no: u.card_no || `CN${String(i + 1).padStart(3, '0')}`,
-        session: u.session || (i % 2 === 0 ? 'Morning' : 'Afternoon')
-      })) as VaultUser[];
+      }));
     },
+    staleTime: 30_000,
   });
 }
