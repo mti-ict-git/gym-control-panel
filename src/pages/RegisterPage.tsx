@@ -193,7 +193,7 @@ export default function RegisterPage() {
 
       {/* Right Panel - Form */}
       <div className="w-full lg:w-1/2 p-6 flex items-center justify-center">
-        <div className="w-full max-w-md bg-white rounded-3xl p-8 lg:p-12 shadow-xl">
+        <div className="w-full max-w-lg bg-white rounded-3xl p-10 lg:p-14 shadow-xl">
           <div className="flex lg:hidden justify-center mb-6">
             <img src={gymIcon} alt="Gym" className="w-20 h-20 object-contain" />
           </div>
