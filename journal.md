@@ -54,3 +54,43 @@ This journal tracks decisions, notes, and progress for the project.
   - Keep table minimal but add serial for quick referencing.
   - Run credential tester inside LAN for private IP access; cloud functions used only for reachability fallback.
 
+## 2025-12-29
+
+- Goals:
+  - Wire Schedules + Register to GymDB `dbo.gym_schedule`.
+  - Make Gym Booking show real booking data after registration.
+  - Improve session management with edit/delete.
+  - Rename and move route from `/vault` to `/gym_booking`.
+- Notes:
+  - Schedules (GymDB sessions):
+    - `SchedulesPage` now reads sessions from GymDB via local tester endpoint `/gym-sessions`.
+    - Added create session wiring to GymDB `dbo.gym_schedule` via `/gym-session-create`.
+    - Added edit/delete actions in Sessions table, backed by `/gym-session-update` and `/gym-session-delete`.
+    - Files:
+      - [SchedulesPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/SchedulesPage.tsx)
+      - [db-tester.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/server/db-tester.js)
+  - Register (GymDB sessions + quota):
+    - Session, time, and available values load from GymDB `dbo.gym_schedule` (Available = `Quota`).
+    - Registration inserts booking into Supabase `gym_schedules` via edge function `public-register`.
+    - Files:
+      - [RegisterPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/RegisterPage.tsx)
+      - [public-register](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/supabase/functions/public-register/index.ts)
+  - Gym Booking (post-register list):
+    - Route displays bookings from Supabase `gym_schedules`, enriched from Master DB `MTIMasterEmployeeDB.employee_core`.
+    - Session label resolves from GymDB `dbo.gym_schedule` using the GymDB sessions endpoint.
+    - Files:
+      - [VaultPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/VaultPage.tsx)
+      - [useVaultUsers.ts](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/hooks/useVaultUsers.ts)
+      - [db-tester.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/server/db-tester.js)
+  - Master Employee DB (employee_core):
+    - Added `/employee-core` endpoint to query employee details by `ids` list or `q` search.
+    - Supports flexible column naming by inspecting INFORMATION_SCHEMA and mapping to expected fields.
+  - Routing:
+    - Changed main route from `/vault` to `/gym_booking` and kept a redirect from `/vault` for backward compatibility.
+    - Updated sidebar link to `/gym_booking`.
+    - Files:
+      - [App.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/App.tsx)
+      - [AppSidebar.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/components/layout/AppSidebar.tsx)
+- Decisions:
+  - Keep GymDB + Master DB access on LAN via the local tester service to avoid exposing MSSQL to the browser.
+  - Use Supabase `gym_schedules` as the source of truth for booking records, and enrich UI with Master DB employee data.
