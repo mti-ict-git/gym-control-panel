@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 
 export interface VaultUser {
   schedule_time: string;
@@ -10,22 +9,6 @@ export interface VaultUser {
   card_no: string | null;
 }
 
-type EmployeeCoreRow = {
-  employee_id: string;
-  name: string;
-  department: string | null;
-  card_no: string | null;
-};
-
-type EmployeeCoreResponse = { ok: boolean; employees?: EmployeeCoreRow[]; error?: string } | null;
-
-type BookingScheduleRow = {
-  id: string;
-  schedule_time: string;
-  status: VaultUser['status'] | string;
-  gym_users: { employee_id: string | null } | null;
-};
-
 const JAKARTA_OFFSET_MINUTES = 7 * 60;
 
 function startOfTodayJakartaUtcDate(): Date {
@@ -34,71 +17,72 @@ function startOfTodayJakartaUtcDate(): Date {
   return new Date(Date.UTC(jakartaNow.getUTCFullYear(), jakartaNow.getUTCMonth(), jakartaNow.getUTCDate()));
 }
 
+type GymDbBookingRow = {
+  booking_id: number;
+  employee_id: string;
+  card_no: string | null;
+  employee_name: string;
+  department: string | null;
+  booking_date: string;
+  status: string;
+  time_start: string | null;
+};
+
+type GymDbBookingResponse = { ok: boolean; error?: string; bookings?: GymDbBookingRow[] } | null;
+
+function buildJakartaScheduleTimeIso(dateStr: string, hhmm: string): string | null {
+  const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(dateStr);
+  const t = /^([0-9]{2}):([0-9]{2})$/.exec(hhmm);
+  if (!m || !t) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const hour = Number(t[1]);
+  const minute = Number(t[2]);
+  const utc = new Date(Date.UTC(year, month - 1, day, hour, minute) - JAKARTA_OFFSET_MINUTES * 60_000);
+  return utc.toISOString();
+}
+
 export function useVaultUsers() {
   return useQuery({
     queryKey: ['vault-users'],
     queryFn: async (): Promise<VaultUser[]> => {
+      const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
+      if (!endpoint) return [];
+
       const todayJakarta = startOfTodayJakartaUtcDate();
       const tomorrow = new Date(todayJakarta.getTime() + 24 * 60 * 60_000);
       const dayAfter = new Date(todayJakarta.getTime() + 2 * 24 * 60 * 60_000);
-      const endOfDayAfter = new Date(dayAfter.getTime() + (24 * 60 * 60_000 - 1));
 
-      const { data: schedules, error: schedErr } = await supabase
-        .from('gym_schedules')
-        .select(
-          `
-            id,
-            schedule_time,
-            status,
-            gym_users (
-              employee_id
-            )
-          `,
-        )
-        .gte('schedule_time', tomorrow.toISOString())
-        .lte('schedule_time', endOfDayAfter.toISOString())
-        .in('status', ['BOOKED', 'IN_GYM', 'OUT'])
-        .order('schedule_time', { ascending: true });
+      const toYmd = (d: Date) => {
+        const y = d.getUTCFullYear();
+        const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
+      };
 
-      if (schedErr) throw schedErr;
+      const from = toYmd(tomorrow);
+      const to = toYmd(dayAfter);
 
-      const rows: BookingScheduleRow[] = Array.isArray(schedules) ? (schedules as BookingScheduleRow[]) : [];
-      const employeeIds = Array.from(
-        new Set(
-          rows.map((r) => String(r.gym_users?.employee_id || '').trim()).filter(Boolean),
-        ),
-      ).slice(0, 200);
+      const resp = await fetch(`${endpoint}/gym-bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      const json = (await resp.json()) as GymDbBookingResponse;
+      if (!json || !json.ok) throw new Error(json?.error || 'Failed to load GymDB bookings');
 
-      const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
-      const employeeMap = new Map<string, EmployeeCoreRow>();
-
-      if (endpoint && employeeIds.length > 0) {
-        const resp = await fetch(`${endpoint}/employee-core?ids=${encodeURIComponent(employeeIds.join(','))}`);
-        const json = (await resp.json()) as EmployeeCoreResponse;
-        if (json?.ok && Array.isArray(json.employees)) {
-          for (const e of json.employees) {
-            employeeMap.set(String(e.employee_id).trim(), {
-              employee_id: String(e.employee_id).trim(),
-              name: String(e.name ?? '').trim(),
-              department: e.department != null ? String(e.department).trim() : null,
-              card_no: e.card_no != null ? String(e.card_no).trim() : null,
-            });
-          }
-        }
-      }
-
+      const rows = Array.isArray(json.bookings) ? json.bookings : [];
       return rows
         .map((r) => {
-          const employee_id = String(r.gym_users?.employee_id || '').trim();
-          if (!employee_id) return null;
-          const emp = employeeMap.get(employee_id);
+          const schedule_time = r.time_start ? buildJakartaScheduleTimeIso(String(r.booking_date), String(r.time_start)) : null;
+          if (!schedule_time) return null;
+          const rawStatus = String(r.status || '').toUpperCase();
+          const mappedStatus: VaultUser['status'] =
+            rawStatus === 'BOOKED' ? 'BOOKED' : rawStatus === 'CHECKIN' ? 'IN_GYM' : 'OUT';
           return {
-            schedule_time: String(r.schedule_time),
-            employee_id,
-            name: emp?.name || '',
-            department: emp?.department ?? null,
-            card_no: emp?.card_no ?? null,
-            status: String(r.status) as VaultUser['status'],
+            schedule_time,
+            employee_id: String(r.employee_id || '').trim(),
+            name: String(r.employee_name || '').trim(),
+            department: r.department != null ? String(r.department).trim() : null,
+            card_no: r.card_no != null ? String(r.card_no).trim() : null,
+            status: mappedStatus,
           } satisfies VaultUser;
         })
         .filter(Boolean) as VaultUser[];

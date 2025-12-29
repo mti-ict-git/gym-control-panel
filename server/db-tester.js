@@ -187,6 +187,7 @@ app.get('/employee-core', async (req, res) => {
     const nameCol = pickColumn(columns, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
     const deptCol = pickColumn(columns, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
     const cardCol = pickColumn(columns, ['id_card', 'ID Card', 'card_no', 'Card No', 'CardNo']);
+    const genderCol = pickColumn(columns, ['gender', 'Gender', 'sex', 'Sex', 'jenis_kelamin', 'Jenis Kelamin']);
 
     if (!employeeIdCol || !nameCol) {
       await pool.close();
@@ -202,6 +203,7 @@ app.get('/employee-core', async (req, res) => {
       `[${nameCol}] AS name`,
       deptCol ? `[${deptCol}] AS department` : `CAST(NULL AS varchar(255)) AS department`,
       cardCol ? `[${cardCol}] AS card_no` : `CAST(NULL AS varchar(255)) AS card_no`,
+      genderCol ? `[${genderCol}] AS gender` : `CAST(NULL AS varchar(50)) AS gender`,
     ].join(',\n        ');
 
     const request = pool.request();
@@ -235,6 +237,7 @@ app.get('/employee-core', async (req, res) => {
       name: String(row.name ?? '').trim(),
       department: row.department != null ? String(row.department).trim() : null,
       card_no: row.card_no != null ? String(row.card_no).trim() : null,
+      gender: row.gender != null ? String(row.gender).trim() : null,
     })).filter((e) => e.employee_id);
 
     return res.json({ ok: true, employees });
@@ -698,6 +701,330 @@ app.post('/gym-schedule-create', async (req, res) => {
   }
 });
 
+app.get('/gym-bookings', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', bookings: [] });
+  }
+
+  const from = String(req.query.from || '').trim();
+  const to = String(req.query.to || '').trim();
+  if (!from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return res.status(400).json({ ok: false, error: 'from and to are required (yyyy-MM-dd)', bookings: [] });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: String(DB_ENCRYPT || 'false').toLowerCase() === 'true',
+      trustServerCertificate: String(DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const request = pool.request();
+    request.input('fromDate', sql.Date, new Date(from));
+    request.input('toDate', sql.Date, new Date(to));
+
+    const result = await request.query(`
+      SELECT
+        b.BookingID AS booking_id,
+        b.EmployeeID AS employee_id,
+        b.CardNo AS card_no,
+        b.EmployeeName AS employee_name,
+        b.Department AS department,
+        b.Gender AS gender,
+        b.SessionName AS session_name,
+        b.ScheduleID AS schedule_id,
+        CONVERT(varchar(10), b.BookingDate, 23) AS booking_date,
+        b.Status AS status,
+        b.ApprovalStatus AS approval_status,
+        b.CreatedAt AS created_at,
+        CONVERT(varchar(5), s.StartTime, 108) AS time_start,
+        CONVERT(varchar(5), s.EndTime, 108) AS time_end
+      FROM dbo.gym_booking b
+      LEFT JOIN dbo.gym_schedule s
+        ON s.ScheduleID = b.ScheduleID
+      WHERE b.BookingDate >= @fromDate
+        AND b.BookingDate <= @toDate
+        AND b.Status IN ('BOOKED','CHECKIN','COMPLETED')
+      ORDER BY b.BookingDate ASC, time_start ASC, b.CreatedAt ASC
+    `);
+    await pool.close();
+
+    const bookings = Array.isArray(result?.recordset)
+      ? result.recordset.map((r) => ({
+          booking_id: Number(r.booking_id),
+          employee_id: String(r.employee_id ?? '').trim(),
+          card_no: r.card_no != null ? String(r.card_no).trim() : null,
+          employee_name: String(r.employee_name ?? '').trim(),
+          department: r.department != null ? String(r.department).trim() : null,
+          gender: r.gender != null ? String(r.gender).trim() : null,
+          session_name: String(r.session_name ?? '').trim(),
+          schedule_id: Number(r.schedule_id),
+          booking_date: String(r.booking_date ?? '').trim(),
+          status: String(r.status ?? '').trim(),
+          approval_status: r.approval_status != null ? String(r.approval_status).trim() : null,
+          created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at ?? ''),
+          time_start: r.time_start != null ? String(r.time_start).trim() : null,
+          time_end: r.time_end != null ? String(r.time_end).trim() : null,
+        }))
+      : [];
+
+    return res.json({ ok: true, bookings });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, bookings: [] });
+  }
+});
+
+app.post('/gym-booking-create', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+    MASTER_DB_SERVER,
+    MASTER_DB_PORT,
+    MASTER_DB_DATABASE,
+    MASTER_DB_USER,
+    MASTER_DB_PASSWORD,
+    MASTER_DB_ENCRYPT,
+    MASTER_DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  const gymServer = envTrim(DB_SERVER);
+  const gymDatabase = envTrim(DB_DATABASE);
+  const gymUser = envTrim(DB_USER);
+  const gymPassword = envTrim(DB_PASSWORD);
+  if (!gymServer || !gymDatabase || !gymUser || !gymPassword) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const masterServer = envTrim(MASTER_DB_SERVER);
+  const masterDatabase = envTrim(MASTER_DB_DATABASE);
+  const masterUser = envTrim(MASTER_DB_USER);
+  const masterPassword = envTrim(MASTER_DB_PASSWORD);
+  if (!masterServer || !masterDatabase || !masterUser || !masterPassword) {
+    return res.status(500).json({ ok: false, error: 'Master DB env is not configured' });
+  }
+
+  const { employee_id, session_id, booking_date } = req.body || {};
+  const employeeId = String(employee_id || '').trim();
+  const sessionId = String(session_id || '').trim();
+  const bookingDateStr = String(booking_date || '').trim();
+
+  if (!employeeId || !sessionId || !bookingDateStr) {
+    return res.status(400).json({ ok: false, error: 'employee_id, session_id, booking_date are required' });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDateStr)) {
+    return res.status(400).json({ ok: false, error: 'booking_date must be yyyy-MM-dd' });
+  }
+
+  const parts = sessionId.split('__');
+  const sessionName = String(parts[0] || '').trim();
+  const timeStart = String(parts[1] || '').trim();
+  if (!sessionName || !timeStart || !/^\d{2}:\d{2}$/.test(timeStart)) {
+    return res.status(400).json({ ok: false, error: 'session_id must be "Session__HH:MM"' });
+  }
+
+  const gymConfig = {
+    server: gymServer,
+    port: Number(DB_PORT || 1433),
+    database: gymDatabase,
+    user: gymUser,
+    password: gymPassword,
+    options: {
+      encrypt: String(DB_ENCRYPT || 'false').toLowerCase() === 'true',
+      trustServerCertificate: String(DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  const masterConfig = {
+    server: masterServer,
+    port: Number(MASTER_DB_PORT || 1433),
+    database: masterDatabase,
+    user: masterUser,
+    password: masterPassword,
+    options: {
+      encrypt: String(MASTER_DB_ENCRYPT || 'false').toLowerCase() === 'true',
+      trustServerCertificate: String(MASTER_DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  const pickColumn = (columns, candidates) => {
+    const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
+    for (const cand of candidates) {
+      const hit = map.get(String(cand).toLowerCase());
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  try {
+    const bookingDate = new Date(bookingDateStr);
+    if (isNaN(bookingDate.getTime())) throw new Error('Invalid booking_date');
+
+    const gymPool = await sql.connect(gymConfig);
+    const scheduleReq = gymPool.request();
+    scheduleReq.input('session_name', sql.VarChar(50), sessionName);
+    scheduleReq.input('time_start', sql.VarChar(5), timeStart);
+    const scheduleResult = await scheduleReq.query(`
+      SELECT TOP 1
+        ScheduleID AS schedule_id,
+        Quota AS quota
+      FROM dbo.gym_schedule
+      WHERE Session = @session_name
+        AND StartTime = CAST(@time_start AS time(0))
+    `);
+
+    const scheduleRow = Array.isArray(scheduleResult?.recordset) ? scheduleResult.recordset[0] : null;
+    const scheduleId = scheduleRow?.schedule_id != null ? Number(scheduleRow.schedule_id) : null;
+    const quota = scheduleRow?.quota != null ? Number(scheduleRow.quota) : 15;
+    if (!scheduleId || !Number.isFinite(scheduleId)) {
+      await gymPool.close();
+      return res.status(200).json({ ok: false, error: 'Session not found in GymDB' });
+    }
+
+    const dupReq = gymPool.request();
+    dupReq.input('employee_id', sql.VarChar(20), employeeId);
+    dupReq.input('booking_date', sql.Date, bookingDate);
+    const dupResult = await dupReq.query(`
+      SELECT COUNT(*) AS cnt
+      FROM dbo.gym_booking
+      WHERE EmployeeID = @employee_id
+        AND BookingDate = @booking_date
+        AND Status IN ('BOOKED','CHECKIN')
+    `);
+    const duplicateCount = Number(dupResult?.recordset?.[0]?.cnt || 0);
+    if (duplicateCount > 0) {
+      await gymPool.close();
+      return res.status(200).json({ ok: false, error: 'You are already registered for this day' });
+    }
+
+    const quotaReq = gymPool.request();
+    quotaReq.input('schedule_id', sql.Int, scheduleId);
+    quotaReq.input('booking_date', sql.Date, bookingDate);
+    const quotaResult = await quotaReq.query(`
+      SELECT COUNT(*) AS cnt
+      FROM dbo.gym_booking
+      WHERE ScheduleID = @schedule_id
+        AND BookingDate = @booking_date
+        AND Status IN ('BOOKED','CHECKIN')
+    `);
+    const bookedCount = Number(quotaResult?.recordset?.[0]?.cnt || 0);
+    if (bookedCount >= quota) {
+      await gymPool.close();
+      return res.status(200).json({ ok: false, error: 'This session is full' });
+    }
+
+    await gymPool.close();
+
+    const masterPool = await sql.connect(masterConfig);
+    const schemaResult = await masterPool.request().query(`
+      SELECT TOP 1 TABLE_SCHEMA AS schema_name
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_NAME = 'employee_core'
+      ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA
+    `);
+    const schema = schemaResult?.recordset?.[0]?.schema_name ? String(schemaResult.recordset[0].schema_name) : 'dbo';
+    const colReq = masterPool.request();
+    colReq.input('schema', sql.VarChar(128), schema);
+    const columnsResult = await colReq.query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'employee_core' AND TABLE_SCHEMA = @schema
+    `);
+    const columns = (columnsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
+    const employeeIdCol = pickColumn(columns, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID']);
+    const nameCol = pickColumn(columns, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
+    const deptCol = pickColumn(columns, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
+    const cardCol = pickColumn(columns, ['id_card', 'ID Card', 'card_no', 'Card No', 'CardNo']);
+    const genderCol = pickColumn(columns, ['gender', 'Gender', 'sex', 'Sex', 'jenis_kelamin', 'Jenis Kelamin']);
+
+    if (!employeeIdCol || !nameCol) {
+      await masterPool.close();
+      return res.status(200).json({ ok: false, error: 'employee_core must have employee_id and Name columns' });
+    }
+
+    const selectCols = [
+      `[${employeeIdCol}] AS employee_id`,
+      `[${nameCol}] AS name`,
+      deptCol ? `[${deptCol}] AS department` : `CAST(NULL AS varchar(255)) AS department`,
+      cardCol ? `[${cardCol}] AS card_no` : `CAST(NULL AS varchar(255)) AS card_no`,
+      genderCol ? `[${genderCol}] AS gender` : `CAST(NULL AS varchar(50)) AS gender`,
+    ].join(',\n        ');
+
+    const empReq = masterPool.request();
+    empReq.input('id', sql.VarChar(100), employeeId);
+    const empResult = await empReq.query(`
+      SELECT TOP 1
+        ${selectCols}
+      FROM [${schema}].[employee_core]
+      WHERE [${employeeIdCol}] = @id
+    `);
+    await masterPool.close();
+
+    const empRow = Array.isArray(empResult?.recordset) ? empResult.recordset[0] : null;
+    if (!empRow) {
+      return res.status(200).json({ ok: false, error: 'Employee not found' });
+    }
+
+    const employeeName = String(empRow.name ?? '').trim();
+    const department = empRow.department != null ? String(empRow.department).trim() : '';
+    const cardNo = empRow.card_no != null ? String(empRow.card_no).trim() : null;
+    const gender = empRow.gender != null && String(empRow.gender).trim() ? String(empRow.gender).trim() : 'UNKNOWN';
+
+    const gymPool2 = await sql.connect(gymConfig);
+    const insertReq = gymPool2.request();
+    insertReq.input('employee_id', sql.VarChar(20), employeeId);
+    insertReq.input('card_no', sql.VarChar(50), cardNo);
+    insertReq.input('employee_name', sql.VarChar(100), employeeName);
+    insertReq.input('department', sql.VarChar(100), department);
+    insertReq.input('gender', sql.VarChar(10), gender);
+    insertReq.input('session_name', sql.VarChar(50), sessionName);
+    insertReq.input('schedule_id', sql.Int, scheduleId);
+    insertReq.input('booking_date', sql.Date, bookingDate);
+
+    const insertResult = await insertReq.query(`
+      INSERT INTO dbo.gym_booking (
+        EmployeeID, CardNo, EmployeeName, Department, Gender, SessionName, ScheduleID, BookingDate, Status
+      )
+      OUTPUT INSERTED.BookingID AS booking_id
+      VALUES (
+        @employee_id, @card_no, @employee_name, @department, @gender, @session_name, @schedule_id, @booking_date, 'BOOKED'
+      )
+    `);
+
+    await gymPool2.close();
+    const bookingId = Number(insertResult?.recordset?.[0]?.booking_id || 0);
+    return res.json({ ok: true, booking_id: bookingId, schedule_id: scheduleId });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
 app.post('/gym-booking-init', async (req, res) => {
   const {
     DB_SERVER,
@@ -736,6 +1063,7 @@ app.post('/gym-booking-init', async (req, res) => {
     const tx = new sql.Transaction(pool);
     await tx.begin();
     const exec = async (q) => tx.request().query(q);
+    let duplicates = [];
 
     try {
       await exec('SET NOCOUNT ON;');
@@ -888,6 +1216,49 @@ app.post('/gym-booking-init', async (req, res) => {
         `);
       }
 
+      const idxExists = await exec(`
+        SELECT 1 AS ok
+        FROM sys.indexes
+        WHERE name = 'UX_gym_booking_one_per_day'
+          AND object_id = OBJECT_ID('dbo.gym_booking')
+      `);
+
+      if (!(idxExists?.recordset || []).length) {
+        const dupResult = await exec(`
+          SELECT TOP 20 EmployeeID, BookingDate, COUNT(*) AS cnt
+          FROM dbo.gym_booking
+          WHERE Status IN ('BOOKED','CHECKIN')
+          GROUP BY EmployeeID, BookingDate
+          HAVING COUNT(*) > 1
+          ORDER BY cnt DESC
+        `);
+        duplicates = Array.isArray(dupResult?.recordset) ? dupResult.recordset : [];
+        if (duplicates.length > 0) {
+          throw new Error('Duplicate active bookings exist; cannot create unique index UX_gym_booking_one_per_day');
+        }
+
+        await exec(`
+          CREATE UNIQUE INDEX UX_gym_booking_one_per_day
+          ON dbo.gym_booking (EmployeeID, BookingDate)
+          WHERE Status IN ('BOOKED','CHECKIN')
+        `);
+      }
+
+      const todayIdxExists = await exec(`
+        SELECT 1 AS ok
+        FROM sys.indexes
+        WHERE name = 'IX_gym_booking_today'
+          AND object_id = OBJECT_ID('dbo.gym_booking')
+      `);
+
+      if (!(todayIdxExists?.recordset || []).length) {
+        await exec(`
+          CREATE INDEX IX_gym_booking_today
+          ON dbo.gym_booking (BookingDate, ApprovalStatus, Status)
+          INCLUDE (EmployeeName, Department, SessionName)
+        `);
+      }
+
       await tx.commit();
     } catch (e) {
       try {
@@ -907,12 +1278,28 @@ app.post('/gym-booking-init', async (req, res) => {
       ORDER BY ORDINAL_POSITION
     `);
 
+    const indexResult = await pool.request().query(`
+      SELECT 1 AS ok
+      FROM sys.indexes
+      WHERE name = 'UX_gym_booking_one_per_day'
+        AND object_id = OBJECT_ID('dbo.gym_booking')
+    `);
+
+    const todayIndexResult = await pool.request().query(`
+      SELECT 1 AS ok
+      FROM sys.indexes
+      WHERE name = 'IX_gym_booking_today'
+        AND object_id = OBJECT_ID('dbo.gym_booking')
+    `);
+
     await pool.close();
     const columns = Array.isArray(schemaResult?.recordset) ? schemaResult.recordset : [];
-    return res.json({ ok: true, columns });
+    const index_ok = Array.isArray(indexResult?.recordset) && indexResult.recordset.length > 0;
+    const index_today_ok = Array.isArray(todayIndexResult?.recordset) && todayIndexResult.recordset.length > 0;
+    return res.json({ ok: true, columns, index_ok, index_today_ok });
   } catch (error) {
     const message = error?.message || String(error);
-    return res.status(200).json({ ok: false, error: message });
+    return res.status(200).json({ ok: false, error: message, duplicates });
   }
 });
 

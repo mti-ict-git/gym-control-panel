@@ -8,7 +8,6 @@ import { CalendarIcon, Loader2 } from 'lucide-react';
 import gymIcon from '@/assets/gym-icon.png';
 import treadmillImg from '@/assets/treadmill.png';
 import benchPressImg from '@/assets/bench-press.png';
-import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
@@ -69,6 +68,18 @@ export default function RegisterPage() {
   const sessionKey = (s: GymDbSession): string => `${s.session_name}__${s.time_start}`;
   const selectedGymDbSession = (gymDbSessions || []).find((s) => sessionKey(s) === selectedSessionId) ?? null;
 
+  const displaySessionName = (raw: string): string => {
+    const cleaned = String(raw || '').trim().replace(/\s+/g, ' ');
+    if (!cleaned) return '';
+    return cleaned
+      .split(' ')
+      .map((w) => {
+        if (!/[A-Za-z]/.test(w)) return w;
+        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      })
+      .join(' ');
+  };
+
   const endFor = (label: string): string | null => {
     switch (label) {
       case 'Morning':
@@ -82,17 +93,8 @@ export default function RegisterPage() {
     }
   };
 
-  const displaySessionName = (raw: string): string => {
-    const cleaned = String(raw || '').trim().replace(/\s+/g, ' ');
-    if (!cleaned) return '';
-    return cleaned
-      .split(' ')
-      .map((w) => {
-        if (!/[A-Za-z]/.test(w)) return w;
-        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
-      })
-      .join(' ');
-  };
+  const timeEndForSession = (session: GymDbSession): string =>
+    session.time_end ?? endFor(session.session_name) ?? session.time_start;
 
   // Auto-swipe carousel
   useEffect(() => {
@@ -143,36 +145,23 @@ export default function RegisterPage() {
     };
   }, [employeeIdInput]);
 
-  const timeEndForSession = (session: GymDbSession): string => {
-    const fallback = endFor(session.session_name);
-    return session.time_end ?? fallback ?? session.time_start;
-  };
-
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
-      const session = (gymDbSessions || []).find((s) => sessionKey(s) === data.sessionId) ?? null;
-      const time_end = session ? timeEndForSession(session) : null;
+      const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
+      if (!endpoint) throw new Error('DB tester endpoint is not configured');
 
-      const { data: res, error } = await supabase.functions.invoke('public-register', {
-        body: {
-          employeeId: data.employeeId,
-          sessionId: data.sessionId,
-          date: format(data.date, 'yyyy-MM-dd'),
-          session: session
-            ? {
-                session_name: session.session_name,
-                time_start: session.time_start,
-                time_end,
-                quota: session.quota,
-              }
-            : null,
-        },
+      const resp = await fetch(`${endpoint}/gym-booking-create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employee_id: data.employeeId,
+          session_id: data.sessionId,
+          booking_date: format(data.date, 'yyyy-MM-dd'),
+        }),
       });
 
-      if (error) throw error;
-
-      const payload = res as { ok: boolean; error?: string; sessionName?: string } | null;
+      const payload = (await resp.json()) as { ok: boolean; error?: string } | null;
       if (!payload || !payload.ok) {
         toast({
           title: 'Registration failed',
@@ -186,7 +175,7 @@ export default function RegisterPage() {
 
       toast({
         title: 'Registration successful!',
-        description: `You have been registered for ${selectedSession ? displaySessionName(selectedSession.session_name) : payload.sessionName} on ${format(data.date, 'MMMM d, yyyy')}.`,
+        description: `You have been registered for ${selectedSession ? displaySessionName(selectedSession.session_name) : 'the selected session'} on ${format(data.date, 'MMMM d, yyyy')}.`,
       });
 
       form.reset();
