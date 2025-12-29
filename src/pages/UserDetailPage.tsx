@@ -114,8 +114,9 @@ export default function UserDetailPage() {
     
     try {
       await checkInMutation.mutateAsync(scheduleId);
-    } catch (error: any) {
-      if (error.message === 'GYM_FULL') {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '';
+      if (message === 'GYM_FULL') {
         setShowCapacityAlert(true);
       }
     }

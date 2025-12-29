@@ -34,7 +34,7 @@ import {
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
-import { usePublicGymSessionsList } from '@/hooks/usePublicGymSessions';
+import { useGymDbSessions, GymDbSession } from '@/hooks/useGymDbSessions';
 
 const formSchema = z.object({
   employeeId: z.string().trim().min(1, 'Employee ID is required').max(50, 'Employee ID is too long'),
@@ -64,11 +64,10 @@ export default function RegisterPage() {
   const selectedDate = form.watch('date');
   const selectedSessionId = form.watch('sessionId');
   const employeeIdInput = form.watch('employeeId');
-  const { data: sessions, isLoading: sessionsLoading } = usePublicGymSessionsList(selectedDate);
-  const selectedSession = sessions?.find((s) => s.id === selectedSessionId);
-  const [availabilities, setAvailabilities] = useState<Array<{ session_label: string; time_start: string; quota: number; booked_count: number; available: number }>>([]);
-  const [availLoading, setAvailLoading] = useState(false);
-  const [selectedAvailTime, setSelectedAvailTime] = useState<string | null>(null);
+  const { data: gymDbSessions, isLoading: gymDbSessionsLoading } = useGymDbSessions();
+
+  const sessionKey = (s: GymDbSession): string => `${s.session_name}__${s.time_start}`;
+  const selectedGymDbSession = (gymDbSessions || []).find((s) => sessionKey(s) === selectedSessionId) ?? null;
 
   const endFor = (label: string): string | null => {
     switch (label) {
@@ -81,6 +80,18 @@ export default function RegisterPage() {
       default:
         return null;
     }
+  };
+
+  const displaySessionName = (raw: string): string => {
+    const cleaned = String(raw || '').trim().replace(/\s+/g, ' ');
+    if (!cleaned) return '';
+    return cleaned
+      .split(' ')
+      .map((w) => {
+        if (!/[A-Za-z]/.test(w)) return w;
+        return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      })
+      .join(' ');
   };
 
   // Auto-swipe carousel
@@ -132,42 +143,30 @@ export default function RegisterPage() {
     };
   }, [employeeIdInput]);
 
-  // Fetch GymDB availability for selected date
-  useEffect(() => {
-    const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
-    if (!endpoint || !selectedDate) {
-      setAvailabilities([]);
-      return;
-    }
-    setAvailLoading(true);
-    const ctrl = new AbortController();
-    const dateStr = format(selectedDate, 'yyyy-MM-dd');
-    (async () => {
-      try {
-        const resp = await fetch(`${endpoint}/gym-availability?date=${encodeURIComponent(dateStr)}`, { signal: ctrl.signal });
-        if (resp.ok) {
-          const json: { success: boolean; sessions?: Array<{ session_label: string; time_start: string; quota: number; booked_count: number; available: number }> } = await resp.json();
-          setAvailabilities(Array.isArray(json.sessions) ? json.sessions : []);
-        } else {
-          setAvailabilities([]);
-        }
-      } catch (_) {
-        setAvailabilities([]);
-      } finally {
-        setAvailLoading(false);
-      }
-    })();
-    return () => ctrl.abort();
-  }, [selectedDate]);
+  const timeEndForSession = (session: GymDbSession): string => {
+    const fallback = endFor(session.session_name);
+    return session.time_end ?? fallback ?? session.time_start;
+  };
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
+      const session = (gymDbSessions || []).find((s) => sessionKey(s) === data.sessionId) ?? null;
+      const time_end = session ? timeEndForSession(session) : null;
+
       const { data: res, error } = await supabase.functions.invoke('public-register', {
         body: {
           employeeId: data.employeeId,
           sessionId: data.sessionId,
           date: format(data.date, 'yyyy-MM-dd'),
+          session: session
+            ? {
+                session_name: session.session_name,
+                time_start: session.time_start,
+                time_end,
+                quota: session.quota,
+              }
+            : null,
         },
       });
 
@@ -183,11 +182,11 @@ export default function RegisterPage() {
         return;
       }
 
-      const selectedSession = sessions?.find((s) => s.id === data.sessionId);
+      const selectedSession = selectedGymDbSession;
 
       toast({
         title: 'Registration successful!',
-        description: `You have been registered for ${selectedSession?.session_name ?? payload.sessionName} on ${format(data.date, 'MMMM d, yyyy')}.`,
+        description: `You have been registered for ${selectedSession ? displaySessionName(selectedSession.session_name) : payload.sessionName} on ${format(data.date, 'MMMM d, yyyy')}.`,
       });
 
       form.reset();
@@ -202,8 +201,6 @@ export default function RegisterPage() {
       setIsSubmitting(false);
     }
   };
-
-  const hasSessions = (sessions?.length ?? 0) > 0;
 
   return (
     <div className="min-h-screen flex bg-slate-400/80">
@@ -394,26 +391,23 @@ export default function RegisterPage() {
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors">
-                            <SelectValue placeholder={availLoading ? 'Loading...' : 'Select'} />
+                            <SelectValue placeholder={gymDbSessionsLoading ? 'Loading...' : 'Select'} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent className="z-[9999] bg-white">
-                          {availLoading ? (
+                          {gymDbSessionsLoading ? (
                             <SelectItem value="__loading__" disabled>
                               Loading...
                             </SelectItem>
-                          ) : availabilities.length > 0 ? (
-                            availabilities.map((av) => (
-                              <SelectItem
-                                key={av.time_start}
-                                value={String(
-                                  sessions?.find((s) => s.time_start.slice(0, 5) === av.time_start)?.id || ''
-                                )}
-                                onClick={() => setSelectedAvailTime(av.time_start)}
-                              >
-                                {av.session_label}
-                              </SelectItem>
-                            ))
+                          ) : (gymDbSessions?.length ?? 0) > 0 ? (
+                            (gymDbSessions || [])
+                              .slice()
+                              .sort((a, b) => a.time_start.localeCompare(b.time_start))
+                              .map((s) => (
+                                <SelectItem key={sessionKey(s)} value={sessionKey(s)}>
+                                  {displaySessionName(s.session_name)}
+                                </SelectItem>
+                              ))
                           ) : (
                             <SelectItem value="__empty__" disabled>
                               No sessions available
@@ -429,29 +423,16 @@ export default function RegisterPage() {
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Time</div>
                   <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
-                    {selectedAvailTime
-                      ? (() => {
-                          const av = availabilities.find((a) => a.time_start === selectedAvailTime);
-                          const end = av ? endFor(av.session_label) : null;
-                          return end ? `${selectedAvailTime} - ${end}` : selectedAvailTime;
-                        })()
-                      : selectedSession
-                        ? `${selectedSession.time_start.slice(0, 5)} - ${selectedSession.time_end.slice(0, 5)}`
-                        : '-'}
+                    {selectedGymDbSession
+                      ? `${selectedGymDbSession.time_start} - ${timeEndForSession(selectedGymDbSession)}`
+                      : '-'}
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Available</div>
                   <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
-                    {selectedAvailTime
-                      ? (() => {
-                          const av = availabilities.find((a) => a.time_start === selectedAvailTime);
-                          return av ? `${av.available} / ${av.quota}` : '-';
-                        })()
-                      : selectedSession
-                        ? `${(selectedSession.quota ?? 0) - (selectedSession.booked_count ?? 0)} / ${selectedSession.quota}`
-                        : '-'}
+                    {selectedGymDbSession ? String(selectedGymDbSession.quota) : '-'}
                   </div>
                 </div>
               </div>

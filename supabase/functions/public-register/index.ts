@@ -8,6 +8,24 @@ const corsHeaders = {
 
 const JAKARTA_OFFSET_MINUTES = 7 * 60;
 
+function parseGymDbSessionId(sessionId: string) {
+  const idx = sessionId.lastIndexOf("__");
+  if (idx <= 0) return null;
+  const session_name = sessionId.slice(0, idx).trim();
+  const time_start = sessionId.slice(idx + 2).trim();
+  if (!session_name || !time_start) return null;
+  if (!/^\d{2}:\d{2}$/.test(time_start)) return null;
+  return { session_name, time_start };
+}
+
+function parseSessionQuota(raw: unknown): number | null {
+  const n = typeof raw === "string" ? Number(raw) : typeof raw === "number" ? raw : NaN;
+  if (!Number.isFinite(n)) return null;
+  const q = Math.floor(n);
+  if (q < 1 || q > 1000) return null;
+  return q;
+}
+
 function getAdminClient() {
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -57,6 +75,9 @@ serve(async (req) => {
     const sessionId = String(body.sessionId ?? "").trim();
     const date = String(body.date ?? "").trim();
 
+    const parsedGymDb = parseGymDbSessionId(sessionId);
+    const sessionQuota = parseSessionQuota(body?.session?.quota);
+
     if (!employeeId) {
       return new Response(JSON.stringify({ ok: false, error: "Employee ID is required" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -69,6 +90,18 @@ serve(async (req) => {
     }
     if (!sessionId) {
       return new Response(JSON.stringify({ ok: false, error: "Session is required" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!parsedGymDb) {
+      return new Response(JSON.stringify({ ok: false, error: "Invalid session" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!sessionQuota) {
+      return new Response(JSON.stringify({ ok: false, error: "Invalid session quota" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -112,25 +145,7 @@ serve(async (req) => {
       });
     }
 
-    const { data: session, error: sessionError } = await supabase
-      .from("gym_sessions")
-      .select("id, session_name, time_start, quota")
-      .eq("id", sessionId)
-      .maybeSingle();
-
-    if (sessionError) {
-      return new Response(JSON.stringify({ ok: false, error: sessionError.message }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    if (!session) {
-      return new Response(JSON.stringify({ ok: false, error: "Session not found" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const scheduleTimeIso = buildScheduleTimeIso(dateParts, session.time_start);
+    const scheduleTimeIso = buildScheduleTimeIso(dateParts, parsedGymDb.time_start);
     if (!scheduleTimeIso) {
       return new Response(JSON.stringify({ ok: false, error: "Invalid session time" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -169,7 +184,7 @@ serve(async (req) => {
       });
     }
 
-    if ((bookingCount ?? 0) >= session.quota) {
+    if ((bookingCount ?? 0) >= sessionQuota) {
       return new Response(JSON.stringify({ ok: false, error: "This session is full" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -190,7 +205,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, sessionName: session.session_name, schedule_time: scheduleTimeIso }),
+      JSON.stringify({ ok: true, sessionName: parsedGymDb.session_name, schedule_time: scheduleTimeIso }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       },

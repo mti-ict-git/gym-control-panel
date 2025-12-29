@@ -42,9 +42,10 @@ function getDateRange(range: DateRange, customStart?: Date, customEnd?: Date): {
   switch (range) {
     case 'today':
       return { start: startOfDay(now), end: endOfDay(now) };
-    case 'yesterday':
+    case 'yesterday': {
       const yesterday = subDays(now, 1);
       return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
+    }
     case 'week':
       return { start: startOfWeek(now, { weekStartsOn: 1 }), end: endOfWeek(now, { weekStartsOn: 1 }) };
     case 'month':
