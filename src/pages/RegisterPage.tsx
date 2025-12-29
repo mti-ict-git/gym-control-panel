@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format, addDays, startOfDay } from 'date-fns';
-import { CalendarIcon, Loader2 } from 'lucide-react';
+import { CalendarIcon, Loader2, Clock, MapPin, AlertTriangle, Users } from 'lucide-react';
 import gymIcon from '@/assets/gym-icon.png';
 import treadmillImg from '@/assets/treadmill.png';
 import benchPressImg from '@/assets/bench-press.png';
@@ -113,43 +113,52 @@ export default function RegisterPage() {
 
   const hasSessions = (sessions?.length ?? 0) > 0;
 
+  // Calculate slots remaining
+  const slotsRemaining = selectedSession
+    ? (selectedSession.quota ?? 0) - (selectedSession.booked_count ?? 0)
+    : 15;
+  const maxSlots = selectedSession?.quota ?? 15;
+  const progressPercentage = ((maxSlots - slotsRemaining) / maxSlots) * 100;
+
   return (
-    <div className="min-h-screen flex bg-slate-400/80">
+    <div className="min-h-screen flex bg-gradient-to-br from-slate-300 via-slate-200 to-slate-300">
       {/* Left Panel - Decorative */}
       <div className="hidden lg:flex lg:w-1/2 p-6">
-        <div className="w-full bg-slate-100 rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden">
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-72 h-72 border border-slate-300 rounded-full absolute" />
-            <div className="w-96 h-96 border border-slate-300 rounded-full absolute" />
-            <div className="w-[28rem] h-[28rem] border border-slate-200 rounded-full absolute" />
+        <div className="w-full bg-slate-100 rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden shadow-lg">
+          {/* Floating circles */}
+          <div className="absolute top-8 left-12 w-8 h-8 bg-green-400 rounded-full flex items-center justify-center shadow-md">
+            <span className="text-white text-xs">−</span>
+          </div>
+          <div className="absolute top-8 right-32 w-8 h-8 bg-amber-400 rounded-full flex items-center justify-center shadow-md">
+            <span className="text-amber-900 text-xs">💪</span>
+          </div>
+          <div className="absolute bottom-28 left-16 w-8 h-8 bg-blue-400 rounded-full flex items-center justify-center shadow-md">
+            <span className="text-white text-xs">#</span>
+          </div>
+          <div className="absolute bottom-28 right-20 w-8 h-8 bg-purple-400 rounded-full flex items-center justify-center shadow-md">
+            <span className="text-white text-xs">●</span>
           </div>
 
-          <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
-            💪
-          </div>
-          <div className="absolute bottom-32 left-20 w-10 h-10 bg-blue-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-            🏋️
-          </div>
-          <div className="absolute top-40 left-28 w-10 h-10 bg-green-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-            ⚡
-          </div>
-          <div className="absolute bottom-40 right-28 w-10 h-10 bg-purple-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-            🎯
+          {/* Concentric circles */}
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-64 h-64 border border-slate-300/60 rounded-full absolute" />
+            <div className="w-80 h-80 border border-slate-300/40 rounded-full absolute" />
+            <div className="w-96 h-96 border border-slate-200/30 rounded-full absolute" />
           </div>
 
           {/* Spacer */}
           <div className="flex-1" />
 
           {/* Carousel - Centered on circles */}
-          <div className="absolute inset-0 flex items-center justify-center z-10">
+          <div className="absolute inset-0 flex items-center justify-center z-10" style={{ marginTop: '-40px' }}>
             <div className="flex flex-col items-center">
-              <div className="w-72 h-72 flex items-center justify-center relative">
+              <div className="w-56 h-56 flex items-center justify-center relative">
                 {carouselImages.map((img, idx) => (
                   <img
                     key={idx}
                     src={img}
                     alt={`Fitness ${idx + 1}`}
-                    className={`absolute w-64 h-64 object-contain transition-all duration-500 ${
+                    className={`absolute w-48 h-48 object-contain transition-all duration-500 ${
                       idx === currentSlide
                         ? 'opacity-100 scale-100'
                         : 'opacity-0 scale-95'
@@ -163,17 +172,19 @@ export default function RegisterPage() {
           {/* Spacer */}
           <div className="flex-1" />
 
-          <div className="relative z-10 text-center">
-            <h1 className="text-2xl font-semibold text-slate-800 mb-3">
+          <div className="relative z-10 text-center mt-8">
+            <h1 className="text-xl font-semibold text-slate-800 mb-2">
               Book your gym session
               <br />
               quick and easy.
             </h1>
             <p className="text-slate-500 text-sm max-w-xs mx-auto">
-              Reserve your spot for tomorrow or the next day. Stay fit, stay healthy!
+              Reserve your spot for tomorrow or the next day.
+              <br />
+              Stay fit, stay healthy!
             </p>
 
-            <div className="flex justify-center gap-2 mt-8">
+            <div className="flex justify-center gap-2 mt-6">
               {carouselImages.map((_, idx) => (
                 <button
                   key={idx}
@@ -181,7 +192,7 @@ export default function RegisterPage() {
                   className={`w-2 h-2 rounded-full transition-all duration-300 ${
                     idx === currentSlide
                       ? 'bg-slate-800'
-                      : 'bg-slate-300 hover:bg-slate-400'
+                      : 'bg-slate-400 hover:bg-slate-500'
                   }`}
                   aria-label={`Go to slide ${idx + 1}`}
                 />
@@ -191,31 +202,71 @@ export default function RegisterPage() {
         </div>
       </div>
 
-      {/* Right Panel - Form */}
-      <div className="w-full lg:w-1/2 p-6 flex items-center justify-center">
-        <div className="w-full max-w-lg bg-white rounded-3xl p-10 lg:p-14 shadow-xl">
-          <div className="flex lg:hidden justify-center mb-6">
-            <img src={gymIcon} alt="Gym" className="w-20 h-20 object-contain" />
+      {/* Right Panel - Form & Info */}
+      <div className="w-full lg:w-1/2 p-6 flex flex-col items-center justify-center gap-4 relative">
+        {/* Circular Progress Indicator - Desktop only */}
+        <div className="hidden lg:flex absolute top-8 right-8 flex-col items-center">
+          <div className="relative w-28 h-28">
+            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+              {/* Background circle */}
+              <circle
+                cx="50"
+                cy="50"
+                r="42"
+                fill="none"
+                stroke="#e2e8f0"
+                strokeWidth="8"
+              />
+              {/* Progress circle */}
+              <circle
+                cx="50"
+                cy="50"
+                r="42"
+                fill="none"
+                stroke="url(#gradient)"
+                strokeWidth="8"
+                strokeLinecap="round"
+                strokeDasharray={`${(slotsRemaining / maxSlots) * 264} 264`}
+              />
+              <defs>
+                <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#38bdf8" />
+                  <stop offset="100%" stopColor="#1e40af" />
+                </linearGradient>
+              </defs>
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-2xl font-bold text-slate-800">{slotsRemaining}</span>
+              <span className="text-slate-400 text-sm">/ {maxSlots}</span>
+            </div>
+          </div>
+          <span className="text-slate-500 text-sm mt-1">Slots remaining</span>
+        </div>
+
+        {/* Main Form Card */}
+        <div className="w-full max-w-md bg-white rounded-2xl p-8 shadow-xl">
+          <div className="flex lg:hidden justify-center mb-4">
+            <img src={gymIcon} alt="Gym" className="w-16 h-16 object-contain" />
           </div>
 
-          <div className="text-center mb-8">
-            <h2 className="text-2xl font-semibold text-slate-900">Gym Booking</h2>
+          <div className="text-center mb-6">
+            <h2 className="text-xl font-semibold text-slate-900">Gym Booking</h2>
             <p className="text-slate-500 text-sm mt-1">Register for a gym session</p>
           </div>
 
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
                 control={form.control}
                 name="employeeId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-slate-700">Employee ID</FormLabel>
+                    <FormLabel className="text-slate-700 text-sm">Employee ID</FormLabel>
                     <FormControl>
                       <Input
                         placeholder="Enter your Employee ID"
                         {...field}
-                        className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors"
+                        className="h-11 rounded-lg border-slate-200 bg-slate-50 focus:bg-white transition-colors"
                       />
                     </FormControl>
                     <FormMessage />
@@ -228,14 +279,14 @@ export default function RegisterPage() {
                 name="date"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
-                    <FormLabel className="text-slate-700">Date</FormLabel>
+                    <FormLabel className="text-slate-700 text-sm">Date</FormLabel>
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
                           <Button
                             variant="outline"
                             className={cn(
-                              'h-12 w-full rounded-xl border-slate-200 bg-slate-50 hover:bg-white pl-3 text-left font-normal transition-colors',
+                              'h-11 w-full rounded-lg border-slate-200 bg-slate-50 hover:bg-white pl-3 text-left font-normal transition-colors',
                               !field.value && 'text-muted-foreground'
                             )}
                           >
@@ -265,17 +316,17 @@ export default function RegisterPage() {
                 )}
               />
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-3 gap-3">
                 <FormField
                   control={form.control}
                   name="sessionId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-slate-700">Session</FormLabel>
+                      <FormLabel className="text-slate-700 text-sm">Session</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
-                          <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors">
-                            <SelectValue placeholder={sessionsLoading ? 'Loading...' : 'Select'} />
+                          <SelectTrigger className="h-11 rounded-lg border-slate-200 bg-slate-50 focus:bg-white transition-colors">
+                            <SelectValue placeholder={sessionsLoading ? '...' : 'Select'} />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent className="z-[9999] bg-white">
@@ -291,7 +342,7 @@ export default function RegisterPage() {
                             ))
                           ) : (
                             <SelectItem value="__empty__" disabled>
-                              No sessions available
+                              No sessions
                             </SelectItem>
                           )}
                         </SelectContent>
@@ -302,19 +353,19 @@ export default function RegisterPage() {
                 />
 
                 <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Time</div>
-                  <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
+                  <div className="text-sm font-medium text-slate-700">Time</div>
+                  <div className="flex h-11 w-full items-center justify-center rounded-lg border border-slate-200 bg-slate-100 px-2 text-sm text-slate-500">
                     {selectedSession
-                      ? `${selectedSession.time_start.slice(0, 5)} - ${selectedSession.time_end.slice(0, 5)}`
+                      ? `${selectedSession.time_start.slice(0, 5)}`
                       : '-'}
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Available</div>
-                  <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
+                  <div className="text-sm font-medium text-slate-700">Available</div>
+                  <div className="flex h-11 w-full items-center justify-center rounded-lg border border-slate-200 bg-slate-100 px-2 text-sm text-slate-500">
                     {selectedSession
-                      ? `${(selectedSession.quota ?? 0) - (selectedSession.booked_count ?? 0)} / ${selectedSession.quota}`
+                      ? `${slotsRemaining}`
                       : '-'}
                   </div>
                 </div>
@@ -322,7 +373,7 @@ export default function RegisterPage() {
 
               <Button
                 type="submit"
-                className="w-full h-12 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-900 font-semibold shadow-md"
+                className="w-full h-11 rounded-lg bg-amber-400 hover:bg-amber-500 text-slate-900 font-semibold shadow-md mt-2"
                 disabled={isSubmitting}
               >
                 {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -330,6 +381,35 @@ export default function RegisterPage() {
               </Button>
             </form>
           </Form>
+        </div>
+
+        {/* Session Info Card */}
+        <div className="w-full max-w-md bg-white rounded-2xl p-5 shadow-lg">
+          <h3 className="text-base font-semibold text-slate-900 mb-3">Session Info</h3>
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-3 text-sm text-slate-600">
+              <Clock className="w-4 h-4 text-slate-400" />
+              <span>Session Schedule: {selectedSession ? `${selectedSession.time_start.slice(0, 5)} - ${selectedSession.time_end.slice(0, 5)}` : '08:00 - 20:00'}</span>
+            </div>
+            <div className="flex items-center gap-3 text-sm text-slate-600">
+              <Users className="w-4 h-4 text-slate-400" />
+              <span>Max Capacity: {maxSlots} people</span>
+            </div>
+            <div className="flex items-center gap-3 text-sm text-slate-600">
+              <MapPin className="w-4 h-4 text-slate-400" />
+              <span>Location: MTI Gym</span>
+            </div>
+            <div className="flex items-center gap-3 text-sm text-amber-600">
+              <AlertTriangle className="w-4 h-4" />
+              <span>Late arrival &gt;10 min = auto cancel</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile slots indicator */}
+        <div className="lg:hidden flex items-center gap-2 text-slate-500 text-sm">
+          <span className="font-semibold text-slate-800">{slotsRemaining}</span>
+          <span>/ {maxSlots} Slots remaining</span>
         </div>
       </div>
     </div>
