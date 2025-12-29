@@ -5,6 +5,7 @@ export interface VaultUser {
   employee_id: string;
   name: string;
   department: string | null;
+  gender: string | null;
   status: 'BOOKED' | 'IN_GYM' | 'OUT';
   card_no: string | null;
 }
@@ -23,6 +24,7 @@ type GymDbBookingRow = {
   card_no: string | null;
   employee_name: string;
   department: string | null;
+  gender: string | null;
   booking_date: string;
   status: string;
   time_start: string | null;
@@ -76,11 +78,18 @@ export function useVaultUsers() {
           const rawStatus = String(r.status || '').toUpperCase();
           const mappedStatus: VaultUser['status'] =
             rawStatus === 'BOOKED' ? 'BOOKED' : rawStatus === 'CHECKIN' ? 'IN_GYM' : 'OUT';
+
+          const rawGender = r.gender != null ? String(r.gender).trim() : null;
+          let mappedGender = rawGender;
+          if (rawGender === 'M') mappedGender = 'Male';
+          else if (rawGender === 'F') mappedGender = 'Female';
+
           return {
             schedule_time,
             employee_id: String(r.employee_id || '').trim(),
             name: String(r.employee_name || '').trim(),
             department: r.department != null ? String(r.department).trim() : null,
+            gender: mappedGender,
             card_no: r.card_no != null ? String(r.card_no).trim() : null,
             status: mappedStatus,
           } satisfies VaultUser;

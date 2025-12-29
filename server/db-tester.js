@@ -809,6 +809,13 @@ app.post('/gym-booking-create', async (req, res) => {
     MASTER_DB_PASSWORD,
     MASTER_DB_ENCRYPT,
     MASTER_DB_TRUST_SERVER_CERTIFICATE,
+    CARD_DB_SERVER,
+    CARD_DB_PORT,
+    CARD_DB_DATABASE,
+    CARD_DB_USER,
+    CARD_DB_PASSWORD,
+    CARD_DB_ENCRYPT,
+    CARD_DB_TRUST_SERVER_CERTIFICATE,
   } = process.env;
 
   const gymServer = envTrim(DB_SERVER);
@@ -828,12 +835,16 @@ app.post('/gym-booking-create', async (req, res) => {
   }
 
   const { employee_id, session_id, booking_date } = req.body || {};
-  const employeeId = String(employee_id || '').trim();
+  const employeeIdHeader = envTrim(req.headers['x-employee-id'] || req.headers['x-employee_id']);
+  const employeeId = String(employee_id || employeeIdHeader || '').trim();
   const sessionId = String(session_id || '').trim();
   const bookingDateStr = String(booking_date || '').trim();
 
   if (!employeeId || !sessionId || !bookingDateStr) {
-    return res.status(400).json({ ok: false, error: 'employee_id, session_id, booking_date are required' });
+    return res.status(400).json({
+      ok: false,
+      error: 'employee_id (body or x-employee-id header), session_id, booking_date are required',
+    });
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDateStr)) {
     return res.status(400).json({ ok: false, error: 'booking_date must be yyyy-MM-dd' });
@@ -879,6 +890,106 @@ app.post('/gym-booking-create', async (req, res) => {
       if (hit) return hit;
     }
     return null;
+  };
+
+  const pickSchemaForTable = async (pool, tableName) => {
+    const safe = String(tableName || '').trim();
+    if (!/^[A-Za-z0-9_]+$/.test(safe)) return null;
+    const req = pool.request();
+    req.input('tableName', sql.VarChar(128), safe);
+    const r = await req.query(`
+      SELECT TOP 1 TABLE_SCHEMA AS schema_name
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_NAME = @tableName
+      ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA
+    `);
+    const schemaName = r?.recordset?.[0]?.schema_name ? String(r.recordset[0].schema_name) : null;
+    return schemaName && schemaName.trim().length > 0 ? schemaName : null;
+  };
+
+  const tryLoadActiveCardNo = async (empId) => {
+    const cardServer = envTrim(CARD_DB_SERVER);
+    const cardDatabase = envTrim(CARD_DB_DATABASE);
+    const cardUser = envTrim(CARD_DB_USER);
+    const cardPassword = envTrim(CARD_DB_PASSWORD);
+
+    if (!cardServer || !cardDatabase || !cardUser || !cardPassword) return null;
+
+    const cardConfig = {
+      server: cardServer,
+      port: Number(CARD_DB_PORT || 1433),
+      database: cardDatabase,
+      user: cardUser,
+      password: cardPassword,
+      options: {
+        encrypt: String(CARD_DB_ENCRYPT || 'false').toLowerCase() === 'true',
+        trustServerCertificate: String(CARD_DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
+      },
+      pool: { max: 1, min: 0, idleTimeoutMillis: 5000 },
+    };
+
+    const tableCandidates = ['employee_card', 'employee_cards', 'cards', 'card'];
+
+    let pool;
+    try {
+      pool = await sql.connect(cardConfig);
+      const tableResult = await pool.request().query(`
+        SELECT TOP 1 TABLE_SCHEMA AS schema_name, TABLE_NAME AS table_name
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_TYPE = 'BASE TABLE'
+          AND TABLE_NAME IN (${tableCandidates.map((t) => `'${t}'`).join(', ')})
+        ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA
+      `);
+      const row = tableResult?.recordset?.[0] || null;
+      if (!row?.schema_name || !row?.table_name) {
+        await pool.close();
+        return null;
+      }
+
+      const schema = String(row.schema_name);
+      const table = String(row.table_name);
+
+      const colsResult = await pool.request().query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = '${schema.replace(/'/g, "''")}'
+          AND TABLE_NAME = '${table.replace(/'/g, "''")}'
+      `);
+      const cols = (colsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
+      const empCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID']);
+      const cardCol = pickColumn(cols, ['card_no', 'CardNo', 'card_number', 'CardNumber', 'id_card', 'IDCard']);
+      const activeCol = pickColumn(cols, ['is_active', 'IsActive', 'active', 'Active', 'status', 'Status']);
+
+      if (!empCol || !cardCol) {
+        await pool.close();
+        return null;
+      }
+
+      const req = pool.request();
+      req.input('id', sql.VarChar(100), String(empId));
+
+      const activeWhere = activeCol
+        ? `AND (\n          [${activeCol}] = 1\n          OR UPPER(CAST([${activeCol}] AS varchar(50))) IN ('ACTIVE','AKTIF','1','TRUE')\n        )`
+        : '';
+
+      const cardResult = await req.query(`
+        SELECT TOP 1
+          [${cardCol}] AS card_no
+        FROM [${schema}].[${table}]
+        WHERE [${empCol}] = @id
+        ${activeWhere}
+      `);
+      await pool.close();
+
+      const cardNo = cardResult?.recordset?.[0]?.card_no;
+      return cardNo != null ? String(cardNo).trim() : null;
+    } catch (_) {
+      try {
+        if (pool) await pool.close();
+      } catch (_) {
+      }
+      return null;
+    }
   };
 
   try {
@@ -941,21 +1052,20 @@ app.post('/gym-booking-create', async (req, res) => {
     await gymPool.close();
 
     const masterPool = await sql.connect(masterConfig);
-    const schemaResult = await masterPool.request().query(`
-      SELECT TOP 1 TABLE_SCHEMA AS schema_name
-      FROM INFORMATION_SCHEMA.TABLES
-      WHERE TABLE_NAME = 'employee_core'
-      ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA
-    `);
-    const schema = schemaResult?.recordset?.[0]?.schema_name ? String(schemaResult.recordset[0].schema_name) : 'dbo';
-    const colReq = masterPool.request();
-    colReq.input('schema', sql.VarChar(128), schema);
-    const columnsResult = await colReq.query(`
+
+    const coreSchema = await pickSchemaForTable(masterPool, 'employee_core');
+    if (!coreSchema) {
+      await masterPool.close();
+      return res.status(200).json({ ok: false, error: 'Missing table employee_core' });
+    }
+
+    const columnsResult = await masterPool.request().query(`
       SELECT COLUMN_NAME
       FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'employee_core' AND TABLE_SCHEMA = @schema
+      WHERE TABLE_NAME = 'employee_core' AND TABLE_SCHEMA = '${coreSchema.replace(/'/g, "''")}'
     `);
     const columns = (columnsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
+
     const employeeIdCol = pickColumn(columns, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID']);
     const nameCol = pickColumn(columns, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
     const deptCol = pickColumn(columns, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
@@ -980,19 +1090,57 @@ app.post('/gym-booking-create', async (req, res) => {
     const empResult = await empReq.query(`
       SELECT TOP 1
         ${selectCols}
-      FROM [${schema}].[employee_core]
+      FROM [${coreSchema}].[employee_core]
       WHERE [${employeeIdCol}] = @id
     `);
-    await masterPool.close();
 
     const empRow = Array.isArray(empResult?.recordset) ? empResult.recordset[0] : null;
     if (!empRow) {
+      await masterPool.close();
       return res.status(200).json({ ok: false, error: 'Employee not found' });
     }
 
+    let department = empRow.department != null ? String(empRow.department).trim() : '';
+    const employmentSchema = await pickSchemaForTable(masterPool, 'employee_employment');
+    if (employmentSchema) {
+      const empColsResult = await masterPool.request().query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'employee_employment' AND TABLE_SCHEMA = '${employmentSchema.replace(/'/g, "''")}'
+      `);
+      const empCols = (empColsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
+      const empIdCol2 = pickColumn(empCols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID']);
+      const deptCol2 = pickColumn(empCols, ['department', 'Department', 'dept', 'Dept', 'department_name', 'DepartmentName', 'dept_name', 'DeptName']);
+      const endDateCol = pickColumn(empCols, ['end_date', 'EndDate', 'enddate', 'termination_date', 'TerminationDate']);
+      const startDateCol = pickColumn(empCols, ['start_date', 'StartDate', 'startdate', 'effective_date', 'EffectiveDate']);
+
+      if (empIdCol2 && deptCol2) {
+        const empReq2 = masterPool.request();
+        empReq2.input('id', sql.VarChar(100), employeeId);
+        const orderParts = [];
+        if (endDateCol) orderParts.push(`CASE WHEN [${endDateCol}] IS NULL THEN 0 ELSE 1 END`);
+        if (startDateCol) orderParts.push(`[${startDateCol}] DESC`);
+        const orderBy = orderParts.length > 0 ? `ORDER BY ${orderParts.join(', ')}` : '';
+        const deptResult = await empReq2.query(`
+          SELECT TOP 1
+            [${deptCol2}] AS department
+          FROM [${employmentSchema}].[employee_employment]
+          WHERE [${empIdCol2}] = @id
+          ${orderBy}
+        `);
+        const deptRow = Array.isArray(deptResult?.recordset) ? deptResult.recordset[0] : null;
+        if (deptRow?.department != null && String(deptRow.department).trim()) {
+          department = String(deptRow.department).trim();
+        }
+      }
+    }
+
+    await masterPool.close();
+
     const employeeName = String(empRow.name ?? '').trim();
-    const department = empRow.department != null ? String(empRow.department).trim() : '';
-    const cardNo = empRow.card_no != null ? String(empRow.card_no).trim() : null;
+    const cardNoMaster = empRow.card_no != null ? String(empRow.card_no).trim() : null;
+    const cardNoCardDb = await tryLoadActiveCardNo(employeeId);
+    const cardNo = cardNoCardDb || cardNoMaster;
     const gender = empRow.gender != null && String(empRow.gender).trim() ? String(empRow.gender).trim() : 'UNKNOWN';
 
     const gymPool2 = await sql.connect(gymConfig);

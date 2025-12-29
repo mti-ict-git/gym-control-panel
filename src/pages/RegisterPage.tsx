@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { useForm, FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format, addDays, startOfDay } from 'date-fns';
@@ -181,6 +181,7 @@ export default function RegisterPage() {
       form.reset();
       navigate('/gym_booking');
     } catch (error: unknown) {
+      console.error('Registration error:', error);
       toast({
         title: 'Registration failed',
         description: error instanceof Error ? error.message : 'An error occurred. Please try again.',
@@ -188,6 +189,21 @@ export default function RegisterPage() {
       });
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const onInvalid = (errors: FieldErrors<FormData>) => {
+    console.log('Validation errors:', errors);
+    const errorMessages = Object.values(errors)
+      .map((e) => e?.message)
+      .filter(Boolean);
+
+    if (errorMessages.length > 0) {
+      toast({
+        title: 'Validation Error',
+        description: errorMessages.join(', ') || 'Please check the form for errors.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -282,7 +298,7 @@ export default function RegisterPage() {
           </div>
 
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+            <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="space-y-5">
               <FormField
                 control={form.control}
                 name="employeeId"

@@ -66,6 +66,7 @@ export default function VaultPage() {
                   <TableHead className="w-12 text-right">No</TableHead>
                   <TableHead className="hidden md:table-cell">ID Card</TableHead>
                   <TableHead>Name</TableHead>
+                  <TableHead className="hidden md:table-cell">Gender</TableHead>
                   <TableHead>Employee ID</TableHead>
                   <TableHead className="hidden md:table-cell">Department</TableHead>
                   <TableHead className="hidden md:table-cell">Session</TableHead>
@@ -77,6 +78,7 @@ export default function VaultPage() {
                     <TableCell className="w-12 text-right">{index + 1}</TableCell>
                     <TableCell className="hidden md:table-cell">{user.card_no || '-'}</TableCell>
                     <TableCell className="font-medium">{user.name || '-'}</TableCell>
+                    <TableCell className="hidden md:table-cell">{user.gender || '-'}</TableCell>
                     <TableCell>{user.employee_id}</TableCell>
                     <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
                     <TableCell className="hidden md:table-cell">{sessionNameFor(user)}</TableCell>
