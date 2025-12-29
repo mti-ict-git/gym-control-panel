@@ -96,6 +96,138 @@ app.get('/employees', async (req, res) => {
   }
 });
 
+app.get('/employee-core', async (req, res) => {
+  const {
+    MASTER_DB_SERVER,
+    MASTER_DB_PORT,
+    MASTER_DB_DATABASE,
+    MASTER_DB_USER,
+    MASTER_DB_PASSWORD,
+    MASTER_DB_ENCRYPT,
+    MASTER_DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  const q = String(req.query.q || '').trim();
+  const idsRaw = String(req.query.ids || '').trim();
+  const limitRaw = Number(req.query.limit || 200);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, Math.floor(limitRaw))) : 200;
+
+  const ids = idsRaw
+    ? idsRaw
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean)
+        .slice(0, 200)
+    : [];
+
+  if (!MASTER_DB_SERVER || !MASTER_DB_DATABASE || !MASTER_DB_USER || !MASTER_DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Master DB env is not configured', employees: [] });
+  }
+
+  const config = {
+    server: MASTER_DB_SERVER,
+    port: Number(MASTER_DB_PORT || 1433),
+    database: MASTER_DB_DATABASE,
+    user: MASTER_DB_USER,
+    password: MASTER_DB_PASSWORD,
+    options: {
+      encrypt: String(MASTER_DB_ENCRYPT || 'false').toLowerCase() === 'true',
+      trustServerCertificate: String(MASTER_DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  const pickColumn = (columns, candidates) => {
+    const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
+    for (const cand of candidates) {
+      const hit = map.get(String(cand).toLowerCase());
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  try {
+    const pool = await sql.connect(config);
+
+    const schemaResult = await pool.request().query(`
+      SELECT TOP 1 TABLE_SCHEMA AS schema_name
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_NAME = 'employee_core'
+      ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA
+    `);
+
+    const schema = schemaResult?.recordset?.[0]?.schema_name ? String(schemaResult.recordset[0].schema_name) : 'dbo';
+
+    const colReq = pool.request();
+    colReq.input('schema', sql.VarChar(128), schema);
+    const columnsResult = await colReq.query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'employee_core' AND TABLE_SCHEMA = @schema
+    `);
+    const columns = (columnsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
+
+    const employeeIdCol = pickColumn(columns, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID']);
+    const nameCol = pickColumn(columns, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
+    const deptCol = pickColumn(columns, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
+    const cardCol = pickColumn(columns, ['id_card', 'ID Card', 'card_no', 'Card No', 'CardNo']);
+
+    if (!employeeIdCol || !nameCol) {
+      await pool.close();
+      return res.status(200).json({
+        ok: false,
+        error: 'employee_core must have employee_id and Name columns',
+        employees: [],
+      });
+    }
+
+    const selectCols = [
+      `[${employeeIdCol}] AS employee_id`,
+      `[${nameCol}] AS name`,
+      deptCol ? `[${deptCol}] AS department` : `CAST(NULL AS varchar(255)) AS department`,
+      cardCol ? `[${cardCol}] AS card_no` : `CAST(NULL AS varchar(255)) AS card_no`,
+    ].join(',\n        ');
+
+    const request = pool.request();
+    let whereSql = '';
+
+    if (ids.length > 0) {
+      const params = ids.map((_, idx) => `@id${idx}`);
+      ids.forEach((id, idx) => {
+        request.input(`id${idx}`, sql.VarChar(100), id);
+      });
+      whereSql = `WHERE [${employeeIdCol}] IN (${params.join(', ')})`;
+    } else if (q) {
+      request.input('qEmp', sql.VarChar(100), q + '%');
+      request.input('qName', sql.VarChar(200), q + '%');
+      whereSql = `WHERE [${employeeIdCol}] LIKE @qEmp OR [${nameCol}] LIKE @qName`;
+    }
+
+    const query = `
+      SELECT TOP (${limit})
+        ${selectCols}
+      FROM [${schema}].[employee_core]
+      ${whereSql}
+      ORDER BY [${employeeIdCol}] ASC
+    `;
+
+    const result = await request.query(query);
+    await pool.close();
+
+    const employees = (result?.recordset || []).map((row) => ({
+      employee_id: String(row.employee_id ?? '').trim(),
+      name: String(row.name ?? '').trim(),
+      department: row.department != null ? String(row.department).trim() : null,
+      card_no: row.card_no != null ? String(row.card_no).trim() : null,
+    })).filter((e) => e.employee_id);
+
+    return res.json({ ok: true, employees });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, employees: [] });
+  }
+});
+
 // GymDB availability for a given date, grouped by time (HH:MM)
 app.get('/gym-availability', async (req, res) => {
   const {
@@ -326,6 +458,144 @@ app.post('/gym-session-create', async (req, res) => {
     `);
     await pool.close();
     return res.json({ ok: true });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+app.post('/gym-session-update', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const {
+    original_session_name,
+    original_time_start,
+    session_name,
+    time_start,
+    time_end,
+    quota,
+  } = req.body || {};
+
+  if (!original_session_name || !original_time_start) {
+    return res.status(400).json({ ok: false, error: 'original_session_name and original_time_start are required' });
+  }
+  if (!session_name || !time_start || !time_end || typeof quota !== 'number') {
+    return res.status(400).json({ ok: false, error: 'session_name, time_start, time_end, quota are required' });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: String(DB_ENCRYPT || 'false').toLowerCase() === 'true',
+      trustServerCertificate: String(DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const request = pool.request();
+    request.input('original_session_name', sql.VarChar(20), String(original_session_name));
+    request.input('original_time_start', sql.VarChar(5), String(original_time_start));
+    request.input('session_name', sql.VarChar(20), String(session_name));
+    request.input('time_start', sql.VarChar(5), String(time_start));
+    request.input('time_end', sql.VarChar(5), String(time_end));
+    request.input('quota', sql.Int, Number(quota));
+
+    const result = await request.query(`
+      UPDATE dbo.gym_schedule
+      SET
+        Session = @session_name,
+        StartTime = CAST(@time_start AS time(0)),
+        EndTime = CAST(@time_end AS time(0)),
+        Quota = @quota
+      WHERE Session = @original_session_name
+        AND StartTime = CAST(@original_time_start AS time(0))
+    `);
+
+    await pool.close();
+
+    const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
+    if (affected < 1) {
+      return res.status(200).json({ ok: false, error: 'Session not found or not updated' });
+    }
+
+    return res.json({ ok: true, affected });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+app.post('/gym-session-delete', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const { session_name, time_start } = req.body || {};
+  if (!session_name || !time_start) {
+    return res.status(400).json({ ok: false, error: 'session_name and time_start are required' });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: String(DB_ENCRYPT || 'false').toLowerCase() === 'true',
+      trustServerCertificate: String(DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const request = pool.request();
+    request.input('session_name', sql.VarChar(20), String(session_name));
+    request.input('time_start', sql.VarChar(5), String(time_start));
+
+    const result = await request.query(`
+      DELETE FROM dbo.gym_schedule
+      WHERE Session = @session_name
+        AND StartTime = CAST(@time_start AS time(0))
+    `);
+
+    await pool.close();
+
+    const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
+    if (affected < 1) {
+      return res.status(200).json({ ok: false, error: 'Session not found or not deleted' });
+    }
+
+    return res.json({ ok: true, affected });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });

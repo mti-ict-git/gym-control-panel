@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Calendar as CalendarIcon, List, Plus } from 'lucide-react';
+import { Calendar as CalendarIcon, List, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useGymDbSessions, GymDbSession } from '@/hooks/useGymDbSessions';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
@@ -11,9 +11,25 @@ import { WeeklyCalendar } from '@/components/schedules/WeeklyCalendar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SessionDialog } from '@/components/schedules/SessionDialog';
 import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export default function SchedulesPage() {
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingSession, setEditingSession] = useState<GymDbSession | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingSession, setDeletingSession] = useState<GymDbSession | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const { data: sessions, isLoading, refetch } = useGymDbSessions();
   const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
@@ -30,6 +46,19 @@ export default function SchedulesPage() {
         return null;
     }
   };
+
+  const timeEndForSession = (session: GymDbSession): string =>
+    session.time_end ?? endFor(session.session_name) ?? session.time_start;
+
+  const toDialogSession = (session: GymDbSession): GymSession => ({
+    id: `gymdb-${session.session_name}-${session.time_start}`,
+    session_name: session.session_name,
+    time_start: session.time_start,
+    time_end: timeEndForSession(session),
+    quota: session.quota,
+    created_at: '',
+    updated_at: '',
+  });
 
   const calendarSessions: GymSession[] = (sessions || []).map((s: GymDbSession, idx) => {
     const timeEnd = s.time_end ?? endFor(s.session_name) ?? '00:00';
@@ -89,6 +118,7 @@ export default function SchedulesPage() {
                       <TableHead>Time Start</TableHead>
                       <TableHead>Time End</TableHead>
                       <TableHead>Quota</TableHead>
+                      <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -99,6 +129,33 @@ export default function SchedulesPage() {
                         <TableCell>{formatTime(session.time_start)}</TableCell>
                         <TableCell>{session.time_end ? formatTime(session.time_end) : '-'}</TableCell>
                         <TableCell>{session.quota}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setEditingSession(session);
+                                setEditDialogOpen(true);
+                              }}
+                              title="Edit"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => {
+                                setDeletingSession(session);
+                                setDeleteDialogOpen(true);
+                              }}
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -159,6 +216,96 @@ export default function SchedulesPage() {
         }}
         isLoading={false}
       />
+
+      <SessionDialog
+        open={editDialogOpen}
+        onOpenChange={(open) => {
+          setEditDialogOpen(open);
+          if (!open) setEditingSession(null);
+        }}
+        session={editingSession ? toDialogSession(editingSession) : null}
+        onSubmit={async (data) => {
+          if (!editingSession) return;
+          setIsSaving(true);
+          try {
+            if (!endpoint) throw new Error('DB tester endpoint is not configured');
+            const resp = await fetch(`${endpoint}/gym-session-update`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                original_session_name: editingSession.session_name,
+                original_time_start: editingSession.time_start,
+                session_name: data.session_name,
+                time_start: data.time_start,
+                time_end: data.time_end,
+                quota: data.quota,
+              }),
+            });
+            const json = await resp.json();
+            if (!json?.ok) throw new Error(json?.error || 'Failed to update session');
+            toast.success('Session updated');
+            setEditDialogOpen(false);
+            setEditingSession(null);
+            refetch();
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Failed to update session');
+          } finally {
+            setIsSaving(false);
+          }
+        }}
+        isLoading={isSaving}
+      />
+
+      <AlertDialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          setDeleteDialogOpen(open);
+          if (!open) setDeletingSession(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Session?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!deletingSession) return;
+                setIsDeleting(true);
+                try {
+                  if (!endpoint) throw new Error('DB tester endpoint is not configured');
+                  const resp = await fetch(`${endpoint}/gym-session-delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      session_name: deletingSession.session_name,
+                      time_start: deletingSession.time_start,
+                    }),
+                  });
+                  const json = await resp.json();
+                  if (!json?.ok) throw new Error(json?.error || 'Failed to delete session');
+                  toast.success('Session deleted');
+                  setDeleteDialogOpen(false);
+                  setDeletingSession(null);
+                  refetch();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Failed to delete session');
+                } finally {
+                  setIsDeleting(false);
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isDeleting}
+            >
+              {isDeleting ? 'Deleting...' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AppLayout>
   );
 }

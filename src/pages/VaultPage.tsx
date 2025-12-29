@@ -1,98 +1,33 @@
-import { Database, UserPlus, AlertCircle, Check, X } from 'lucide-react';
+import { Database, AlertCircle } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { useToast } from '@/hooks/use-toast';
 import { useVaultUsers, VaultUser } from '@/hooks/useVaultUsers';
-import { useGymUsers, useAddGymUserFromVault } from '@/hooks/useGymUsers';
+import { useGymDbSessions } from '@/hooks/useGymDbSessions';
 
-function VaultUserRow({ 
-  user, 
-  isAdded, 
-  onAdd,
-  isAdding,
-  index
-}: { 
-  user: VaultUser; 
-  isAdded: boolean;
-  onAdd: () => void;
-  isAdding: boolean;
-  index: number;
-}) {
-  const isInactive = user.status === 'INACTIVE';
-  const isDisabled = isAdded || isInactive || isAdding;
-  
-  return (
-    <TableRow>
-      <TableCell className="w-12 text-right">{index + 1}</TableCell>
-      <TableCell className="hidden md:table-cell">{user.card_no || '-'}</TableCell>
-      <TableCell className="font-medium">{user.name}</TableCell>
-      <TableCell>{user.employee_id}</TableCell>
-      <TableCell className="hidden md:table-cell">{user.department}</TableCell>
-      <TableCell className="hidden md:table-cell">{user.session || '-'}</TableCell>
-      <TableCell>
-        <div className="flex items-center gap-2">
-          {isAdded ? (
-            <Badge variant="outline" className="text-green-600 border-green-600">
-              Approved
-            </Badge>
-          ) : isInactive ? (
-            <Badge variant="secondary">
-              Inactive
-            </Badge>
-          ) : (
-            <>
-              <Button 
-                size="icon" 
-                variant="ghost"
-                className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-100" 
-                onClick={onAdd}
-                disabled={isDisabled}
-                title="Approve"
-              >
-                <Check className="h-4 w-4" />
-              </Button>
-              <Button 
-                size="icon" 
-                variant="ghost" 
-                className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-100"
-                onClick={() => {}} 
-                disabled={isAdding}
-                title="Decline"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </>
-          )}
-        </div>
-      </TableCell>
-    </TableRow>
-  );
+const JAKARTA_OFFSET_MINUTES = 7 * 60;
+
+function toJakartaHhMm(ts: string): string {
+  const d = new Date(ts);
+  const local = new Date(d.getTime() + JAKARTA_OFFSET_MINUTES * 60_000);
+  const hh = String(local.getUTCHours()).padStart(2, '0');
+  const mm = String(local.getUTCMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
 }
 
 export default function VaultPage() {
-  const { toast } = useToast();
   const { data: vaultUsers, isLoading: isLoadingVault, error: vaultError } = useVaultUsers();
-  const { data: gymUsersResult, isLoading: isLoadingGym } = useGymUsers();
-  const addFromVaultMutation = useAddGymUserFromVault();
+  const { data: gymDbSessions, isLoading: isLoadingGymDbSessions } = useGymDbSessions();
 
-  const gymUserEmployeeIds = new Set(
-    gymUsersResult?.data?.map(u => u.vault_employee_id).filter(Boolean) || []
-  );
+  const isLoading = isLoadingVault || isLoadingGymDbSessions;
 
-  const handleAddToGym = (user: VaultUser) => {
-    addFromVaultMutation.mutate({
-      vault_employee_id: user.employee_id,
-      name: user.name,
-      department: user.department,
-      employee_id: user.employee_id,
-    });
+  const timeToSessionName = new Map((gymDbSessions || []).map((s) => [s.time_start, s.session_name]));
+
+  const sessionNameFor = (user: VaultUser): string => {
+    const hhmm = toJakartaHhMm(user.schedule_time);
+    return timeToSessionName.get(hhmm) || '-';
   };
-
-  const isLoading = isLoadingVault || isLoadingGym;
 
   return (
     <AppLayout>
@@ -100,19 +35,19 @@ export default function VaultPage() {
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Database className="h-6 w-6" />
-            Vault
+            Gym Booking
           </h1>
           <p className="text-muted-foreground">
-            Employee data from Vault system. Add employees to enable gym access.
+            Booking list created from the Register page.
           </p>
         </div>
 
         {vaultError ? (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Connection Error</AlertTitle>
+            <AlertTitle>Load Error</AlertTitle>
             <AlertDescription>
-              Unable to connect to Vault API. Please check the connection and try again.
+              Unable to load booking data. Please try again.
             </AlertDescription>
           </Alert>
         ) : isLoading ? (
@@ -134,19 +69,18 @@ export default function VaultPage() {
                   <TableHead>Employee ID</TableHead>
                   <TableHead className="hidden md:table-cell">Department</TableHead>
                   <TableHead className="hidden md:table-cell">Session</TableHead>
-                  <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {vaultUsers.map((user, index) => (
-                  <VaultUserRow
-                    key={user.employee_id}
-                    user={user}
-                    index={index}
-                    isAdded={gymUserEmployeeIds.has(user.employee_id)}
-                    onAdd={() => handleAddToGym(user)}
-                    isAdding={addFromVaultMutation.isPending}
-                  />
+                  <TableRow key={`${user.employee_id}__${user.schedule_time}__${index}`}>
+                    <TableCell className="w-12 text-right">{index + 1}</TableCell>
+                    <TableCell className="hidden md:table-cell">{user.card_no || '-'}</TableCell>
+                    <TableCell className="font-medium">{user.name || '-'}</TableCell>
+                    <TableCell>{user.employee_id}</TableCell>
+                    <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
+                    <TableCell className="hidden md:table-cell">{sessionNameFor(user)}</TableCell>
+                  </TableRow>
                 ))}
               </TableBody>
             </Table>
@@ -154,9 +88,9 @@ export default function VaultPage() {
         ) : (
           <Alert>
             <AlertCircle className="h-4 w-4" />
-            <AlertTitle>No Vault Users</AlertTitle>
+            <AlertTitle>No Bookings</AlertTitle>
             <AlertDescription>
-              No employee data available from Vault.
+              No booking data available.
             </AlertDescription>
           </Alert>
         )}
