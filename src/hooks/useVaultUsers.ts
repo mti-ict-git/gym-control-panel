@@ -1,12 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 
 export interface VaultUser {
+  booking_id: number;
   schedule_time: string;
   employee_id: string;
   name: string;
   department: string | null;
   gender: string | null;
   status: 'BOOKED' | 'IN_GYM' | 'OUT';
+  approval_status: string | null;
   card_no: string | null;
 }
 
@@ -25,6 +27,7 @@ type GymDbBookingRow = {
   employee_name: string;
   department: string | null;
   gender: string | null;
+  approval_status: string | null;
   booking_date: string;
   status: string;
   time_start: string | null;
@@ -85,12 +88,14 @@ export function useVaultUsers() {
           else if (rawGender === 'F') mappedGender = 'Female';
 
           return {
+            booking_id: r.booking_id,
             schedule_time,
             employee_id: String(r.employee_id || '').trim(),
             name: String(r.employee_name || '').trim(),
             department: r.department != null ? String(r.department).trim() : null,
             gender: mappedGender,
             card_no: r.card_no != null ? String(r.card_no).trim() : null,
+            approval_status: r.approval_status != null ? String(r.approval_status).trim() : null,
             status: mappedStatus,
           } satisfies VaultUser;
         })

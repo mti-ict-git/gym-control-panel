@@ -793,6 +793,71 @@ app.get('/gym-bookings', async (req, res) => {
   }
 });
 
+app.post('/gym-booking-update-status', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const { booking_id, approval_status } = req.body || {};
+  if (!booking_id || !approval_status) {
+    return res.status(400).json({ ok: false, error: 'booking_id and approval_status are required' });
+  }
+
+  const validStatuses = ['APPROVED', 'REJECTED', 'PENDING'];
+  const statusUpper = String(approval_status).toUpperCase();
+  if (!validStatuses.includes(statusUpper)) {
+    return res.status(400).json({ ok: false, error: 'Invalid approval_status' });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: String(DB_ENCRYPT || 'false').toLowerCase() === 'true',
+      trustServerCertificate: String(DB_TRUST_SERVER_CERTIFICATE || 'true').toLowerCase() === 'true',
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const request = pool.request();
+    request.input('booking_id', sql.Int, Number(booking_id));
+    request.input('approval_status', sql.VarChar(20), statusUpper);
+
+    const result = await request.query(`
+      UPDATE dbo.gym_booking
+      SET ApprovalStatus = @approval_status
+      WHERE BookingID = @booking_id
+    `);
+
+    await pool.close();
+
+    const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
+    if (affected < 1) {
+      return res.status(200).json({ ok: false, error: 'Booking not found or not updated' });
+    }
+
+    return res.json({ ok: true, affected });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
 app.post('/gym-booking-create', async (req, res) => {
   const {
     DB_SERVER,
