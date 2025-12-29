@@ -105,11 +105,21 @@ export default function SchedulesPage() {
                 </Table>
               </div>
             ) : (
-              <EmptyState
-                icon={CalendarIcon}
-                title="No sessions found"
-                description="No session data available from GymDB yet."
-              />
+              <div className="flex items-center justify-center py-16">
+                <div className="flex flex-col items-center justify-center p-8 bg-card rounded-xl shadow-sm border max-w-md text-center">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10 mb-4">
+                    <CalendarIcon className="h-8 w-8 text-primary" />
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2">Belum ada jadwal gym</h3>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    Buat jadwal gym untuk mulai mengatur sesi dan kuota.
+                  </p>
+                  <Button onClick={() => setSessionDialogOpen(true)} className="gap-2">
+                    <Plus className="h-4 w-4" />
+                    Buat Jadwal Gym
+                  </Button>
+                </div>
+              </div>
             )}
           </TabsContent>
 
