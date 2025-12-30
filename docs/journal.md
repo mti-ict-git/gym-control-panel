@@ -387,3 +387,31 @@ Database:
 
 Verification:
 - Script output confirms updated schema.
+
+2025-12-30 21:20:55 +08:00
+
+UI:
+- Updated Reports table column label from ID to Booking ID.
+- Updated CSV export header to Booking ID.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:22:30 +08:00
+
+UI:
+- Applied themed badges for Session column on Reports: Morning (green), Afternoon (blue), Night - 1 (purple), Night - 2 (amber), fallback gray for others.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:24:25 +08:00
+
+UI:
+- Mapped gender codes in Reports: M→Male, F→Female, fallback '-'.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).

@@ -90,6 +90,53 @@ function getStatusBadge(status: string) {
   }
 }
 
+function getSessionChip(session: string | null) {
+  const s = String(session || '').trim().toLowerCase();
+  if (s === 'morning') {
+    return (
+      <span className="inline-flex items-center rounded-md bg-green-100 text-green-700 border border-green-200 px-2 py-1 text-xs font-medium">
+        Morning
+      </span>
+    );
+  }
+  if (s === 'afternoon') {
+    return (
+      <span className="inline-flex items-center rounded-md bg-blue-100 text-blue-700 border border-blue-200 px-2 py-1 text-xs font-medium">
+        Afternoon
+      </span>
+    );
+  }
+  if (s === 'night - 1' || s === 'night-1' || s === 'night1') {
+    return (
+      <span className="inline-flex items-center rounded-md bg-purple-100 text-purple-700 border border-purple-200 px-2 py-1 text-xs font-medium">
+        Night - 1
+      </span>
+    );
+  }
+  if (s === 'night - 2' || s === 'night-2' || s === 'night2') {
+    return (
+      <span className="inline-flex items-center rounded-md bg-amber-100 text-amber-700 border border-amber-200 px-2 py-1 text-xs font-medium">
+        Night - 2
+      </span>
+    );
+  }
+  if (!s) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+  return (
+    <span className="inline-flex items-center rounded-md bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 text-xs font-medium">
+      {session}
+    </span>
+  );
+}
+
+function getGenderLabel(gender: string | null) {
+  const v = String(gender || '').trim().toUpperCase();
+  if (v === 'M' || v === 'MALE') return 'Male';
+  if (v === 'F' || v === 'FEMALE') return 'Female';
+  return '-';
+}
+
 export default function ReportsPage() {
   const [dateRange, setDateRange] = useState<DateRange>('today');
   const [customStartDate, setCustomStartDate] = useState('');
@@ -134,7 +181,7 @@ export default function ReportsPage() {
   };
 
   const handleExportCSV = () => {
-    const headers = ['No', 'ID', 'Card No', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
+    const headers = ['No', 'Booking ID', 'Card No', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
     const rows = bookingData.map((record, idx) => [
       String(idx + 1),
       String(record.booking_id ?? ''),
@@ -335,7 +382,7 @@ export default function ReportsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-16">No</TableHead>
-                      <TableHead>ID</TableHead>
+                      <TableHead>Booking ID</TableHead>
                       <TableHead>Card No</TableHead>
                       <TableHead>Employee ID</TableHead>
                       <TableHead>Department</TableHead>
@@ -354,7 +401,7 @@ export default function ReportsPage() {
                         <TableCell className="font-mono text-sm">{record.card_no || '-'}</TableCell>
                         <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
                         <TableCell>{record.department || '-'}</TableCell>
-                        <TableCell>{record.gender || '-'}</TableCell>
+                        <TableCell>{getGenderLabel(record.gender)}</TableCell>
                         <TableCell className="font-mono text-sm">-</TableCell>
                         <TableCell className="font-mono text-sm">-</TableCell>
                         <TableCell className="font-mono text-sm">
@@ -362,7 +409,7 @@ export default function ReportsPage() {
                             ? `${record.time_start} - ${record.time_end}`
                             : record.time_start || '-'}
                         </TableCell>
-                        <TableCell className="font-medium">{record.session_name || '-'}</TableCell>
+                        <TableCell className="font-medium">{getSessionChip(record.session_name)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
