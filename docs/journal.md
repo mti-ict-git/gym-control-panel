@@ -387,3 +387,12 @@ Database:
 
 Verification:
 - Script output confirms updated schema.
+
+2025-12-30 21:23:01
+
+Fix:
+- Rendered AppSidebar on mobile so the sidebar trigger opens the full menu (including Live Gym).
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).

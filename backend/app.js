@@ -26,10 +26,6 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/gym-live-status', (_req, res) => {
-  res.json({ ok: true, people: [] });
-});
-
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
@@ -38,3 +34,21 @@ const PORT = process.env.PORT || 5055;
 app.listen(PORT, () => {
   console.log(`DB tester listening on http://localhost:${PORT}`);
 });
+
+const enableAutoSync = String(process.env.GYM_SYNC_ENABLE || '1').trim().toLowerCase();
+if (['1','true','yes','y'].includes(enableAutoSync)) {
+  let syncing = false;
+  setInterval(async () => {
+    if (syncing) return;
+    syncing = true;
+    try {
+      const since = new Date(Date.now() - 5 * 60 * 1000).toISOString().slice(0, 19);
+      const url = `http://localhost:${PORT}/gym-live-sync?since=${encodeURIComponent(since)}&limit=200`;
+      const r = await fetch(url);
+      await r.text();
+    } catch (_) {
+    } finally {
+      syncing = false;
+    }
+  }, 5000);
+}
