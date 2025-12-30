@@ -159,9 +159,15 @@ This journal tracks decisions, notes, and progress for the project.
     - Kept legacy monolith [server/db-tester.js](file:///c:/Scripts/Projects/gym-control-panel/server/db-tester.js) for comparison
   - Frontend routing:
     - Default route redirects to "/register" in [App.tsx](file:///c:/Scripts/Projects/gym-control-panel/src/App.tsx#L36-L40)
-  - Verification:
+- Verification:
     - Dev servers restarted successfully; backend on http://localhost:5055 and app on http://localhost:5173/
     - Typecheck passed (npx tsc --noEmit); lint shows only existing warnings
+
+- 2025-12-30 10:54:44
+  - Register route behavior:
+    - Removed automatic redirect to "/gym_booking" after successful registration.
+    - Kept success notification via toast; user remains on Register page.
+    - File: [RegisterPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/RegisterPage.tsx#L148-L193)
 
   - Documentation:
     - Added "UI UX flow" file to describe user journey, components, responsive guidelines, accessibility, sample code, and backend endpoints
