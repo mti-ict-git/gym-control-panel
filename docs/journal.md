@@ -46,3 +46,76 @@ Enhancement:
 Verification:
 - Lint: 0 errors.
 - TypeScript check: passed.
+
+2025-12-30 14:11:08 +08:00
+
+Enhancement:
+- Disabled session select until a date is chosen and added hint text.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.
+
+2025-12-30 14:13:35 +08:00
+
+Enhancement:
+- Added success popup dialog after registration with session details and booking ID.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.
+
+2025-12-30 14:21:16 +08:00
+
+Enhancement:
+- Calendar popover now auto-closes after a valid date selection.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.
+
+2025-12-30 14:26:45 +08:00
+
+Enhancement:
+- Removed success toast notification; dialog is the sole success feedback.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.
+
+2025-12-30 14:29:44 +08:00
+
+Enhancement:
+- Added contact person info in success dialog with WhatsApp quick link.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.
+
+2025-12-30 14:32:09 +08:00
+
+Enhancement:
+- Added failure popup dialog on registration errors with contact info and WhatsApp link.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.
+ 
+2025-12-30 14:34:43 +08:00
+
+Verification:
+- Ran lint: 0 errors, warnings only.
+- Ran TypeScript integrity check: passed (noEmit).
+
+UI:
+- Confirmed success toast removed; success dialog shows session details and contact.
+- Confirmed error dialog opens on failed registration with WhatsApp contact.
+
+2025-12-30 14:37:16 +08:00
+
+Enhancement:
+- Updated WhatsApp contact number in Register page to +6285852047041.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.

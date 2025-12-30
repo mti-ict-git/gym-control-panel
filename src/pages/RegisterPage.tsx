@@ -9,6 +9,7 @@ import gymIcon from '@/assets/gym-icon.png';
 import treadmillImg from '@/assets/treadmill.png';
 import benchPressImg from '@/assets/bench-press.png';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -53,6 +54,13 @@ export default function RegisterPage() {
   const [showEmpDropdown, setShowEmpDropdown] = useState(false);
   const [availability, setAvailability] = useState<Record<string, { available: number; booked: number; quota: number }>>({});
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [successOpen, setSuccessOpen] = useState(false);
+  const [successInfo, setSuccessInfo] = useState<{ bookingId: number | null; date: Date | null; sessionName: string; timeStart: string; timeEnd: string } | null>(null);
+  const [datePopoverOpen, setDatePopoverOpen] = useState(false);
+  const contactName = 'Gym Coordinator';
+  const contactPhone = '+6285852047041';
+  const [errorOpen, setErrorOpen] = useState(false);
+  const [errorInfo, setErrorInfo] = useState<string | null>(null);
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -233,11 +241,11 @@ export default function RegisterPage() {
             booking_date: format(data.date, 'yyyy-MM-dd'),
           }),
         });
-        const payload = (await resp.json()) as { ok: boolean; error?: string } | null;
+        const payload = (await resp.json()) as { ok: boolean; error?: string; booking_id?: number; schedule_id?: number } | null;
         if (resp.status >= 500) throw new Error(payload?.error || 'Server error');
         return payload;
       };
-      let payload: { ok: boolean; error?: string } | null = null;
+      let payload: { ok: boolean; error?: string; booking_id?: number; schedule_id?: number } | null = null;
       try {
         payload = await tryPost(`/api/gym-booking-create`);
       } catch (_) {
@@ -249,15 +257,26 @@ export default function RegisterPage() {
           description: payload?.error || 'An error occurred. Please try again.',
           variant: 'destructive',
         });
+        setErrorInfo(payload?.error || 'An error occurred. Please try again.');
+        setErrorOpen(true);
         return;
       }
 
       const selectedSession = selectedGymDbSession;
 
-      toast({
-        title: 'Registration successful!',
-        description: `You have been registered for ${selectedSession ? displaySessionName(selectedSession.session_name) : 'the selected session'} on ${format(data.date, 'MMMM d, yyyy')}.`,
-      });
+      
+
+      const bId = payload && typeof payload.booking_id === 'number' ? payload.booking_id : null;
+      if (selectedSession) {
+        setSuccessInfo({
+          bookingId: bId,
+          date: data.date,
+          sessionName: displaySessionName(selectedSession.session_name),
+          timeStart: selectedSession.time_start,
+          timeEnd: timeEndForSession(selectedSession),
+        });
+        setSuccessOpen(true);
+      }
 
       if (selectedDate && selectedGymDbSession) {
         const key = selectedGymDbSession.time_start;
@@ -277,11 +296,10 @@ export default function RegisterPage() {
       form.setValue('employeeId', '');
     } catch (error: unknown) {
       console.error('Registration error:', error);
-      toast({
-        title: 'Registration failed',
-        description: error instanceof Error ? error.message : 'An error occurred. Please try again.',
-        variant: 'destructive',
-      });
+      const msg = error instanceof Error ? error.message : 'An error occurred. Please try again.';
+      toast({ title: 'Registration failed', description: msg, variant: 'destructive' });
+      setErrorInfo(msg);
+      setErrorOpen(true);
     } finally {
       setIsSubmitting(false);
     }
@@ -445,7 +463,7 @@ export default function RegisterPage() {
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
                     <FormLabel className="text-slate-700">Date</FormLabel>
-                    <Popover>
+                    <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
                       <PopoverTrigger asChild>
                         <FormControl>
                           <Button
@@ -464,7 +482,10 @@ export default function RegisterPage() {
                         <Calendar
                           mode="single"
                           selected={field.value}
-                          onSelect={field.onChange}
+                          onSelect={(d) => {
+                            field.onChange(d);
+                            if (d) setDatePopoverOpen(false);
+                          }}
                           disabled={(date) => {
                             const tomorrow = startOfDay(addDays(new Date(), 1));
                             const dayAfterTomorrow = startOfDay(addDays(new Date(), 2));
@@ -517,8 +538,19 @@ export default function RegisterPage() {
                       <FormLabel className="text-slate-700">Session</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
-                          <SelectTrigger className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors">
-                            <SelectValue placeholder={gymDbSessionsLoading ? 'Loading...' : 'Select'} />
+                          <SelectTrigger
+                            disabled={!selectedDate}
+                            className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors"
+                          >
+                            <SelectValue
+                              placeholder={
+                                !selectedDate
+                                  ? 'Pick date first'
+                                  : gymDbSessionsLoading
+                                    ? 'Loading...'
+                                    : 'Select'
+                              }
+                            />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent className="z-[9999] bg-white">
@@ -541,6 +573,9 @@ export default function RegisterPage() {
                             </SelectItem>
                           )}
                         </SelectContent>
+                        {!selectedDate && (
+                          <div className="text-xs text-slate-500 mt-1">Pick a date first</div>
+                        )}
                       </Select>
                       <FormMessage />
                     </FormItem>
@@ -594,6 +629,71 @@ export default function RegisterPage() {
               </Button>
             </form>
           </Form>
+          <Dialog open={successOpen} onOpenChange={setSuccessOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Registration Successful</DialogTitle>
+                <DialogDescription>
+                  {successInfo
+                    ? `${successInfo.sessionName} on ${successInfo.date ? format(successInfo.date, 'MMMM d, yyyy') : ''} (${successInfo.timeStart} - ${successInfo.timeEnd})`
+                    : ''}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="text-sm text-slate-700">
+                {successInfo?.bookingId != null ? (
+                  <div className="mt-2">Booking ID: {successInfo.bookingId}</div>
+                ) : null}
+                <div className="mt-3 text-slate-600">
+                  Need help or want to change your booking? Contact {contactName} at {contactPhone}.
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const name = successInfo?.sessionName || 'Gym Session';
+                    const when = successInfo?.date ? format(successInfo.date, 'yyyy-MM-dd') : '';
+                    const msg = encodeURIComponent(`Hello ${contactName}, I need assistance with my booking for ${name} on ${when}.`);
+                    const phoneDigits = contactPhone.replace(/[^0-9]/g, '');
+                    window.open(`https://wa.me/${phoneDigits}?text=${msg}`, '_blank');
+                  }}
+                >
+                  Contact via WhatsApp
+                </Button>
+                <Button onClick={() => setSuccessOpen(false)} className="bg-amber-400 hover:bg-amber-500 text-slate-900">
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={errorOpen} onOpenChange={setErrorOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Registration Failed</DialogTitle>
+                <DialogDescription>{errorInfo || ''}</DialogDescription>
+              </DialogHeader>
+              <div className="text-sm text-slate-700">
+                <div className="mt-3 text-slate-600">
+                  Need assistance? Contact {contactName} at {contactPhone}.
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const msg = encodeURIComponent('Hello ' + contactName + ', I need assistance with my gym registration.');
+                    const phoneDigits = contactPhone.replace(/[^0-9]/g, '');
+                    window.open(`https://wa.me/${phoneDigits}?text=${msg}`, '_blank');
+                  }}
+                >
+                  Contact via WhatsApp
+                </Button>
+                <Button onClick={() => setErrorOpen(false)} className="bg-amber-400 hover:bg-amber-500 text-slate-900">
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     </div>
