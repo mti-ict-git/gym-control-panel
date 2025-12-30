@@ -11,11 +11,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Support both /api prefix and root-level routes to tolerate different proxy setups
 app.use('/api', testerRouter);
 app.use('/api', masterRouter);
 app.use('/api', gymRouter);
+app.use(testerRouter);
+app.use(masterRouter);
+app.use(gymRouter);
 
 app.get('/api/health', (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
