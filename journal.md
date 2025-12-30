@@ -299,3 +299,13 @@ This journal tracks decisions, notes, and progress for the project.
   - Add env overrides for source config (table/columns)
     - CARD_DB_TX_TABLE, CARD_DB_TX_SCHEMA, CARD_DB_TX_TIME_COL, CARD_DB_TX_DEVICE_COL, CARD_DB_TX_CARD_COL, CARD_DB_TX_STAFF_COL, CARD_DB_TX_EVENT_COL
   - File: [pull-transactions.js](file:///c:/Scripts/Projects/gym-control-panel/backend/scripts/pull-transactions.js)
+ 
+- 2025-12-30 14:50:15
+  - Added CardDB schema scan script for tblTransactionLive
+  - Outputs table existence, columns, indexes, row count, and candidate sources
+  - File: [scan-carddb-schema.js](file:///c:/Scripts/Projects/gym-control-panel/backend/scripts/scan-carddb-schema.js)
+
+- 2025-12-30 14:53:04
+  - Added script to fetch latest transaction from CardDB
+  - Discovers source or falls back to dbo.tblTransactionLive and prints JSON
+  - File: [get-latest-transaction.js](file:///c:/Scripts/Projects/gym-control-panel/backend/scripts/get-latest-transaction.js)
