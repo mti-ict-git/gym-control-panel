@@ -1,4 +1,4 @@
-import { Database, AlertCircle, CheckCircle, XCircle, Clock, Check, X, IdCard, Users as UsersIcon, CalendarDays } from 'lucide-react';
+import { Database, AlertCircle, CheckCircle, XCircle, Clock, Check, X, IdCard, Users as UsersIcon, CalendarDays, Lock, Unlock } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -11,11 +11,11 @@ import { useGymDbSessions } from '@/hooks/useGymDbSessions';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
-const JAKARTA_OFFSET_MINUTES = 7 * 60;
+const UTC8_OFFSET_MINUTES = 8 * 60;
 
 function toJakartaHhMm(ts: string): string {
   const d = new Date(ts);
-  const local = new Date(d.getTime() + JAKARTA_OFFSET_MINUTES * 60_000);
+  const local = new Date(d.getTime() + UTC8_OFFSET_MINUTES * 60_000);
   const hh = String(local.getUTCHours()).padStart(2, '0');
   const mm = String(local.getUTCMinutes()).padStart(2, '0');
   return `${hh}:${mm}`;
@@ -55,6 +55,36 @@ export default function VaultPage() {
   const queryClient = useQueryClient();
   const { data: vaultUsers, isLoading: isLoadingVault, error: vaultError } = useVaultUsers();
   const { data: gymDbSessions, isLoading: isLoadingGymDbSessions } = useGymDbSessions();
+
+  const toggleAccessMutation = useMutation({
+    mutationFn: async ({ employee_id, grant_access }: { employee_id: string; grant_access: boolean }) => {
+      const tryPost = async (url: string) => {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ employee_id, access: grant_access }),
+        });
+        const j = await r.json();
+        if (r.status >= 500) throw new Error(j?.error || 'Server error');
+        return j as { ok: boolean; error?: string };
+      };
+
+      let json: { ok: boolean; error?: string } = { ok: false };
+      try {
+        json = await tryPost(`/api/gym-controller-access`);
+      } catch (_) {
+        json = await tryPost(`/gym-controller-access`);
+      }
+      if (!json.ok) throw new Error(json.error || 'Failed to update controller access');
+      return json;
+    },
+    onSuccess: (_, vars) => {
+      toast.success(vars.grant_access ? 'Gym access granted' : 'Gym access disabled');
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Controller update failed');
+    },
+  });
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({ booking_id, status }: { booking_id: number; status: 'APPROVED' | 'REJECTED' }) => {
@@ -205,6 +235,26 @@ export default function VaultPage() {
                       >
                         <X className="h-4 w-4" />
                       </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                        onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: true })}
+                        disabled={toggleAccessMutation.isPending}
+                        aria-label={`Give gym access for ${user.name || user.employee_id}`}
+                      >
+                        <Unlock className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                        onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: false })}
+                        disabled={toggleAccessMutation.isPending}
+                        aria-label={`Disable gym access for ${user.name || user.employee_id}`}
+                      >
+                        <Lock className="h-4 w-4" />
+                      </Button>
                     </CardFooter>
                   </Card>
                 ))}
@@ -271,6 +321,26 @@ export default function VaultPage() {
                               title="Reject"
                             >
                               <X className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: true })}
+                              disabled={toggleAccessMutation.isPending}
+                              title="Give Access"
+                            >
+                              <Unlock className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 w-8 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                              onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: false })}
+                              disabled={toggleAccessMutation.isPending}
+                              title="Disable Access"
+                            >
+                              <Lock className="h-4 w-4" />
                             </Button>
                           </div>
                         </TableCell>
