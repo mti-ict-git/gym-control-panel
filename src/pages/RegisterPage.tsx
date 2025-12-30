@@ -57,6 +57,10 @@ export default function RegisterPage() {
   const [successOpen, setSuccessOpen] = useState(false);
   const [successInfo, setSuccessInfo] = useState<{ bookingId: number | null; date: Date | null; sessionName: string; timeStart: string; timeEnd: string } | null>(null);
   const [datePopoverOpen, setDatePopoverOpen] = useState(false);
+  const contactName = 'Gym Coordinator';
+  const contactPhone = '+6285852047041';
+  const [errorOpen, setErrorOpen] = useState(false);
+  const [errorInfo, setErrorInfo] = useState<string | null>(null);
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -253,15 +257,14 @@ export default function RegisterPage() {
           description: payload?.error || 'An error occurred. Please try again.',
           variant: 'destructive',
         });
+        setErrorInfo(payload?.error || 'An error occurred. Please try again.');
+        setErrorOpen(true);
         return;
       }
 
       const selectedSession = selectedGymDbSession;
 
-      toast({
-        title: 'Registration successful!',
-        description: `You have been registered for ${selectedSession ? displaySessionName(selectedSession.session_name) : 'the selected session'} on ${format(data.date, 'MMMM d, yyyy')}.`,
-      });
+      
 
       const bId = payload && typeof payload.booking_id === 'number' ? payload.booking_id : null;
       if (selectedSession) {
@@ -293,11 +296,10 @@ export default function RegisterPage() {
       form.setValue('employeeId', '');
     } catch (error: unknown) {
       console.error('Registration error:', error);
-      toast({
-        title: 'Registration failed',
-        description: error instanceof Error ? error.message : 'An error occurred. Please try again.',
-        variant: 'destructive',
-      });
+      const msg = error instanceof Error ? error.message : 'An error occurred. Please try again.';
+      toast({ title: 'Registration failed', description: msg, variant: 'destructive' });
+      setErrorInfo(msg);
+      setErrorOpen(true);
     } finally {
       setIsSubmitting(false);
     }
@@ -641,9 +643,52 @@ export default function RegisterPage() {
                 {successInfo?.bookingId != null ? (
                   <div className="mt-2">Booking ID: {successInfo.bookingId}</div>
                 ) : null}
+                <div className="mt-3 text-slate-600">
+                  Need help or want to change your booking? Contact {contactName} at {contactPhone}.
+                </div>
               </div>
               <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const name = successInfo?.sessionName || 'Gym Session';
+                    const when = successInfo?.date ? format(successInfo.date, 'yyyy-MM-dd') : '';
+                    const msg = encodeURIComponent(`Hello ${contactName}, I need assistance with my booking for ${name} on ${when}.`);
+                    const phoneDigits = contactPhone.replace(/[^0-9]/g, '');
+                    window.open(`https://wa.me/${phoneDigits}?text=${msg}`, '_blank');
+                  }}
+                >
+                  Contact via WhatsApp
+                </Button>
                 <Button onClick={() => setSuccessOpen(false)} className="bg-amber-400 hover:bg-amber-500 text-slate-900">
+                  Close
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={errorOpen} onOpenChange={setErrorOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Registration Failed</DialogTitle>
+                <DialogDescription>{errorInfo || ''}</DialogDescription>
+              </DialogHeader>
+              <div className="text-sm text-slate-700">
+                <div className="mt-3 text-slate-600">
+                  Need assistance? Contact {contactName} at {contactPhone}.
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const msg = encodeURIComponent('Hello ' + contactName + ', I need assistance with my gym registration.');
+                    const phoneDigits = contactPhone.replace(/[^0-9]/g, '');
+                    window.open(`https://wa.me/${phoneDigits}?text=${msg}`, '_blank');
+                  }}
+                >
+                  Contact via WhatsApp
+                </Button>
+                <Button onClick={() => setErrorOpen(false)} className="bg-amber-400 hover:bg-amber-500 text-slate-900">
                   Close
                 </Button>
               </DialogFooter>
