@@ -215,3 +215,21 @@ Database:
 
 Notes:
 - Table creation is idempotent; route can be re-run safely.
+
+2025-12-30 15:37:16 +08:00
+
+Enhancement:
+- Adjusted Reports page columns to: No, Booking ID, Card No, Employee ID, Department, Gender, Session, Time In, Time Out.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 15:43:20 +08:00
+
+Enhancement:
+- Renamed Gym Booking page column label from "Time" to "Time Schedule" (desktop table and mobile card label).
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).

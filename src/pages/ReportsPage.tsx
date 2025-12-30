@@ -39,6 +39,7 @@ interface AttendanceRecord {
 interface BookingRecord {
   booking_id: number;
   employee_id: string;
+  card_no: string | null;
   department: string | null;
   gender: string | null;
   session_name: string;
@@ -172,10 +173,11 @@ export default function ReportsPage() {
   };
 
   const handleExportCSV = () => {
-    const headers = ['No', 'ID Booking', 'Employee ID', 'Department', 'Gender', 'Session', 'Time In', 'Time Out'];
+    const headers = ['No', 'Booking ID', 'Card No', 'Employee ID', 'Department', 'Gender', 'Session', 'Time In', 'Time Out'];
     const rows = bookingData.map((record, idx) => [
       String(idx + 1),
       String(record.booking_id ?? ''),
+      String(record.card_no ?? ''),
       String(record.employee_id ?? ''),
       String(record.department ?? ''),
       String(record.gender ?? ''),
@@ -369,7 +371,8 @@ export default function ReportsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-16">No</TableHead>
-                      <TableHead>ID Booking</TableHead>
+                      <TableHead>Booking ID</TableHead>
+                      <TableHead>Card No</TableHead>
                       <TableHead>Employee ID</TableHead>
                       <TableHead>Department</TableHead>
                       <TableHead>Gender</TableHead>
@@ -383,6 +386,7 @@ export default function ReportsPage() {
                       <TableRow key={`${record.booking_id}-${idx}`}>
                         <TableCell className="font-mono text-sm">{idx + 1}</TableCell>
                         <TableCell className="font-mono text-sm">{record.booking_id}</TableCell>
+                        <TableCell className="font-mono text-sm">{record.card_no || '-'}</TableCell>
                         <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
                         <TableCell>{record.department || '-'}</TableCell>
                         <TableCell>{record.gender || '-'}</TableCell>

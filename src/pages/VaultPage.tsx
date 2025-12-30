@@ -157,7 +157,7 @@ export default function VaultPage() {
                           <div><SessionBadge name={sessionNameFor(user)} /></div>
                         </div>
                         <div className="col-span-6">
-                          <div className="text-muted-foreground">Time</div>
+                          <div className="text-muted-foreground">Time Schedule</div>
                           <div>{user.time_start && user.time_end ? `${user.time_start} - ${user.time_end}` : user.time_start || '-'}</div>
                         </div>
                         <div className="col-span-6">
@@ -224,7 +224,7 @@ export default function VaultPage() {
                       <TableHead>Employee ID</TableHead>
                       <TableHead className="hidden md:table-cell">Department</TableHead>
                       <TableHead className="hidden md:table-cell">Session</TableHead>
-                      <TableHead className="hidden md:table-cell">Time</TableHead>
+                      <TableHead className="hidden md:table-cell">Time Schedule</TableHead>
                       <TableHead>Date</TableHead>
                       <TableHead className="text-center">Status</TableHead>
                       <TableHead className="text-center">Action</TableHead>
