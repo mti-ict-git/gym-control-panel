@@ -27,6 +27,22 @@ function formatBookingId(n: number): string {
   return `GYMBOOK${padded}`;
 }
 
+function SessionBadge({ name }: { name: string }) {
+  const key = name.toLowerCase();
+  const color = key.includes('morning')
+    ? 'bg-green-100 text-green-900'
+    : key.includes('afternoon')
+    ? 'bg-blue-100 text-blue-900'
+    : key.includes('night') && (key.includes('1') || key.includes('- 1'))
+    ? 'bg-purple-100 text-purple-900'
+    : key.includes('night') && (key.includes('2') || key.includes('- 2'))
+    ? 'bg-amber-100 text-amber-900'
+    : 'bg-slate-100 text-slate-900';
+  return (
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md font-medium ${color}`}>{name}</span>
+  );
+}
+
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <Clock className="h-5 w-5 text-muted-foreground" />;
   const s = status.toUpperCase();
@@ -138,7 +154,7 @@ export default function VaultPage() {
                         </div>
                         <div className="col-span-6">
                           <div className="text-muted-foreground">Session</div>
-                          <div>{sessionNameFor(user)}</div>
+                          <div><SessionBadge name={sessionNameFor(user)} /></div>
                         </div>
                         <div className="col-span-6">
                           <div className="text-muted-foreground">Time</div>
@@ -224,7 +240,7 @@ export default function VaultPage() {
                         <TableCell className="hidden md:table-cell">{user.gender || '-'}</TableCell>
                         <TableCell>{user.employee_id}</TableCell>
                         <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
-                        <TableCell className="hidden md:table-cell">{sessionNameFor(user)}</TableCell>
+                        <TableCell className="hidden md:table-cell"><SessionBadge name={sessionNameFor(user)} /></TableCell>
                         <TableCell className="hidden md:table-cell">
                           {user.time_start && user.time_end ? `${user.time_start} - ${user.time_end}` : user.time_start || '-'}
                         </TableCell>

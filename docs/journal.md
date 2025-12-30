@@ -146,3 +146,30 @@ Enhancement:
 Verification:
 - Lint: 0 errors.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-30 14:57:09 +08:00
+
+Enhancement:
+- Added colored session badges on Gym Booking page: green (Morning), blue (Afternoon), purple (Night 1), amber (Night 2).
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 14:58:44 +08:00
+
+Enhancement:
+- Improved session highlighting: the session text now has colored backgrounds matching the legend (pill-style badges) on both desktop and mobile layouts.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 15:00:24 +08:00
+
+Enhancement:
+- Applied colored session badges to Schedules page Session column.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
