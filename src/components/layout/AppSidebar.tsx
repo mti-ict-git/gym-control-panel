@@ -8,7 +8,8 @@ import {
   LogOut,
   Dumbbell,
   Database,
-  FileText
+  FileText,
+  UserCog
 } from 'lucide-react';
 import {
   Sidebar,
@@ -22,6 +23,7 @@ import {
   SidebarFooter,
 } from '@/components/ui/sidebar';
 import { useAuth } from '@/contexts/AuthContext';
+import { useUserRole } from '@/hooks/useUserRole';
 import { Button } from '@/components/ui/button';
 import { Sun, Moon } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
@@ -32,6 +34,7 @@ const menuItems = [
   { title: 'Gym Booking', url: '/gym_booking', icon: Database },
   { title: 'Schedules', url: '/schedules', icon: Calendar },
   { title: 'Reports', url: '/reports', icon: FileText },
+  { title: 'Management Account', url: '/management', icon: UserCog, superAdminOnly: true },
   { title: 'Settings', url: '/settings', icon: Settings },
 ];
 
@@ -39,6 +42,7 @@ export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { isSuperAdmin } = useUserRole();
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
@@ -87,24 +91,26 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {menuItems.map((item) => {
-                const isActive = location.pathname === item.url || 
-                  (item.url !== '/dashboard' && location.pathname.startsWith(item.url));
-                
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton 
-                      asChild
-                      className={`touch-target ${isActive ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium' : ''}`}
-                    >
-                      <button onClick={() => navigate(item.url)} className="w-full">
-                        <item.icon className="h-5 w-5" />
-                        <span>{item.title}</span>
-                      </button>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
+              {menuItems
+                .filter((item) => !item.superAdminOnly || isSuperAdmin)
+                .map((item) => {
+                  const isActive = location.pathname === item.url || 
+                    (item.url !== '/dashboard' && location.pathname.startsWith(item.url));
+                  
+                  return (
+                    <SidebarMenuItem key={item.title}>
+                      <SidebarMenuButton 
+                        asChild
+                        className={`touch-target ${isActive ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium' : ''}`}
+                      >
+                        <button onClick={() => navigate(item.url)} className="w-full">
+                          <item.icon className="h-5 w-5" />
+                          <span>{item.title}</span>
+                        </button>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
