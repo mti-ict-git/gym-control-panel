@@ -15,6 +15,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (email: string, password: string, username: string) => Promise<{ error: string | null }>;
   logout: () => Promise<void>;
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -47,6 +48,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setIsLoading(false);
     }
     void init();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refresh();
+      }
+    };
+    const intervalId = window.setInterval(() => {
+      void refresh();
+    }, 30 * 60 * 1000);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   const checkAdminRole = async (_userId: string) => {
@@ -77,6 +91,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refresh = async (): Promise<void> => {
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) return;
+      const resp = await fetch('/api/auth/refresh', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const ct = resp.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) return;
+      const json = await resp.json();
+      if (!json?.ok || !json?.token || !json?.user) return;
+      localStorage.setItem('auth_token', String(json.token));
+      setUser(json.user as LocalUser);
+      setIsAdmin((json.user as LocalUser).role === 'admin' || (json.user as LocalUser).role === 'superadmin');
+    } catch { return; }
+  };
+
   const signUp = async (email: string, password: string, username: string): Promise<{ error: string | null }> => {
     try {
       const resp = await fetch('/api/gym-accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, email, role: 'admin', is_active: true, password }) });
@@ -97,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, isLoading, isAdmin, login, signUp, logout }}>
+    <AuthContext.Provider value={{ user, session, isLoading, isAdmin, login, signUp, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

@@ -23,6 +23,8 @@ interface GymAccount {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  last_sign_in?: string | null;
+  last_sign_in_at?: string | null;
 }
 
 export default function ManagementPage() {
@@ -396,6 +398,7 @@ export default function ManagementPage() {
                     <TableHead className="w-16">No</TableHead>
                     <TableHead>Username</TableHead>
                     <TableHead>Email</TableHead>
+                    <TableHead>Last Sign In</TableHead>
                     <TableHead>Current Role</TableHead>
                     <TableHead>Change Role</TableHead>
                     <TableHead className="w-28">Actions</TableHead>
@@ -407,6 +410,7 @@ export default function ManagementPage() {
                       <TableCell>{index + 1}</TableCell>
                       <TableCell className="font-medium">{acc.username}</TableCell>
                       <TableCell>{acc.email || '-'}</TableCell>
+                      <TableCell>{acc.last_sign_in ? new Date(acc.last_sign_in).toLocaleString() : (acc.last_sign_in_at ? new Date(acc.last_sign_in_at).toLocaleString() : '-')}</TableCell>
                       <TableCell>
                         <div className="flex gap-1">
                           <Badge variant={getRoleBadgeVariant(acc.role)}>{getRoleLabel(acc.role)}</Badge>
