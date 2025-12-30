@@ -14,6 +14,7 @@ import UserDetailPage from "./pages/UserDetailPage";
 import SchedulesPage from "./pages/SchedulesPage";
 import VaultPage from "./pages/VaultPage";
 import ReportsPage from "./pages/ReportsPage";
+import ManagementPage from "./pages/ManagementPage";
 import NotFound from "./pages/NotFound";
 
 // Settings pages
@@ -85,6 +86,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <ReportsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/management"
+              element={
+                <ProtectedRoute>
+                  <ManagementPage />
                 </ProtectedRoute>
               }
             />

@@ -173,7 +173,7 @@ export default function ReportsPage() {
   };
 
   const handleExportCSV = () => {
-    const headers = ['No', 'Booking ID', 'Card No', 'Employee ID', 'Department', 'Gender', 'Session', 'Time In', 'Time Out'];
+    const headers = ['No', 'ID', 'Card No', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
     const rows = bookingData.map((record, idx) => [
       String(idx + 1),
       String(record.booking_id ?? ''),
@@ -181,9 +181,12 @@ export default function ReportsPage() {
       String(record.employee_id ?? ''),
       String(record.department ?? ''),
       String(record.gender ?? ''),
+      '-',
+      '-',
+      record.time_start && record.time_end
+        ? `${record.time_start} - ${record.time_end}`
+        : String(record.time_start ?? ''),
       String(record.session_name ?? ''),
-      '-',
-      '-',
     ]);
 
     const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
@@ -371,14 +374,15 @@ export default function ReportsPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-16">No</TableHead>
-                      <TableHead>Booking ID</TableHead>
+                      <TableHead>ID</TableHead>
                       <TableHead>Card No</TableHead>
                       <TableHead>Employee ID</TableHead>
                       <TableHead>Department</TableHead>
                       <TableHead>Gender</TableHead>
+                      <TableHead>In</TableHead>
+                      <TableHead>Out</TableHead>
+                      <TableHead>Time Schedule</TableHead>
                       <TableHead>Session</TableHead>
-                      <TableHead>Time In</TableHead>
-                      <TableHead>Time Out</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -390,9 +394,14 @@ export default function ReportsPage() {
                         <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
                         <TableCell>{record.department || '-'}</TableCell>
                         <TableCell>{record.gender || '-'}</TableCell>
+                        <TableCell className="font-mono text-sm">-</TableCell>
+                        <TableCell className="font-mono text-sm">-</TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {record.time_start && record.time_end
+                            ? `${record.time_start} - ${record.time_end}`
+                            : record.time_start || '-'}
+                        </TableCell>
                         <TableCell className="font-medium">{record.session_name || '-'}</TableCell>
-                        <TableCell className="font-mono text-sm">-</TableCell>
-                        <TableCell className="font-mono text-sm">-</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
