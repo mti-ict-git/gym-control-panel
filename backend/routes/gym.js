@@ -91,7 +91,13 @@ router.get('/gym-sessions', async (req, res) => {
   } = process.env;
 
   if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
-    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', sessions: [] });
+    const missing_env = [
+      !DB_SERVER ? 'DB_SERVER' : null,
+      !DB_DATABASE ? 'DB_DATABASE' : null,
+      !DB_USER ? 'DB_USER' : null,
+      !DB_PASSWORD ? 'DB_PASSWORD' : null,
+    ].filter(Boolean);
+    return res.status(200).json({ ok: false, error: 'Gym DB env is not configured', sessions: [], missing_env });
   }
 
   const config = {
