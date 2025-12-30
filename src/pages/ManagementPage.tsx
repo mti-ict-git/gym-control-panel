@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { supabase } from '@/integrations/supabase/client';
+// Supabase removed: using GymDB backend only
 import { toast } from 'sonner';
 import { UserCog, Shield, Users, UserPlus, Eye, EyeOff, Pencil, Trash2 } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
@@ -111,22 +111,7 @@ export default function ManagementPage() {
 
     setIsCreating(true);
     try {
-      const redirectUrl = `${window.location.origin}/`;
-      
-      const { data, error } = await supabase.auth.signUp({
-        email: newUserEmail,
-        password: newUserPassword,
-        options: {
-          emailRedirectTo: redirectUrl,
-          data: {
-            username: newUserUsername,
-          },
-        },
-      });
-
-      if (error) throw error;
-
-      // Also create mapping in GymDB
+      // Create account directly in GymDB
       const resp = await fetch('/api/gym-accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

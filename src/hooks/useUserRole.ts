@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
 
 type AppRole = 'admin' | 'user' | 'superadmin' | 'committee';
 
@@ -10,28 +9,12 @@ export function useUserRole() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    async function fetchRoles() {
-      if (!user) {
-        setRoles([]);
-        setIsLoading(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', user.id);
-
-      if (error) {
-        console.error('Error fetching user roles:', error);
-        setRoles([]);
-      } else {
-        setRoles(data?.map((r) => r.role as AppRole) || []);
-      }
-      setIsLoading(false);
+    if (!user) {
+      setRoles([]);
+    } else {
+      setRoles([user.role as AppRole]);
     }
-
-    fetchRoles();
+    setIsLoading(false);
   }, [user]);
 
   const hasRole = (role: AppRole) => roles.includes(role);

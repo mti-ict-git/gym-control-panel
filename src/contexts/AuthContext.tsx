@@ -1,10 +1,15 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+
+type LocalUser = {
+  account_id: number;
+  username: string;
+  email: string;
+  role: 'admin' | 'user' | 'superadmin' | 'committee';
+};
 
 interface AuthContextType {
-  user: User | null;
-  session: Session | null;
+  user: LocalUser | null;
+  session: null;
   isLoading: boolean;
   isAdmin: boolean;
   login: (email: string, password: string) => Promise<{ error: string | null }>;
@@ -15,103 +20,80 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<LocalUser | null>(null);
+  const [session] = useState<null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        // Defer role check to avoid deadlock
-        if (session?.user) {
-          setTimeout(() => {
-            checkAdminRole(session.user.id);
-          }, 0);
-        } else {
-          setIsAdmin(false);
-        }
+    async function init() {
+      const token = localStorage.getItem('auth_token');
+      if (!token) {
+        setIsLoading(false);
+        return;
       }
-    );
-
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        checkAdminRole(session.user.id);
+      try {
+        const resp = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+        const json = await resp.json();
+        if (json.ok && json.user) {
+          setUser(json.user as LocalUser);
+          setIsAdmin((json.user as LocalUser).role === 'admin' || (json.user as LocalUser).role === 'superadmin');
+        } else {
+          localStorage.removeItem('auth_token');
+        }
+      } catch {
+        localStorage.removeItem('auth_token');
       }
       setIsLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    }
+    void init();
   }, []);
 
-  const checkAdminRole = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .eq('role', 'admin')
-      .maybeSingle();
-    
-    setIsAdmin(!!data && !error);
+  const checkAdminRole = async (_userId: string) => {
+    // No-op: Supabase removed. isAdmin is derived from local user role.
+    return;
   };
 
   const login = async (email: string, password: string): Promise<{ error: string | null }> => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    
-    if (error) {
-      return { error: error.message };
+    try {
+      const body = email.includes('@') ? { email, password } : { username: email, password };
+      const resp = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!resp.ok) {
+        return { error: `Request failed (${resp.status})` };
+      }
+      const ct = resp.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        return { error: 'Backend returned non-JSON response' };
+      }
+      const json = await resp.json();
+      if (!json.ok) return { error: json.error || 'Login failed' };
+      localStorage.setItem('auth_token', json.token);
+      setUser(json.user as LocalUser);
+      setIsAdmin((json.user as LocalUser).role === 'admin' || (json.user as LocalUser).role === 'superadmin');
+      return { error: null };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Login failed';
+      return { error: msg };
     }
-    
-    return { error: null };
   };
 
   const signUp = async (email: string, password: string, username: string): Promise<{ error: string | null }> => {
-    const redirectUrl = `${window.location.origin}/`;
-    
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        data: {
-          username,
-        },
-      },
-    });
-    
-    if (error) {
-      return { error: error.message };
+    try {
+      const resp = await fetch('/api/gym-accounts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, email, role: 'admin', is_active: true, password }) });
+      const json = await resp.json();
+      if (!json.ok) return { error: json.error || 'Sign up failed' };
+      // Auto login after successful sign up
+      return await login(email, password);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Sign up failed';
+      return { error: msg };
     }
-
-    // Add admin role for the new user
-    if (data.user) {
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .insert({
-          user_id: data.user.id,
-          role: 'admin',
-        });
-      
-      if (roleError) {
-        console.error('Error adding admin role:', roleError);
-      }
-    }
-    
-    return { error: null };
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem('auth_token');
+    setUser(null);
+    setIsAdmin(false);
   };
 
   return (

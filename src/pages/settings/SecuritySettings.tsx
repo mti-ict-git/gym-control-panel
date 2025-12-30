@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+// Supabase removed: use backend auth endpoints
 
 export default function SecuritySettings() {
   const navigate = useNavigate();
@@ -50,22 +50,24 @@ export default function SecuritySettings() {
     }
 
     setIsUpdating(true);
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    setIsUpdating(false);
-
-    if (error) {
-      toast({
-        title: "Error",
-        description: error.message,
-        variant: "destructive",
+    try {
+      const token = localStorage.getItem('auth_token');
+      if (!token) throw new Error('Not authenticated');
+      const resp = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ old_password: '', new_password: newPassword }),
       });
-    } else {
-      toast({
-        title: "Password Updated",
-        description: "Your password has been changed successfully.",
-      });
+      const json = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Failed to update password');
+      toast({ title: 'Password Updated', description: 'Your password has been changed successfully.' });
       setNewPassword('');
       setConfirmPassword('');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to update password';
+      toast({ title: 'Error', description: msg, variant: 'destructive' });
+    } finally {
+      setIsUpdating(false);
     }
   };
 
