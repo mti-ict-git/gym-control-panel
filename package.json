@@ -5,12 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:all": "concurrently -n tester,app -c green,blue \"node server/db-tester.js\" \"vite\"",
+    "dev:all": "concurrently -n tester,app -c green,blue \"node backend/db-tester.js\" \"vite\"",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "dbtester": "node server/db-tester.js"
+    "dbtester": "node backend/db-tester.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

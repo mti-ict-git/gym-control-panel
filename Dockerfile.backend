@@ -8,11 +8,11 @@ COPY package*.json ./
 # Install dependencies
 RUN npm ci
 
-# Copy server code
-COPY server/ ./server/
+# Copy backend code
+COPY backend/ ./backend/
 
 # Expose port
 EXPOSE 5055
 
 # Start the server
-CMD ["node", "server/db-tester.js"]
+CMD ["node", "backend/db-tester.js"]
