@@ -141,3 +141,27 @@ This journal tracks decisions, notes, and progress for the project.
   - Use `ISNULL` in SQL to prioritize `DataDBEnt` data while maintaining backward compatibility with existing `gym_booking` data.
   - Implement Action column buttons directly in the table row for quick status updates.
   - Secure status update endpoint with parameterized queries.
+  
+  - Backend modularization:
+    - Entry point: [backend/app.js](file:///c:/Scripts/Projects/gym-control-panel/backend/app.js)
+    - Routers: [backend/routes/tester.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/tester.js), [backend/routes/master.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/master.js), [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js)
+    - Utilities: [backend/lib/env.js](file:///c:/Scripts/Projects/gym-control-panel/backend/lib/env.js) for env parsing
+  - Scripts:
+    - Updated [package.json](file:///c:/Scripts/Projects/gym-control-panel/package.json#L6-L14) to run backend/app.js for dev and dbtester
+  - Docker:
+    - Updated [Dockerfile.backend](file:///c:/Scripts/Projects/gym-control-panel/Dockerfile.backend#L11-L18) to copy backend/ and run backend/app.js
+  - Cleanup:
+    - Removed unnecessary wrapper [backend/db-tester.js](file:///c:/Scripts/Projects/gym-control-panel/backend/db-tester.js)
+    - Kept legacy monolith [server/db-tester.js](file:///c:/Scripts/Projects/gym-control-panel/server/db-tester.js) for comparison
+  - Frontend routing:
+    - Default route redirects to "/register" in [App.tsx](file:///c:/Scripts/Projects/gym-control-panel/src/App.tsx#L36-L40)
+  - Verification:
+    - Dev servers restarted successfully; backend on http://localhost:5055 and app on http://localhost:5173/
+    - Typecheck passed (npx tsc --noEmit); lint shows only existing warnings
+
+- Documentation:
+  - Added "UI UX flow" file to describe user journey, components, responsive guidelines, accessibility, sample code, and backend endpoints
+  - File: [UI UX flow.md](file:///c:/Scripts/Projects/gym-control-panel/UI%20UX%20flow.md)
+  - Correction:
+    - Updated flow for "/register" to reflect actual behavior (Employee ID + Date + Session booking)
+    - Clarified that account sign-in/sign-up is at "/login" with tabs
