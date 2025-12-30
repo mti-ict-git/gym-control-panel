@@ -331,3 +331,20 @@ Database:
 
 Verification:
 - Script output confirms updated schema.
+
+2025-12-30 16:34:15 +08:00
+
+Configuration:
+- Set GYM_UNIT_FILTER=0041,0040 in .env to restrict live sync and status to active controllers.
+
+Verification:
+- Restarted backend; live sync and status endpoints reflect filtered units.
+
+2025-12-30 16:37:20 +08:00
+
+Fix:
+- Updated Vite proxy to use VITE_BACKEND_URL for backend target, avoiding ECONNREFUSED in Docker/local mixed environments.
+- Added VITE_BACKEND_URL=http://localhost:5055 to .env for local dev.
+
+Verification:
+- Frontend proxy now points to the running backend; /api/* endpoints resolve.
