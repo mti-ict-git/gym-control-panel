@@ -163,9 +163,10 @@ This journal tracks decisions, notes, and progress for the project.
     - Dev servers restarted successfully; backend on http://localhost:5055 and app on http://localhost:5173/
     - Typecheck passed (npx tsc --noEmit); lint shows only existing warnings
 
-- Documentation:
-  - Added "UI UX flow" file to describe user journey, components, responsive guidelines, accessibility, sample code, and backend endpoints
-  - File: [UI UX flow.md](file:///c:/Scripts/Projects/gym-control-panel/UI%20UX%20flow.md)
+  - Documentation:
+    - Added "UI UX flow" file to describe user journey, components, responsive guidelines, accessibility, sample code, and backend endpoints
+    - File: [UI UX flow.md](file:///c:/Scripts/Projects/gym-control-panel/UI%20UX%20flow.md)
   - Correction:
     - Updated flow for "/register" to reflect actual behavior (Employee ID + Date + Session booking)
     - Clarified that account sign-in/sign-up is at "/login" with tabs
+    - Clarified that "/login" is admin-only; employees do not require accounts for booking (HRIS-synced)
