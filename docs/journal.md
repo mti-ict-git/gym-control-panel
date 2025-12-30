@@ -409,3 +409,21 @@ Verification:
 - Ran lint and TypeScript checks: passed.
 - POST /api/gym-accounts-init → ok:true.
 - GET /api/gym-accounts → ok:true, existing and seeded accounts preserved; roles mapped for UI.
+
+2025-12-30 17:10:17 +08:00
+
+Database:
+- Normalized legacy Role values and re-applied CHECK constraint on dbo.gym_account.
+- Added script backend/scripts/fix-roles.js to drop existing role constraints, migrate values to SuperAdmin/Admin/Staff, and re-add CK_gym_account_Role.
+- Ran POST /api/gym-accounts-init successfully after migration.
+
+Security:
+- Backfilled NULL PasswordHash with secure random passwords and bcrypt hashes.
+- Set PasswordResetRequired = 1 for backfilled accounts.
+- Enforced PasswordHash VARCHAR(255) NOT NULL.
+
+Verification:
+- GET /api/gym-accounts shows roles mapped to UI: superadmin/admin/committee.
+- Attempt to create account without password fails with NOT NULL constraint, confirming enforcement.
+- Lint: 0 errors, 8 warnings (react-refresh only-export-components).
+- TypeScript integrity check: passed (noEmit).
