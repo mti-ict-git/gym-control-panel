@@ -10,6 +10,7 @@ export interface VaultUser {
   status: 'BOOKED' | 'IN_GYM' | 'OUT';
   approval_status: string | null;
   card_no: string | null;
+  booking_date: string;
 }
 
 const JAKARTA_OFFSET_MINUTES = 7 * 60;
@@ -66,7 +67,7 @@ export function useVaultUsers() {
         return `${y}-${m}-${dd}`;
       };
 
-      const from = toYmd(tomorrow);
+      const from = toYmd(todayJakarta);
       const to = toYmd(dayAfter);
 
       const resp = await fetch(`${endpoint}/gym-bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
@@ -97,6 +98,7 @@ export function useVaultUsers() {
             card_no: r.card_no != null ? String(r.card_no).trim() : null,
             approval_status: r.approval_status != null ? String(r.approval_status).trim() : null,
             status: mappedStatus,
+            booking_date: r.booking_date,
           } satisfies VaultUser;
         })
         .filter(Boolean) as VaultUser[];

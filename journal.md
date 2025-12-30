@@ -94,3 +94,35 @@ This journal tracks decisions, notes, and progress for the project.
 - Decisions:
   - Keep GymDB + Master DB access on LAN via the local tester service to avoid exposing MSSQL to the browser.
   - Use Supabase `gym_schedules` as the source of truth for booking records, and enrich UI with Master DB employee data.
+
+## 2025-12-30
+
+- Goals:
+  - Enhance "Gym Booking" page with Action column, Status column, and better data formatting.
+  - Integrate "Gym Booking" page with `DataDBEnt` for ID Card and Department data.
+  - Add Date column to "Gym Booking" page.
+- Notes:
+  - Gym Booking Page:
+    - Formatted Gender: "M" -> "Male", "F" -> "Female".
+    - Added Status column with icons (Approved/Rejected/Pending).
+    - Added Action column with Approve/Reject buttons:
+      - Buttons trigger `updateStatusMutation`.
+      - Calls `/gym-booking-update-status` endpoint.
+    - Added Date column:
+      - Positioned after Session column.
+      - Displays formatted booking date.
+    - Updated Data Sources:
+      - ID Card: Now loads from `DataDBEnt.dbo.CardDB` (via `LEFT JOIN` and `ISNULL` fallback).
+      - Department: Now loads from `DataDBEnt.dbo.CardDB` (via `ISNULL` fallback).
+      - Fixed Date Range: Updated `useVaultUsers` to include "today" in the fetch range.
+    - Backend ([db-tester.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/server/db-tester.js)):
+      - Added `/gym-booking-update-status` POST endpoint.
+      - Updated `/gym-bookings` GET query with `OUTER APPLY` / `LEFT JOIN` for `DataDBEnt`.
+    - Files:
+      - [VaultPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/VaultPage.tsx)
+      - [useVaultUsers.ts](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/hooks/useVaultUsers.ts)
+      - [db-tester.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/server/db-tester.js)
+- Decisions:
+  - Use `ISNULL` in SQL to prioritize `DataDBEnt` data while maintaining backward compatibility with existing `gym_booking` data.
+  - Implement Action column buttons directly in the table row for quick status updates.
+  - Secure status update endpoint with parameterized queries.

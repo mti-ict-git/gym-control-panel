@@ -105,6 +105,7 @@ export default function VaultPage() {
                   <TableHead>Employee ID</TableHead>
                   <TableHead className="hidden md:table-cell">Department</TableHead>
                   <TableHead className="hidden md:table-cell">Session</TableHead>
+                  <TableHead>Date</TableHead>
                   <TableHead className="text-center">Status</TableHead>
                   <TableHead className="text-center">Action</TableHead>
                 </TableRow>
@@ -119,6 +120,7 @@ export default function VaultPage() {
                     <TableCell>{user.employee_id}</TableCell>
                     <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
                     <TableCell className="hidden md:table-cell">{sessionNameFor(user)}</TableCell>
+                    <TableCell>{user.booking_date}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center items-center">
                         <StatusBadge status={user.approval_status} />
