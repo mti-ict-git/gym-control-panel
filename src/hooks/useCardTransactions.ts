@@ -6,6 +6,7 @@ export type LiveTransaction = {
   TrController: string | null;
   Transaction: string | null;
   CardNo: string | null;
+  UnitNo?: string | null;
   TrDate: string | null;
   TrTime: string | null;
   TxnTime: string;
