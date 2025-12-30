@@ -5,9 +5,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { UserCog, Shield, Users } from 'lucide-react';
+import { UserCog, Shield, Users, UserPlus } from 'lucide-react';
 
 type AppRole = 'admin' | 'user' | 'superadmin' | 'committee';
 
@@ -21,6 +24,12 @@ interface UserWithRole {
 export default function ManagementPage() {
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserUsername, setNewUserUsername] = useState('');
+  const [newUserRole, setNewUserRole] = useState<AppRole>('admin');
 
   const fetchUsers = async () => {
     setIsLoading(true);
@@ -91,6 +100,65 @@ export default function ManagementPage() {
     }
   };
 
+  const handleCreateUser = async () => {
+    if (!newUserEmail || !newUserPassword || !newUserUsername) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+
+    if (newUserPassword.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      const redirectUrl = `${window.location.origin}/`;
+      
+      const { data, error } = await supabase.auth.signUp({
+        email: newUserEmail,
+        password: newUserPassword,
+        options: {
+          emailRedirectTo: redirectUrl,
+          data: {
+            username: newUserUsername,
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        // Add the selected role for the new user
+        const { error: roleError } = await supabase
+          .from('user_roles')
+          .insert({
+            user_id: data.user.id,
+            role: newUserRole,
+          });
+
+        if (roleError) {
+          console.error('Error adding role:', roleError);
+          toast.error('User created but failed to assign role');
+        } else {
+          toast.success('Account created successfully');
+        }
+      }
+
+      setIsCreateDialogOpen(false);
+      setNewUserEmail('');
+      setNewUserPassword('');
+      setNewUserUsername('');
+      setNewUserRole('admin');
+      fetchUsers();
+    } catch (error: any) {
+      console.error('Error creating user:', error);
+      toast.error(error.message || 'Failed to create account');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
   const getRoleBadgeVariant = (role: AppRole) => {
     switch (role) {
       case 'superadmin':
@@ -129,6 +197,74 @@ export default function ManagementPage() {
             <p className="text-muted-foreground">Manage user roles and permissions</p>
           </div>
         </div>
+
+        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button className="gap-2">
+              <UserPlus className="h-4 w-4" />
+              Create Account
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Create New Account</DialogTitle>
+              <DialogDescription>Create a new user account with a specific role.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid gap-2">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  value={newUserUsername}
+                  onChange={(e) => setNewUserUsername(e.target.value)}
+                  placeholder="Enter username"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={newUserEmail}
+                  onChange={(e) => setNewUserEmail(e.target.value)}
+                  placeholder="Enter email"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={newUserPassword}
+                  onChange={(e) => setNewUserPassword(e.target.value)}
+                  placeholder="Enter password (min 6 characters)"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="role">Role</Label>
+                <Select value={newUserRole} onValueChange={(value) => setNewUserRole(value as AppRole)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="superadmin">Super Admin</SelectItem>
+                    <SelectItem value="committee">Committee</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="user">User</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button onClick={handleCreateUser} disabled={isCreating}>
+                {isCreating ? 'Creating...' : 'Create Account'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <div className="grid gap-4 md:grid-cols-2">
           <Card>
