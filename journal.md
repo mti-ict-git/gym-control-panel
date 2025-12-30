@@ -176,6 +176,19 @@ This journal tracks decisions, notes, and progress for the project.
     - Falls back to static quota when availability not loaded.
     - File: [RegisterPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/RegisterPage.tsx#L62-L106)
 
+- 2025-12-30 11:12:31
+  - Immediate decrement after registration:
+    - Decreases Available locally for the selected session.
+    - Triggers availability refetch for consistency.
+    - Keeps Date and Session values; clears Employee ID only.
+    - File: [RegisterPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/RegisterPage.tsx#L170-L191)
+
+- 2025-12-30 11:17:30
+  - Available format update:
+    - Shows booked/quota as "X/Y" (e.g., 0/15) sourced from /gym-availability.
+    - Local increment on success updates booked and available then refetches.
+    - File: [RegisterPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/RegisterPage.tsx#L426-L440)
+
   - Documentation:
     - Added "UI UX flow" file to describe user journey, components, responsive guidelines, accessibility, sample code, and backend endpoints
     - File: [UI UX flow.md](file:///c:/Scripts/Projects/gym-control-panel/UI%20UX%20flow.md)

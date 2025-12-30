@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
  
 import { useForm, FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -51,7 +51,7 @@ export default function RegisterPage() {
   const [empSuggestions, setEmpSuggestions] = useState<string[]>([]);
   const [empLoading, setEmpLoading] = useState(false);
   const [showEmpDropdown, setShowEmpDropdown] = useState(false);
-  const [availability, setAvailability] = useState<Record<string, number>>({});
+  const [availability, setAvailability] = useState<Record<string, { available: number; booked: number; quota: number }>>({});
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
@@ -146,39 +146,45 @@ export default function RegisterPage() {
     };
   }, [employeeIdInput]);
 
-  useEffect(() => {
+  const fetchAvailability = useCallback(async (dateStr: string) => {
     const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
-    const date = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
-    if (!endpoint || !date) {
+    if (!endpoint || !dateStr) {
       setAvailability({});
       return;
     }
     setAvailabilityLoading(true);
-    const ctrl = new AbortController();
-    const t = setTimeout(async () => {
-      try {
-        const resp = await fetch(`${endpoint}/gym-availability?date=${encodeURIComponent(date)}`, { signal: ctrl.signal });
-        const json = (await resp.json()) as { success: boolean; error?: string; sessions?: { time_start: string; available: number }[] } | null;
-        if (!json || !json.success) {
-          setAvailability({});
-          return;
-        }
-        const map: Record<string, number> = {};
-        (json.sessions || []).forEach((s) => {
-          map[String(s.time_start)] = Number(s.available);
-        });
-        setAvailability(map);
-      } catch (_) {
+    try {
+      const resp = await fetch(`${endpoint}/gym-availability?date=${encodeURIComponent(dateStr)}`);
+      const json = (await resp.json()) as { success: boolean; error?: string; sessions?: { time_start: string; available: number; booked_count: number; quota: number }[] } | null;
+      if (!json || !json.success) {
         setAvailability({});
-      } finally {
-        setAvailabilityLoading(false);
+        return;
       }
-    }, 200);
-    return () => {
-      clearTimeout(t);
-      ctrl.abort();
-    };
-  }, [selectedDate]);
+      const map: Record<string, { available: number; booked: number; quota: number }> = {};
+      (json.sessions || []).forEach((s) => {
+        map[String(s.time_start)] = {
+          available: Number(s.available),
+          booked: Number(s.booked_count || 0),
+          quota: Number(s.quota || 0),
+        };
+      });
+      setAvailability(map);
+    } catch (_) {
+      setAvailability({});
+    } finally {
+      setAvailabilityLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
+    if (!dateStr) {
+      setAvailability({});
+      return;
+    }
+    const t = setTimeout(() => { void fetchAvailability(dateStr); }, 200);
+    return () => { clearTimeout(t); };
+  }, [selectedDate, fetchAvailability]);
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
@@ -213,7 +219,22 @@ export default function RegisterPage() {
         description: `You have been registered for ${selectedSession ? displaySessionName(selectedSession.session_name) : 'the selected session'} on ${format(data.date, 'MMMM d, yyyy')}.`,
       });
 
-      form.reset();
+      if (selectedDate && selectedGymDbSession) {
+        const key = selectedGymDbSession.time_start;
+        setAvailability((prev) => {
+          const existing = prev[key];
+          if (existing) {
+            const booked = Math.max(0, existing.booked + 1);
+            const available = Math.max(0, existing.quota - booked);
+            return { ...prev, [key]: { ...existing, booked, available } };
+          }
+          const quota = selectedGymDbSession.quota;
+          return { ...prev, [key]: { booked: 1, quota, available: Math.max(0, quota - 1) } };
+        });
+        const dateStr = format(selectedDate, 'yyyy-MM-dd');
+        void fetchAvailability(dateStr);
+      }
+      form.setValue('employeeId', '');
     } catch (error: unknown) {
       console.error('Registration error:', error);
       toast({
@@ -474,9 +495,12 @@ export default function RegisterPage() {
                     {selectedGymDbSession
                       ? availabilityLoading
                         ? 'Loading...'
-                        : availability[selectedGymDbSession.time_start] != null
-                          ? String(availability[selectedGymDbSession.time_start])
-                          : String(selectedGymDbSession.quota)
+                        : (() => {
+                            const a = availability[selectedGymDbSession.time_start];
+                            const booked = a ? a.booked : 0;
+                            const quota = a ? a.quota : selectedGymDbSession.quota;
+                            return `${booked}/${quota}`;
+                          })()
                       : '-'}
                   </div>
                 </div>
