@@ -7,7 +7,7 @@ export type LivePersonStatus = {
   schedule: string | null;
   time_in: string | null;
   time_out: string | null;
-  status: 'IN_GYM' | 'LEFT';
+  status: 'BOOKED' | 'IN_GYM' | 'LEFT';
 };
 
 type LiveStatusResponse = { ok: boolean; error?: string; people?: LivePersonStatus[] } | null;
