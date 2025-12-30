@@ -15,11 +15,11 @@ export interface VaultUser {
   booking_date: string;
 }
 
-const JAKARTA_OFFSET_MINUTES = 7 * 60;
+const UTC8_OFFSET_MINUTES = 8 * 60;
 
 function startOfTodayJakartaUtcDate(): Date {
   const now = new Date();
-  const jakartaNow = new Date(now.getTime() + JAKARTA_OFFSET_MINUTES * 60_000);
+  const jakartaNow = new Date(now.getTime() + UTC8_OFFSET_MINUTES * 60_000);
   return new Date(Date.UTC(jakartaNow.getUTCFullYear(), jakartaNow.getUTCMonth(), jakartaNow.getUTCDate()));
 }
 
@@ -48,7 +48,7 @@ function buildJakartaScheduleTimeIso(dateStr: string, hhmm: string): string | nu
   const day = Number(m[3]);
   const hour = Number(t[1]);
   const minute = Number(t[2]);
-  const utc = new Date(Date.UTC(year, month - 1, day, hour, minute) - JAKARTA_OFFSET_MINUTES * 60_000);
+  const utc = new Date(Date.UTC(year, month - 1, day, hour, minute) - UTC8_OFFSET_MINUTES * 60_000);
   return utc.toISOString();
 }
 

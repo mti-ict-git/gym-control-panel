@@ -581,6 +581,136 @@ router.post('/gym-booking-update-status', async (req, res) => {
   }
 });
 
+router.post('/gym-controller-access', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const { employee_id, access, unit_no, card_no } = req.body || {};
+  const employeeId = employee_id != null ? String(employee_id).trim() : '';
+  if (!employeeId) {
+    return res.status(400).json({ ok: false, error: 'employee_id is required' });
+  }
+
+  const accessStr = access != null ? String(access).trim().toLowerCase() : '';
+  const allow = accessStr === '1' || accessStr === 'true' || accessStr === 'yes' || accessStr === 'y';
+
+  const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+  const unitNo = (unit_no != null ? String(unit_no).trim() : '') || envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+  const tzAllow = envTrim(process.env.GYM_ACCESS_TZ_ALLOW) || '01';
+  const tzDeny = envTrim(process.env.GYM_ACCESS_TZ_DENY) || '00';
+  const customAccessTz = allow ? tzAllow : tzDeny;
+
+  const baseUrl =
+    envTrim(process.env.VAULT_UPLOAD_ASMX_BASE_URL) ||
+    envTrim(process.env.VAULT_ASMX_BASE_URL) ||
+    envTrim(process.env.VAULT_API_BASE) ||
+    '';
+  if (!baseUrl) {
+    return res.status(500).json({ ok: false, error: 'Vault ASMX base URL is not configured' });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: envBool(DB_ENCRYPT, false),
+      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  const extractTag = (xml, tag) => {
+    const re = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
+    const m = re.exec(xml);
+    if (!m) return null;
+    return String(m[1]).replace(/\r\n/g, '\n').trim();
+  };
+
+  try {
+    let cardNo = card_no != null ? String(card_no).trim() : '';
+
+    if (!cardNo) {
+      const pool = await sql.connect(config);
+      const req1 = pool.request();
+      req1.input('emp', sql.VarChar(50), employeeId);
+      const r1 = await req1.query(
+        "SELECT TOP 1 CardNo FROM dbo.gym_booking WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY BookingDate DESC, CreatedAt DESC"
+      );
+      cardNo = r1?.recordset?.[0]?.CardNo != null ? String(r1.recordset[0].CardNo).trim() : '';
+      if (!cardNo) {
+        const req2 = pool.request();
+        req2.input('emp', sql.NVarChar(50), employeeId);
+        const r2 = await req2.query(
+          "SELECT TOP 1 CardNo FROM dbo.gym_live_taps WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY TxnTime DESC"
+        );
+        cardNo = r2?.recordset?.[0]?.CardNo != null ? String(r2.recordset[0].CardNo).trim() : '';
+      }
+
+      await pool.close();
+    }
+
+    if (!cardNo) {
+      return res.status(200).json({ ok: false, error: 'CardNo not found for employee_id' });
+    }
+
+    const url = new URL(`${baseUrl.replace(/\/+$/, '')}/UploadCardByDoorUnitNo`);
+    url.searchParams.set('CardNo', cardNo);
+    url.searchParams.set('UnitNo', unitNo);
+    url.searchParams.set('CustomAccessTZ', customAccessTz);
+    const r = await fetch(url.toString(), { method: 'GET' });
+    const body = await r.text();
+
+    const parsed = {
+      unitNo: extractTag(body, 'UnitNo'),
+      doorName: extractTag(body, 'DoorName'),
+      ipAddress: extractTag(body, 'IPAddress'),
+      doorId: extractTag(body, 'DoorID'),
+      uploadStatus: extractTag(body, 'UploadStatus'),
+      log: extractTag(body, 'Log'),
+    };
+
+    const pool2 = await sql.connect(config);
+    await pool2.request().query(`IF OBJECT_ID('dbo.gym_controller_access_override','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_controller_access_override (
+        EmployeeID VARCHAR(20) NOT NULL,
+        UnitNo VARCHAR(20) NOT NULL,
+        CustomAccessTZ VARCHAR(2) NOT NULL,
+        UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
+        CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
+      );
+    END`);
+    const req3 = pool2.request();
+    req3.input('emp', sql.VarChar(20), employeeId);
+    req3.input('unit', sql.VarChar(20), unitNo);
+    req3.input('tz', sql.VarChar(2), customAccessTz);
+    await req3.query(`IF EXISTS (SELECT 1 FROM dbo.gym_controller_access_override WHERE EmployeeID=@emp AND UnitNo=@unit)
+      UPDATE dbo.gym_controller_access_override SET CustomAccessTZ=@tz, UpdatedAt=GETDATE() WHERE EmployeeID=@emp AND UnitNo=@unit
+    ELSE
+      INSERT INTO dbo.gym_controller_access_override (EmployeeID, UnitNo, CustomAccessTZ) VALUES (@emp, @unit, @tz)`);
+    await pool2.close();
+
+    const uploadOk = String(parsed.uploadStatus || '').trim() === '1';
+    return res.json({ ok: uploadOk && r.ok, employee_id: employeeId, unit_no: unitNo, tz: customAccessTz, parsed, body });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
 router.post('/gym-booking-backfill-cardno', async (req, res) => {
   const {
     DB_SERVER,
