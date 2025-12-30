@@ -34,6 +34,7 @@ type GymDbBookingRow = {
   booking_date: string;
   status: string;
   time_start: string | null;
+  time_end: string | null;
 };
 
 type GymDbBookingResponse = { ok: boolean; error?: string; bookings?: GymDbBookingRow[] } | null;
@@ -55,9 +56,6 @@ export function useVaultUsers() {
   return useQuery({
     queryKey: ['vault-users'],
     queryFn: async (): Promise<VaultUser[]> => {
-      const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
-      if (!endpoint) return [];
-
       const todayJakarta = startOfTodayJakartaUtcDate();
       const tomorrow = new Date(todayJakarta.getTime() + 24 * 60 * 60_000);
       const dayAfter = new Date(todayJakarta.getTime() + 2 * 24 * 60 * 60_000);
@@ -72,7 +70,7 @@ export function useVaultUsers() {
       const from = toYmd(todayJakarta);
       const to = toYmd(dayAfter);
 
-      const resp = await fetch(`${endpoint}/gym-bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      const resp = await fetch(`/api/gym-bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
       const json = (await resp.json()) as GymDbBookingResponse;
       if (!json || !json.ok) throw new Error(json?.error || 'Failed to load GymDB bookings');
 

@@ -107,8 +107,6 @@ export default function RegisterPage() {
 
   // Employee ID suggestions from Master Employee DB via local tester service
   useEffect(() => {
-    const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
-    if (!endpoint) return;
 
     const q = (employeeIdInput || '').trim();
     if (q.length === 0) {
@@ -120,7 +118,7 @@ export default function RegisterPage() {
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const url = `${endpoint}/employees?q=${encodeURIComponent(q)}`;
+        const url = `/api/employees?q=${encodeURIComponent(q)}`;
         const resp = await fetch(url, { signal: ctrl.signal });
         if (resp.ok) {
           const json = await resp.json();
@@ -189,10 +187,7 @@ export default function RegisterPage() {
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
-      const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
-      if (!endpoint) throw new Error('DB tester endpoint is not configured');
-
-      const resp = await fetch(`${endpoint}/gym-booking-create`, {
+      const resp = await fetch(`/api/gym-booking-create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
