@@ -51,6 +51,8 @@ export default function RegisterPage() {
   const [empSuggestions, setEmpSuggestions] = useState<string[]>([]);
   const [empLoading, setEmpLoading] = useState(false);
   const [showEmpDropdown, setShowEmpDropdown] = useState(false);
+  const [availability, setAvailability] = useState<Record<string, number>>({});
+  const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -143,6 +145,40 @@ export default function RegisterPage() {
       ctrl.abort();
     };
   }, [employeeIdInput]);
+
+  useEffect(() => {
+    const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
+    const date = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
+    if (!endpoint || !date) {
+      setAvailability({});
+      return;
+    }
+    setAvailabilityLoading(true);
+    const ctrl = new AbortController();
+    const t = setTimeout(async () => {
+      try {
+        const resp = await fetch(`${endpoint}/gym-availability?date=${encodeURIComponent(date)}`, { signal: ctrl.signal });
+        const json = (await resp.json()) as { success: boolean; error?: string; sessions?: { time_start: string; available: number }[] } | null;
+        if (!json || !json.success) {
+          setAvailability({});
+          return;
+        }
+        const map: Record<string, number> = {};
+        (json.sessions || []).forEach((s) => {
+          map[String(s.time_start)] = Number(s.available);
+        });
+        setAvailability(map);
+      } catch (_) {
+        setAvailability({});
+      } finally {
+        setAvailabilityLoading(false);
+      }
+    }, 200);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [selectedDate]);
 
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
@@ -435,7 +471,13 @@ export default function RegisterPage() {
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Available</div>
                   <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
-                    {selectedGymDbSession ? String(selectedGymDbSession.quota) : '-'}
+                    {selectedGymDbSession
+                      ? availabilityLoading
+                        ? 'Loading...'
+                        : availability[selectedGymDbSession.time_start] != null
+                          ? String(availability[selectedGymDbSession.time_start])
+                          : String(selectedGymDbSession.quota)
+                      : '-'}
                   </div>
                 </div>
               </div>
