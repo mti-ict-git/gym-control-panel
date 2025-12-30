@@ -32,7 +32,10 @@ cd <YOUR_PROJECT_NAME>
 # Step 3: Install the necessary dependencies.
 npm i
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# Step 4: Start frontend + backend together (recommended for local dev).
+npm run dev:all
+
+# Alternative: run frontend only (expects backend on http://localhost:5055).
 npm run dev
 ```
 

@@ -10,7 +10,8 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "dbtester": "node backend/app.js"
+    "dbtester": "node backend/app.js",
+    "controller:upload-card": "node backend/scripts/upload-card-to-controller.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

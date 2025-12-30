@@ -62,6 +62,13 @@ export default function GymUsersPage() {
   const totalPages = 1;
   const { data: liveStatus, isLoading: isLoadingStatus } = useGymLiveStatus();
 
+  const formatTimeUtc8 = (iso: string | null) => {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '-';
+    return d.toLocaleTimeString(undefined, { timeZone: 'Asia/Singapore' });
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -100,8 +107,8 @@ export default function GymUsersPage() {
                       <TableCell>{p.employee_id ?? '-'}</TableCell>
                       <TableCell>{p.department ?? '-'}</TableCell>
                       <TableCell>{p.schedule ?? '-'}</TableCell>
-                      <TableCell>{p.time_in ? new Date(p.time_in).toLocaleTimeString() : '-'}</TableCell>
-                      <TableCell>{p.time_out ? new Date(p.time_out).toLocaleTimeString() : '-'}</TableCell>
+                      <TableCell>{formatTimeUtc8(p.time_in)}</TableCell>
+                      <TableCell>{formatTimeUtc8(p.time_out)}</TableCell>
                       <TableCell>{p.status}</TableCell>
                     </TableRow>
                   ))}
