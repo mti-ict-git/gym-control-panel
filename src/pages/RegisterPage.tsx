@@ -641,7 +641,7 @@ export default function RegisterPage() {
               </DialogHeader>
               <div className="text-sm text-slate-700">
                 {successInfo?.bookingId != null ? (
-                  <div className="mt-2">Booking ID: {successInfo.bookingId}</div>
+                  <div className="mt-2">Booking ID: {`GYMBOOK${String(successInfo.bookingId).padStart(2, '0')}`}</div>
                 ) : null}
                 <div className="mt-3 text-slate-600">
                   Need help or want to change your booking? Contact {contactName} at {contactPhone}.

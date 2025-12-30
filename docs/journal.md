@@ -119,3 +119,30 @@ Enhancement:
 Verification:
 - Lint: 0 errors.
 - TypeScript check: passed.
+
+2025-12-30 14:41:48 +08:00
+
+Enhancement:
+- Added Booking ID column to Gym Booking table (desktop) and field in mobile card.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 14:44:22 +08:00
+
+Enhancement:
+- Reordered Booking ID column to appear immediately after No in desktop table.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 14:48:14 +08:00
+
+Enhancement:
+- Formatted Booking ID as GYMBOOKxx in VaultPage (mobile and desktop) and Register success dialog.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
