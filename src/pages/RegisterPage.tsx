@@ -471,6 +471,16 @@ export default function RegisterPage() {
                             const dateToCheck = startOfDay(date);
                             return dateToCheck < tomorrow || dateToCheck > dayAfterTomorrow;
                           }}
+                          modifiers={{
+                            highlighted: [
+                              startOfDay(addDays(new Date(), 1)),
+                              startOfDay(addDays(new Date(), 2)),
+                            ],
+                          }}
+                          modifiersClassNames={{
+                            highlighted:
+                              "bg-amber-100 text-amber-900 font-semibold rounded-md",
+                          }}
                           initialFocus
                           className="pointer-events-auto"
                         />

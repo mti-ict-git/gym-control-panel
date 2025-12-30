@@ -11,3 +11,11 @@ Verification:
 UI:
 - Register page shows Available as booked/quota and helper text “Remaining: X”.
 
+2025-12-30 12:26:10 +08:00
+
+Enhancement:
+- Calendar highlights tomorrow and day after tomorrow in Register page.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.
