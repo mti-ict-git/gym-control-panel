@@ -46,17 +46,17 @@ async function discoverSource(pool) {
   const explicitStaff = envTrim(process.env.CARD_DB_TX_STAFF_COL);
   const explicitEvent = envTrim(process.env.CARD_DB_TX_EVENT_COL);
 
-  if (explicitTable && explicitTime) {
+  if (explicitTable) {
     const colsRes = await pool.request().query(
       `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${explicitSchema.replace(/'/g,"''")}' AND TABLE_NAME='${explicitTable.replace(/'/g,"''")}'`
     );
     const cols = (colsRes?.recordset || []).map((x)=>String(x.COLUMN_NAME));
-    const timeCol = pickColumn(cols, [explicitTime]);
+    const timeCol = explicitTime ? pickColumn(cols, [explicitTime]) : pickColumn(cols, ['TransDateTime','EventTime','LogTime','DateTime','Time','timestamp','datetime','TransTime']);
     if (!timeCol) return null;
-    const deviceCol = explicitDevice ? pickColumn(cols, [explicitDevice]) : null;
-    const cardCol = explicitCard ? pickColumn(cols, [explicitCard]) : null;
-    const staffCol = explicitStaff ? pickColumn(cols, [explicitStaff]) : null;
-    const eventCol = explicitEvent ? pickColumn(cols, [explicitEvent]) : null;
+    const deviceCol = explicitDevice ? pickColumn(cols, [explicitDevice]) : pickColumn(cols, ['Device','Reader','Terminal','Door','DeviceName']);
+    const cardCol = explicitCard ? pickColumn(cols, [explicitCard]) : pickColumn(cols, ['CardNo','CardNumber','Card','CardID','IDCard']);
+    const staffCol = explicitStaff ? pickColumn(cols, [explicitStaff]) : pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
+    const eventCol = explicitEvent ? pickColumn(cols, [explicitEvent]) : pickColumn(cols, ['Event','EventType','Status','Action','Result']);
     return { schema: explicitSchema, table: explicitTable, timeCol, deviceCol, cardCol, staffCol, eventCol };
   }
 

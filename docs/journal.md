@@ -20,6 +20,25 @@ Verification:
 - Lint: 0 errors.
 - TypeScript check: passed.
 
+2025-12-30 14:56:28 +08:00
+
+Enhancement:
+- Updated latest transaction script to return TrName, TrController, Transaction, CardNo, TrDate, TrTime.
+
+Verification:
+- Ran lint: 0 errors, warnings only.
+- Ran TypeScript integrity check: passed (noEmit).
+
+2025-12-30 14:45:22 +08:00
+
+Learning:
+- Audited repository structure: frontend (Vite + React + shadcn + Tailwind), backend (Express + mssql), Supabase edge functions, Docker compose.
+- Mapped key flows: RegisterPage calls local backend /gym-booking-create; availability via /gym-availability with fallback /gym-bookings; sessions via /gym-sessions; Supabase public functions for register/sessions.
+
+Verification:
+- Lint: 0 errors, 8 warnings (react-refresh only-export-components).
+- TypeScript integrity check: passed (noEmit).
+
 2025-12-30 13:58:18 +08:00
 
 Enhancement:
