@@ -12,6 +12,7 @@ import { useMostRelevantSchedule } from '@/hooks/useGymSchedules';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Input } from '@/components/ui/input';
 import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext, PaginationLink } from '@/components/ui/pagination';
+import { useCardTransactions } from '@/hooks/useCardTransactions';
 
 function UserRow({ user, index, onClick }: { user: GymUser; index: number; onClick: () => void }) {
   const { data: schedule } = useMostRelevantSchedule(user.id);
@@ -56,9 +57,10 @@ export default function GymUsersPage() {
   const pageSize = 10;
 
   const { data, isLoading } = useGymUsers(search, page, pageSize);
-  const users = data?.data ?? [];
-  const total = data?.total ?? 0;
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total]);
+  const users = [];
+  const total = 0;
+  const totalPages = 1;
+  const { data: liveTx, isLoading: isLoadingTx } = useCardTransactions();
 
   return (
     <AppLayout>
@@ -68,7 +70,7 @@ export default function GymUsersPage() {
           <p className="text-muted-foreground">Real-time overview of active gym members and access status.</p>
         </div>
 
-        {isLoading ? (
+        {isLoading || isLoadingTx ? (
           <div className="space-y-4">
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
@@ -76,83 +78,36 @@ export default function GymUsersPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                  placeholder="Search name, employee ID, department"
-                  className="pl-9"
-                />
-              </div>
+            <div className="rounded-lg border bg-card overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12 text-right">No</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Card No</TableHead>
+                    <TableHead>Controller</TableHead>
+                    <TableHead>Transaction</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(liveTx ?? []).map((t, idx) => (
+                    <TableRow key={`${t.CardNo}-${t.TxnTime}-${idx}`}>
+                      <TableCell className="w-12 text-right">{idx + 1}</TableCell>
+                      <TableCell className="font-medium">{t.TrName ?? '-'}</TableCell>
+                      <TableCell>{t.CardNo ?? '-'}</TableCell>
+                      <TableCell>{t.TrController ?? '-'}</TableCell>
+                      <TableCell>{t.Transaction ?? '-'}</TableCell>
+                      <TableCell>{t.TrDate ?? '-'}</TableCell>
+                      <TableCell>{t.TrTime ?? '-'}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
             </div>
 
-            {users && users.length > 0 ? (
-              <div className="rounded-lg border bg-card overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12 text-right">No</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>ID Employee</TableHead>
-                      <TableHead>Department</TableHead>
-                      <TableHead>Schedule</TableHead>
-                      <TableHead>Time In</TableHead>
-                      <TableHead>Time Out</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {users.map((user, idx) => (
-                      <UserRow 
-                        key={user.id} 
-                        user={user}
-                        index={(page - 1) * pageSize + idx + 1}
-                        onClick={() => navigate(`/users/${user.id}`)}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <EmptyState
-                icon={Users}
-                title="No results"
-                description="Try adjusting your search keywords."
-              />
-            )}
-
-            <Pagination className="mt-2">
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious
-                    href="#"
-                    onClick={(e) => { e.preventDefault(); setPage((p) => Math.max(1, p - 1)); }}
-                  />
-                </PaginationItem>
-                {Array.from({ length: totalPages }).slice(Math.max(0, page - 3), Math.min(totalPages, page + 2)).map((_, idx) => {
-                  const pageNumber = Math.max(1, Math.min(totalPages, (page - 2) + idx));
-                  return (
-                    <PaginationItem key={pageNumber}>
-                      <PaginationLink
-                        href="#"
-                        isActive={pageNumber === page}
-                        onClick={(e) => { e.preventDefault(); setPage(pageNumber); }}
-                      >
-                        {pageNumber}
-                      </PaginationLink>
-                    </PaginationItem>
-                  );
-                })}
-                <PaginationItem>
-                  <PaginationNext
-                    href="#"
-                    onClick={(e) => { e.preventDefault(); setPage((p) => Math.min(totalPages, p + 1)); }}
-                  />
-                </PaginationItem>
-              </PaginationContent>
-            </Pagination>
+            
           </div>
         )}
       </div>

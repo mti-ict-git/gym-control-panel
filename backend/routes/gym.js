@@ -1140,8 +1140,7 @@ router.post('/gym-booking-init', async (req, res) => {
   }
 });
 
-// Initialize gym_reports table in GymDB (idempotent)
-router.post('/gym-reports-init', async (req, res) => {
+router.get('/gym-live-sync', async (req, res) => {
   const {
     DB_SERVER,
     DB_PORT,
@@ -1150,119 +1149,238 @@ router.post('/gym-reports-init', async (req, res) => {
     DB_PASSWORD,
     DB_ENCRYPT,
     DB_TRUST_SERVER_CERTIFICATE,
+    CARD_DB_SERVER,
+    CARD_DB_PORT,
+    CARD_DB_DATABASE,
+    CARD_DB_USER,
+    CARD_DB_PASSWORD,
+    CARD_DB_ENCRYPT,
+    CARD_DB_TRUST_SERVER_CERTIFICATE,
+    CARDDB_SERVER,
+    CARDDB_PORT,
+    CARDDB_NAME,
+    CARDDB_USER,
+    CARDDB_PASSWORD,
+    CARDDB_ENCRYPT,
+    CARDDB_TRUST_SERVER_CERTIFICATE,
+    CARD_DB_TX_TABLE,
+    CARD_DB_TX_SCHEMA,
+    CARD_DB_TX_TIME_COL,
+    CARD_DB_TX_DEVICE_COL,
+    CARD_DB_TX_CARD_COL,
+    CARD_DB_TX_STAFF_COL,
+    CARD_DB_TX_EVENT_COL,
   } = process.env;
 
-  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+  const gymServer = envTrim(DB_SERVER);
+  const gymDatabase = envTrim(DB_DATABASE);
+  const gymUser = envTrim(DB_USER);
+  const gymPassword = envTrim(DB_PASSWORD);
+  if (!gymServer || !gymDatabase || !gymUser || !gymPassword) {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
   }
 
-  const config = {
-    server: DB_SERVER,
+  const gymConfig = {
+    server: gymServer,
     port: Number(DB_PORT || 1433),
-    database: DB_DATABASE,
-    user: DB_USER,
-    password: DB_PASSWORD,
-    options: {
-      encrypt: envBool(DB_ENCRYPT, false),
-      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
-    },
+    database: gymDatabase,
+    user: gymUser,
+    password: gymPassword,
+    options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  const cardServer = envTrim(CARD_DB_SERVER) || envTrim(CARDDB_SERVER);
+  const cardDatabase = envTrim(CARD_DB_DATABASE) || envTrim(CARDDB_NAME);
+  const cardUser = envTrim(CARD_DB_USER) || envTrim(CARDDB_USER);
+  const cardPassword = envTrim(CARD_DB_PASSWORD) || envTrim(CARDDB_PASSWORD);
+  if (!cardServer || !cardDatabase || !cardUser || !cardPassword) {
+    return res.status(500).json({ ok: false, error: 'CardDB env is not configured' });
+  }
+
+  const cardConfig = {
+    server: cardServer,
+    port: Number(CARD_DB_PORT || CARDDB_PORT || 1433),
+    database: cardDatabase,
+    user: cardUser,
+    password: cardPassword,
+    options: { encrypt: envBool(CARD_DB_ENCRYPT, false) || envBool(CARDDB_ENCRYPT, false), trustServerCertificate: envBool(CARD_DB_TRUST_SERVER_CERTIFICATE, true) || envBool(CARDDB_TRUST_SERVER_CERTIFICATE, true) },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  const sinceStr = String(req.query.since || '').trim();
+  const limit = Number(String(req.query.limit || '200'));
+  const maxRows = Number.isFinite(limit) && limit > 0 && limit <= 1000 ? limit : 200;
+
+  const pickColumn = (columns, candidates) => {
+    const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
+    for (const cand of candidates) {
+      const hit = map.get(String(cand).toLowerCase());
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  const discoverSource = async (pool) => {
+    const explicitTable = envTrim(CARD_DB_TX_TABLE);
+    const explicitSchema = envTrim(CARD_DB_TX_SCHEMA) || 'dbo';
+    const explicitTime = envTrim(CARD_DB_TX_TIME_COL);
+    const explicitDevice = envTrim(CARD_DB_TX_DEVICE_COL);
+    const explicitCard = envTrim(CARD_DB_TX_CARD_COL);
+    const explicitStaff = envTrim(CARD_DB_TX_STAFF_COL);
+    const explicitEvent = envTrim(CARD_DB_TX_EVENT_COL);
+    if (explicitTable) {
+      const colsRes = await pool.request().query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${explicitSchema.replace(/'/g,"''")}' AND TABLE_NAME='${explicitTable.replace(/'/g,"''")}'`);
+      const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+      const timeCol = explicitTime ? pickColumn(cols, [explicitTime]) : pickColumn(cols, ['TrDateTime','TransDateTime','EventTime','LogTime','DateTime','Time','timestamp','datetime','TransTime']);
+      if (!timeCol) return null;
+      const deviceCol = explicitDevice ? pickColumn(cols, [explicitDevice]) : pickColumn(cols, ['TrController','Device','Reader','Terminal','Door','DeviceName']);
+      const cardCol = explicitCard ? pickColumn(cols, [explicitCard]) : pickColumn(cols, ['CardNo','TrCardID','CardNumber','Card','CardID','IDCard']);
+      const staffCol = explicitStaff ? pickColumn(cols, [explicitStaff]) : pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
+      const eventCol = explicitEvent ? pickColumn(cols, [explicitEvent]) : pickColumn(cols, ['Transaction','Event','EventType','Status','Action','Result']);
+      const nameCol = pickColumn(cols, ['TrName','Name','EmployeeName','EmpName','StaffName']);
+      const controllerCol = pickColumn(cols, ['TrController','Controller','Device','Reader','Terminal','Door','DeviceName']);
+      return { schema: explicitSchema, table: explicitTable, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol };
+    }
+    const candidates = ['tblTransaction','tblTransactionLive','Transaction','Transactions','AccessLog','EventLog','Logs','Attendance','History','CardTransaction'];
+    const r = await pool.request().query(`SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' AND TABLE_NAME IN (${candidates.map((t)=>`'${t}'`).join(',')}) ORDER BY CASE WHEN TABLE_SCHEMA='dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA, TABLE_NAME`);
+    const row = r?.recordset?.[0];
+    if (!row) return null;
+    const schema = String(row.TABLE_SCHEMA);
+    const table = String(row.TABLE_NAME);
+    const colsRes = await pool.request().query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${schema.replace(/'/g,"''")}' AND TABLE_NAME='${table.replace(/'/g,"''")}'`);
+    const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+    const timeCol = pickColumn(cols, ['TrDateTime','TransDateTime','EventTime','LogTime','DateTime','Time','timestamp','datetime','TransTime']);
+    const deviceCol = pickColumn(cols, ['TrController','Device','Reader','Terminal','Door','DeviceName']);
+    const cardCol = pickColumn(cols, ['CardNo','TrCardID','CardNumber','Card','CardID','IDCard']);
+    const staffCol = pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
+    const eventCol = pickColumn(cols, ['Transaction','Event','EventType','Status','Action','Result']);
+    const nameCol = pickColumn(cols, ['TrName','Name','EmployeeName','EmpName','StaffName']);
+    const controllerCol = pickColumn(cols, ['TrController','Controller','Device','Reader','Terminal','Door','DeviceName']);
+    if (!timeCol) return null;
+    return { schema, table, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol };
+  };
+
   try {
-    const pool = await sql.connect(config);
-    const tx = new sql.Transaction(pool);
+    const gymPool = await sql.connect(gymConfig);
+    const tx = new sql.Transaction(gymPool);
     await tx.begin();
     const exec = async (q) => tx.request().query(q);
-
     await exec('SET NOCOUNT ON;');
+    await exec(`IF OBJECT_ID('dbo.gym_live_taps','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_live_taps (
+        Id INT IDENTITY(1,1) PRIMARY KEY,
+        TrName NVARCHAR(200) NULL,
+        TrController NVARCHAR(200) NULL,
+        [Transaction] NVARCHAR(100) NULL,
+        CardNo NVARCHAR(100) NULL,
+        TrDate DATE NULL,
+        TrTime VARCHAR(8) NULL,
+        TxnTime DATETIME NOT NULL,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_live_taps_CreatedAt DEFAULT GETDATE()
+      );
+    END`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_gym_live_taps_unique' AND object_id = OBJECT_ID('dbo.gym_live_taps')) BEGIN
+      CREATE UNIQUE INDEX UX_gym_live_taps_unique ON dbo.gym_live_taps (CardNo, TxnTime, TrController) WHERE CardNo IS NOT NULL;
+    END`);
+    await tx.commit();
 
-    const tableExists = await exec("SELECT OBJECT_ID('dbo.gym_reports','U') AS id;");
-    if (!tableExists?.recordset?.[0]?.id) {
-      await exec(`
-        CREATE TABLE dbo.gym_reports (
-          ReportID INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-          BookingID INT NOT NULL,
-          EmployeeID VARCHAR(20) NOT NULL,
-          Department VARCHAR(100) NULL,
-          Gender VARCHAR(10) NULL,
-          SessionName VARCHAR(50) NOT NULL,
-          TimeIn DATETIME NULL,
-          TimeOut DATETIME NULL,
-          ReportDate DATE NOT NULL,
-          CreatedAt DATETIME NOT NULL DEFAULT(GETDATE())
-        );
-      `);
-
-      await exec(`
-        CREATE INDEX IX_gym_reports_ReportDate ON dbo.gym_reports(ReportDate);
-        CREATE INDEX IX_gym_reports_BookingID ON dbo.gym_reports(BookingID);
-      `);
+    const cardPool = await sql.connect(cardConfig);
+    const src = await discoverSource(cardPool);
+    if (!src) {
+      await cardPool.close();
+      await gymPool.close();
+      return res.status(200).json({ ok: false, error: 'No transaction source table discovered' });
     }
 
-    await tx.commit();
-    await pool.close();
-    return res.json({ ok: true });
+    const req2 = cardPool.request();
+    let where = '';
+    if (sinceStr) {
+      const sinceDate = new Date(sinceStr);
+      if (!isNaN(sinceDate.getTime())) {
+        req2.input('since', sql.DateTime, sinceDate);
+        where = `WHERE [${src.timeCol}] > @since`;
+      }
+    }
+    const orderBy = `[${src.timeCol}] DESC`;
+    const query = `SELECT TOP ${maxRows} ${[
+      src.nameCol ? `[${src.nameCol}] AS TrName` : `CAST(NULL AS nvarchar(200)) AS TrName`,
+      src.controllerCol ? `[${src.controllerCol}] AS TrController` : `CAST(NULL AS nvarchar(200)) AS TrController`,
+      src.eventCol ? `[${src.eventCol}] AS [Transaction]` : `CAST(NULL AS nvarchar(100)) AS [Transaction]`,
+      src.cardCol ? `[${src.cardCol}] AS CardNo` : `CAST(NULL AS nvarchar(100)) AS CardNo`,
+      `CONVERT(date, [${src.timeCol}]) AS TrDate`,
+      `CONVERT(varchar(8), [${src.timeCol}], 108) AS TrTime`,
+      `[${src.timeCol}] AS TxnTime`
+    ].join(', ')} FROM [${src.schema}].[${src.table}] ${where} ORDER BY ${orderBy}`;
+    const result = await req2.query(query);
+    await cardPool.close();
+
+    const rows = Array.isArray(result?.recordset) ? result.recordset : [];
+    for (const r of rows) {
+      const ins = gymPool.request();
+      ins.input('TrName', sql.NVarChar(200), r.TrName != null ? String(r.TrName) : null);
+      ins.input('TrController', sql.NVarChar(200), r.TrController != null ? String(r.TrController) : null);
+      ins.input('Transaction', sql.NVarChar(100), r.Transaction != null ? String(r.Transaction) : null);
+      ins.input('CardNo', sql.NVarChar(100), r.CardNo != null ? String(r.CardNo) : null);
+      ins.input('TrDate', sql.Date, r.TrDate != null ? new Date(String(r.TrDate)) : null);
+      ins.input('TrTime', sql.VarChar(8), r.TrTime != null ? String(r.TrTime) : null);
+      ins.input('TxnTime', sql.DateTime, r.TxnTime instanceof Date ? r.TxnTime : new Date(String(r.TxnTime)));
+      await ins.query(`IF NOT EXISTS (
+        SELECT 1 FROM dbo.gym_live_taps WHERE ISNULL(CardNo,'') = ISNULL(@CardNo,'') AND TxnTime = @TxnTime AND ISNULL(TrController,'') = ISNULL(@TrController,'')
+      ) BEGIN
+        INSERT INTO dbo.gym_live_taps (TrName, TrController, [Transaction], CardNo, TrDate, TrTime, TxnTime) VALUES (@TrName, @TrController, @Transaction, @CardNo, @TrDate, @TrTime, @TxnTime)
+      END`);
+    }
+
+    await gymPool.close();
+    return res.json({ ok: true, inserted: rows.length });
   } catch (error) {
-    try { /* attempt rollback if possible */ } catch (_) {}
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
   }
 });
 
-// List reports from dbo.gym_reports (basic)
-router.get('/gym-reports', async (req, res) => {
-  const {
-    DB_SERVER,
-    DB_PORT,
-    DB_DATABASE,
-    DB_USER,
-    DB_PASSWORD,
-    DB_ENCRYPT,
-    DB_TRUST_SERVER_CERTIFICATE,
-  } = process.env;
-
-  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
-    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', reports: [] });
+router.get('/gym-live-persisted', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
   }
-
-  const config = {
-    server: DB_SERVER,
-    port: Number(DB_PORT || 1433),
-    database: DB_DATABASE,
-    user: DB_USER,
-    password: DB_PASSWORD,
-    options: {
-      encrypt: envBool(DB_ENCRYPT, false),
-      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
-    },
-    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
-  };
-
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  const sinceStr = String(req.query.since || '').trim();
+  const limit = Number(String(req.query.limit || '100'));
+  const maxRows = Number.isFinite(limit) && limit > 0 && limit <= 1000 ? limit : 100;
   try {
     const pool = await sql.connect(config);
-    const result = await pool.request().query(
-      `SELECT ReportID AS report_id, BookingID AS booking_id, EmployeeID AS employee_id, Department AS department, Gender AS gender, SessionName AS session_name, TimeIn AS time_in, TimeOut AS time_out, ReportDate AS report_date, CreatedAt AS created_at FROM dbo.gym_reports ORDER BY ReportDate DESC, ReportID DESC`
-    );
+    const req2 = pool.request();
+    let where = '';
+    if (sinceStr) {
+      const sinceDate = new Date(sinceStr);
+      if (!isNaN(sinceDate.getTime())) {
+        req2.input('since', sql.DateTime, sinceDate);
+        where = 'WHERE TxnTime > @since';
+      }
+    }
+    const q = `SELECT TOP ${maxRows} TrName, TrController, [Transaction], CardNo, TrDate, TrTime, TxnTime FROM dbo.gym_live_taps ${where} ORDER BY TxnTime DESC`;
+    const r = await req2.query(q);
     await pool.close();
-
-    const reports = Array.isArray(result?.recordset) ? result.recordset.map((r) => ({
-      report_id: Number(r.report_id),
-      booking_id: Number(r.booking_id),
-      employee_id: String(r.employee_id ?? '').trim(),
-      department: r.department != null ? String(r.department).trim() : null,
-      gender: r.gender != null ? String(r.gender).trim() : null,
-      session_name: String(r.session_name ?? '').trim(),
-      time_in: r.time_in instanceof Date ? r.time_in.toISOString() : (r.time_in ? String(r.time_in) : null),
-      time_out: r.time_out instanceof Date ? r.time_out.toISOString() : (r.time_out ? String(r.time_out) : null),
-      report_date: r.report_date instanceof Date ? r.report_date.toISOString().slice(0,10) : String(r.report_date ?? ''),
-      created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at ?? ''),
-    })) : [];
-
-    return res.json({ ok: true, reports });
+    const rows = Array.isArray(r?.recordset) ? r.recordset : [];
+    const out = rows.map((x) => ({
+      TrName: x.TrName != null ? String(x.TrName) : null,
+      TrController: x.TrController != null ? String(x.TrController) : null,
+      Transaction: x.Transaction != null ? String(x.Transaction) : null,
+      CardNo: x.CardNo != null ? String(x.CardNo) : null,
+      TrDate: x.TrDate != null ? String(x.TrDate) : null,
+      TrTime: x.TrTime != null ? String(x.TrTime) : null,
+      TxnTime: x.TxnTime instanceof Date ? x.TxnTime.toISOString() : String(x.TxnTime || '')
+    }));
+    return res.json({ ok: true, transactions: out });
   } catch (error) {
     const message = error?.message || String(error);
-    return res.status(200).json({ ok: false, error: message, reports: [] });
+    return res.status(200).json({ ok: false, error: message });
   }
 });
 

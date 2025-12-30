@@ -48,6 +48,27 @@ Verification:
 - Lint: 0 errors.
 - TypeScript check: passed.
 
+2025-12-30 15:07:40 +08:00
+
+Enhancement:
+- Added backend endpoint GET /gym-live-transactions returning TrName, TrController, Transaction, CardNo, TrDate, TrTime, TxnTime with optional since and limit.
+- Added frontend hook useCardTransactions with 2s polling.
+- Updated Live Gym page to display recent door taps.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript check: passed.
+
+2025-12-30 15:12:08 +08:00
+
+Enhancement:
+- Enabled React Router future flags (v7_startTransition, v7_relativeSplatPath) to align with upcoming v7 behavior and suppress warnings.
+- Adjusted client polling to include since watermark and stabilize hook order after hard reload.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
 2025-12-30 14:06:20 +08:00
 
 Enhancement:
