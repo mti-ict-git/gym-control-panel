@@ -281,3 +281,8 @@ This journal tracks decisions, notes, and progress for the project.
     - Compact paddings, text sizes, icon-only actions
     - Accordion for gender/department details on demand
   - File: [VaultPage.tsx](file:///c:/Scripts/Projects/gym-control-panel/src/pages/VaultPage.tsx#L132-L198)
+
+- 2025-12-30 14:21:36
+  - Fix Dialog accessibility warning: add DialogTitle to CommandDialog
+    - Hidden title with sr-only to satisfy Radix requirement
+  - File: [command.tsx](file:///c:/Scripts/Projects/gym-control-panel/src/components/ui/command.tsx#L26-L36)
