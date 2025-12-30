@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => ({
     allowedHosts: ["mti-gym.merdekabattery.com"],
     proxy: {
       "/api": {
-        target: "http://localhost:5055",
+        target: process.env.VITE_BACKEND_URL || "http://localhost:5055",
         changeOrigin: true,
         secure: false,
       },
