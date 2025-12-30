@@ -1140,4 +1140,130 @@ router.post('/gym-booking-init', async (req, res) => {
   }
 });
 
+// Initialize gym_reports table in GymDB (idempotent)
+router.post('/gym-reports-init', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: envBool(DB_ENCRYPT, false),
+      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    const exec = async (q) => tx.request().query(q);
+
+    await exec('SET NOCOUNT ON;');
+
+    const tableExists = await exec("SELECT OBJECT_ID('dbo.gym_reports','U') AS id;");
+    if (!tableExists?.recordset?.[0]?.id) {
+      await exec(`
+        CREATE TABLE dbo.gym_reports (
+          ReportID INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          BookingID INT NOT NULL,
+          EmployeeID VARCHAR(20) NOT NULL,
+          Department VARCHAR(100) NULL,
+          Gender VARCHAR(10) NULL,
+          SessionName VARCHAR(50) NOT NULL,
+          TimeIn DATETIME NULL,
+          TimeOut DATETIME NULL,
+          ReportDate DATE NOT NULL,
+          CreatedAt DATETIME NOT NULL DEFAULT(GETDATE())
+        );
+      `);
+
+      await exec(`
+        CREATE INDEX IX_gym_reports_ReportDate ON dbo.gym_reports(ReportDate);
+        CREATE INDEX IX_gym_reports_BookingID ON dbo.gym_reports(BookingID);
+      `);
+    }
+
+    await tx.commit();
+    await pool.close();
+    return res.json({ ok: true });
+  } catch (error) {
+    try { /* attempt rollback if possible */ } catch (_) {}
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+// List reports from dbo.gym_reports (basic)
+router.get('/gym-reports', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', reports: [] });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: envBool(DB_ENCRYPT, false),
+      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const result = await pool.request().query(
+      `SELECT ReportID AS report_id, BookingID AS booking_id, EmployeeID AS employee_id, Department AS department, Gender AS gender, SessionName AS session_name, TimeIn AS time_in, TimeOut AS time_out, ReportDate AS report_date, CreatedAt AS created_at FROM dbo.gym_reports ORDER BY ReportDate DESC, ReportID DESC`
+    );
+    await pool.close();
+
+    const reports = Array.isArray(result?.recordset) ? result.recordset.map((r) => ({
+      report_id: Number(r.report_id),
+      booking_id: Number(r.booking_id),
+      employee_id: String(r.employee_id ?? '').trim(),
+      department: r.department != null ? String(r.department).trim() : null,
+      gender: r.gender != null ? String(r.gender).trim() : null,
+      session_name: String(r.session_name ?? '').trim(),
+      time_in: r.time_in instanceof Date ? r.time_in.toISOString() : (r.time_in ? String(r.time_in) : null),
+      time_out: r.time_out instanceof Date ? r.time_out.toISOString() : (r.time_out ? String(r.time_out) : null),
+      report_date: r.report_date instanceof Date ? r.report_date.toISOString().slice(0,10) : String(r.report_date ?? ''),
+      created_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at ?? ''),
+    })) : [];
+
+    return res.json({ ok: true, reports });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, reports: [] });
+  }
+});
+
 export default router;

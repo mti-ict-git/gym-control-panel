@@ -192,3 +192,26 @@ Enhancement:
 Verification:
 - Lint: 0 errors.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-30 15:25:26 +08:00
+
+Enhancement:
+- Updated Reports page to use GymDB bookings and show columns: No, ID Booking, Employee ID, Department, Gender, Session, Time In, Time Out.
+
+Backend:
+- Added /gym-reports-init to create dbo.gym_reports with schema: ReportID INT IDENTITY PRIMARY KEY, BookingID INT, EmployeeID VARCHAR(20), Department VARCHAR(100), Gender VARCHAR(10), SessionName VARCHAR(50), TimeIn DATETIME NULL, TimeOut DATETIME NULL, ReportDate DATE NOT NULL, CreatedAt DATETIME DEFAULT GETDATE().
+- Added indexes on ReportDate and BookingID.
+- Added /gym-reports endpoint to list report rows.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 15:28:43 +08:00
+
+Database:
+- Executed POST /api/gym-reports-init on local GymDB service to create dbo.gym_reports.
+- Verified with GET /api/gym-reports → ok:true, reports: [].
+
+Notes:
+- Table creation is idempotent; route can be re-run safely.
