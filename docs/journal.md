@@ -263,3 +263,12 @@ Enhancement:
 Verification:
 - Lint: 0 errors.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-30 16:17:57 +08:00
+
+Enhancement:
+- Management page account creation form: enforced complex passwords (min 8 chars, upper/lower/number/symbol), added Re-confirm Password field, and eye toggles for both fields.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).

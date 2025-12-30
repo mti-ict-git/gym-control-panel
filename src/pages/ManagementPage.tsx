@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { UserCog, Shield, Users, UserPlus } from 'lucide-react';
+import { UserCog, Shield, Users, UserPlus, Eye, EyeOff } from 'lucide-react';
 
 type AppRole = 'admin' | 'user' | 'superadmin' | 'committee';
 
@@ -28,8 +28,11 @@ export default function ManagementPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserConfirmPassword, setNewUserConfirmPassword] = useState('');
   const [newUserUsername, setNewUserUsername] = useState('');
   const [newUserRole, setNewUserRole] = useState<AppRole>('admin');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const fetchUsers = async () => {
     setIsLoading(true);
@@ -100,14 +103,28 @@ export default function ManagementPage() {
     }
   };
 
+  const isPasswordComplex = (pwd: string) => {
+    const hasMinLen = pwd.length >= 8;
+    const hasUpper = /[A-Z]/.test(pwd);
+    const hasLower = /[a-z]/.test(pwd);
+    const hasNumber = /[0-9]/.test(pwd);
+    const hasSymbol = /[^A-Za-z0-9]/.test(pwd);
+    return hasMinLen && hasUpper && hasLower && hasNumber && hasSymbol;
+  };
+
   const handleCreateUser = async () => {
     if (!newUserEmail || !newUserPassword || !newUserUsername) {
       toast.error('Please fill in all fields');
       return;
     }
 
-    if (newUserPassword.length < 6) {
-      toast.error('Password must be at least 6 characters');
+    if (!isPasswordComplex(newUserPassword)) {
+      toast.error('Password must be 8+ chars, include upper, lower, number, symbol');
+      return;
+    }
+
+    if (newUserPassword !== newUserConfirmPassword) {
+      toast.error('Passwords do not match');
       return;
     }
 
@@ -149,11 +166,13 @@ export default function ManagementPage() {
       setNewUserEmail('');
       setNewUserPassword('');
       setNewUserUsername('');
+      setNewUserConfirmPassword('');
       setNewUserRole('admin');
       fetchUsers();
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Failed to create account';
       console.error('Error creating user:', error);
-      toast.error(error.message || 'Failed to create account');
+      toast.error(msg);
     } finally {
       setIsCreating(false);
     }
@@ -232,13 +251,43 @@ export default function ManagementPage() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="password">Password</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={newUserPassword}
-                  onChange={(e) => setNewUserPassword(e.target.value)}
-                  placeholder="Enter password (min 6 characters)"
-                />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={newUserPassword}
+                    onChange={(e) => setNewUserPassword(e.target.value)}
+                    placeholder="Enter password (min 8, upper/lower/number/symbol)"
+                    className="pr-12"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  >
+                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="confirm-password">Re-confirm Password</Label>
+                <div className="relative">
+                  <Input
+                    id="confirm-password"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={newUserConfirmPassword}
+                    onChange={(e) => setNewUserConfirmPassword(e.target.value)}
+                    placeholder="Re-enter password"
+                    className="pr-12"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
+                </div>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="role">Role</Label>
