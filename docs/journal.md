@@ -254,3 +254,12 @@ Enhancement:
 Verification:
 - Lint: 0 errors.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-30 15:48:20 +08:00
+
+Enhancement:
+- Updated Reports page column set and order to: No, ID, Card No, Employee ID, Department, Gender, In, Out, Time Schedule, Session. CSV export matches the same order.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
