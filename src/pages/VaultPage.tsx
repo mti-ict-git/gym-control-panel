@@ -34,10 +34,7 @@ export default function VaultPage() {
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({ booking_id, status }: { booking_id: number; status: 'APPROVED' | 'REJECTED' }) => {
-      const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
-      if (!endpoint) throw new Error('DB Endpoint not configured');
-
-      const resp = await fetch(`${endpoint}/gym-booking-update-status`, {
+      const resp = await fetch(`/api/gym-booking-update-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ booking_id, approval_status: status }),

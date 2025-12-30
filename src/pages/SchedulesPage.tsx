@@ -32,7 +32,7 @@ export default function SchedulesPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const { data: sessions, isLoading, refetch } = useGymDbSessions();
-  const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
+  const endpoint = '/api';
 
   const endFor = (label: string): string | null => {
     switch (label) {
@@ -194,7 +194,6 @@ export default function SchedulesPage() {
         onOpenChange={setSessionDialogOpen}
         onSubmit={async (data) => {
           try {
-            if (!endpoint) throw new Error('DB tester endpoint is not configured');
             const resp = await fetch(`${endpoint}/gym-session-create`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -228,7 +227,6 @@ export default function SchedulesPage() {
           if (!editingSession) return;
           setIsSaving(true);
           try {
-            if (!endpoint) throw new Error('DB tester endpoint is not configured');
             const resp = await fetch(`${endpoint}/gym-session-update`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -277,7 +275,6 @@ export default function SchedulesPage() {
                 if (!deletingSession) return;
                 setIsDeleting(true);
                 try {
-                  if (!endpoint) throw new Error('DB tester endpoint is not configured');
                   const resp = await fetch(`${endpoint}/gym-session-delete`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
