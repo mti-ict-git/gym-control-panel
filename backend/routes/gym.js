@@ -1140,4 +1140,159 @@ router.post('/gym-booking-init', async (req, res) => {
   }
 });
 
+router.get('/gym-live-transactions', async (req, res) => {
+  const {
+    CARD_DB_SERVER,
+    CARD_DB_PORT,
+    CARD_DB_DATABASE,
+    CARD_DB_USER,
+    CARD_DB_PASSWORD,
+    CARD_DB_ENCRYPT,
+    CARD_DB_TRUST_SERVER_CERTIFICATE,
+    CARDDB_SERVER,
+    CARDDB_PORT,
+    CARDDB_NAME,
+    CARDDB_USER,
+    CARDDB_PASSWORD,
+    CARDDB_ENCRYPT,
+    CARDDB_TRUST_SERVER_CERTIFICATE,
+    CARD_DB_TX_TABLE,
+    CARD_DB_TX_SCHEMA,
+    CARD_DB_TX_TIME_COL,
+    CARD_DB_TX_DEVICE_COL,
+    CARD_DB_TX_CARD_COL,
+    CARD_DB_TX_STAFF_COL,
+    CARD_DB_TX_EVENT_COL,
+  } = process.env;
+
+  const server = envTrim(CARD_DB_SERVER) || envTrim(CARDDB_SERVER);
+  const database = envTrim(CARD_DB_DATABASE) || envTrim(CARDDB_NAME);
+  const user = envTrim(CARD_DB_USER) || envTrim(CARDDB_USER);
+  const password = envTrim(CARD_DB_PASSWORD) || envTrim(CARDDB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'CardDB env is not configured' });
+  }
+
+  const config = {
+    server,
+    port: Number(CARD_DB_PORT || CARDDB_PORT || 1433),
+    database,
+    user,
+    password,
+    options: {
+      encrypt: envBool(CARD_DB_ENCRYPT, false) || envBool(CARDDB_ENCRYPT, false),
+      trustServerCertificate: envBool(CARD_DB_TRUST_SERVER_CERTIFICATE, true) || envBool(CARDDB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  const sinceStr = String(req.query.since || '').trim();
+  const limit = Number(String(req.query.limit || '50'));
+  const maxRows = Number.isFinite(limit) && limit > 0 && limit <= 500 ? limit : 50;
+
+  const pickColumn = (columns, candidates) => {
+    const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
+    for (const cand of candidates) {
+      const hit = map.get(String(cand).toLowerCase());
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  const discoverSource = async (pool) => {
+    const explicitTable = envTrim(CARD_DB_TX_TABLE);
+    const explicitSchema = envTrim(CARD_DB_TX_SCHEMA) || 'dbo';
+    const explicitTime = envTrim(CARD_DB_TX_TIME_COL);
+    const explicitDevice = envTrim(CARD_DB_TX_DEVICE_COL);
+    const explicitCard = envTrim(CARD_DB_TX_CARD_COL);
+    const explicitStaff = envTrim(CARD_DB_TX_STAFF_COL);
+    const explicitEvent = envTrim(CARD_DB_TX_EVENT_COL);
+
+    if (explicitTable) {
+      const colsRes = await pool.request().query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${explicitSchema.replace(/'/g,"''")}' AND TABLE_NAME='${explicitTable.replace(/'/g,"''")}'`
+      );
+      const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+      const timeCol = explicitTime ? pickColumn(cols, [explicitTime]) : pickColumn(cols, ['TrDateTime','TransDateTime','EventTime','LogTime','DateTime','Time','timestamp','datetime','TransTime']);
+      if (!timeCol) return null;
+      const deviceCol = explicitDevice ? pickColumn(cols, [explicitDevice]) : pickColumn(cols, ['TrController','Device','Reader','Terminal','Door','DeviceName']);
+      const cardCol = explicitCard ? pickColumn(cols, [explicitCard]) : pickColumn(cols, ['CardNo','TrCardID','CardNumber','Card','CardID','IDCard']);
+      const staffCol = explicitStaff ? pickColumn(cols, [explicitStaff]) : pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
+      const eventCol = explicitEvent ? pickColumn(cols, [explicitEvent]) : pickColumn(cols, ['Transaction','Event','EventType','Status','Action','Result']);
+      const nameCol = pickColumn(cols, ['TrName','Name','EmployeeName','EmpName','StaffName']);
+      const controllerCol = pickColumn(cols, ['TrController','Controller','Device','Reader','Terminal','Door','DeviceName']);
+      return { schema: explicitSchema, table: explicitTable, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol };
+    }
+
+    const candidates = ['tblTransaction','tblTransactionLive','Transaction','Transactions','AccessLog','EventLog','Logs','Attendance','History','CardTransaction'];
+    const r = await pool.request().query(
+      `SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' AND TABLE_NAME IN (${candidates.map((t)=>`'${t}'`).join(',')}) ORDER BY CASE WHEN TABLE_SCHEMA='dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA, TABLE_NAME`
+    );
+    const row = r?.recordset?.[0];
+    if (!row) return null;
+    const schema = String(row.TABLE_SCHEMA);
+    const table = String(row.TABLE_NAME);
+    const colsRes = await pool.request().query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${schema.replace(/'/g,"''")}' AND TABLE_NAME='${table.replace(/'/g,"''")}'`
+    );
+    const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+    const timeCol = pickColumn(cols, ['TrDateTime','TransDateTime','EventTime','LogTime','DateTime','Time','timestamp','datetime','TransTime']);
+    const deviceCol = pickColumn(cols, ['TrController','Device','Reader','Terminal','Door','DeviceName']);
+    const cardCol = pickColumn(cols, ['CardNo','TrCardID','CardNumber','Card','CardID','IDCard']);
+    const staffCol = pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
+    const eventCol = pickColumn(cols, ['Transaction','Event','EventType','Status','Action','Result']);
+    const nameCol = pickColumn(cols, ['TrName','Name','EmployeeName','EmpName','StaffName']);
+    const controllerCol = pickColumn(cols, ['TrController','Controller','Device','Reader','Terminal','Door','DeviceName']);
+    if (!timeCol) return null;
+    return { schema, table, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol };
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const src = await discoverSource(pool);
+    if (!src) {
+      await pool.close();
+      return res.status(200).json({ ok: false, error: 'No transaction source table discovered' });
+    }
+
+    const req2 = pool.request();
+    let where = '';
+    if (sinceStr) {
+      const sinceDate = new Date(sinceStr);
+      if (!isNaN(sinceDate.getTime())) {
+        req2.input('since', sql.DateTime, sinceDate);
+        where = `WHERE [${src.timeCol}] > @since`;
+      }
+    }
+
+    const orderBy = `[${src.timeCol}] DESC`;
+    const query = `SELECT TOP ${maxRows} ${[
+      src.nameCol ? `[${src.nameCol}] AS TrName` : `CAST(NULL AS nvarchar(200)) AS TrName`,
+      src.controllerCol ? `[${src.controllerCol}] AS TrController` : `CAST(NULL AS nvarchar(200)) AS TrController`,
+      src.eventCol ? `[${src.eventCol}] AS [Transaction]` : `CAST(NULL AS nvarchar(100)) AS [Transaction]`,
+      src.cardCol ? `[${src.cardCol}] AS CardNo` : `CAST(NULL AS nvarchar(100)) AS CardNo`,
+      `CONVERT(date, [${src.timeCol}]) AS TrDate`,
+      `CONVERT(varchar(8), [${src.timeCol}], 108) AS TrTime`,
+      `[${src.timeCol}] AS TxnTime`
+    ].join(', ')} FROM [${src.schema}].[${src.table}] ${where} ORDER BY ${orderBy}`;
+    const result = await req2.query(query);
+    await pool.close();
+
+    const rows = Array.isArray(result?.recordset) ? result.recordset : [];
+    const out = rows.map((r) => ({
+      TrName: r.TrName != null ? String(r.TrName) : null,
+      TrController: r.TrController != null ? String(r.TrController) : null,
+      Transaction: r.Transaction != null ? String(r.Transaction) : null,
+      CardNo: r.CardNo != null ? String(r.CardNo) : null,
+      TrDate: r.TrDate != null ? String(r.TrDate) : null,
+      TrTime: r.TrTime != null ? String(r.TrTime) : null,
+      TxnTime: r.TxnTime instanceof Date ? r.TxnTime.toISOString() : String(r.TxnTime || '')
+    }));
+    return res.json({ ok: true, transactions: out, source: src });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
 export default router;
