@@ -784,6 +784,7 @@ router.post('/gym-booking-create', async (req, res) => {
       const cardCol = pickColumn(cols, ['card_no', 'CardNo', 'card_number', 'CardNumber', 'id_card', 'IDCard']);
       const activeCol = pickColumn(cols, ['is_active', 'IsActive', 'active', 'Active', 'status', 'Status']);
       const delStateCol = pickColumn(cols, ['del_state', 'DelState']);
+      const blockCol = pickColumn(cols, ['block', 'Block', 'is_blocked', 'IsBlocked']);
 
       if (!empCol || !cardCol) {
         await pool.close();
@@ -793,14 +794,14 @@ router.post('/gym-booking-create', async (req, res) => {
       const req2 = pool.request();
       req2.input('id', sql.VarChar(100), String(empId));
 
-      const activeWhere = activeCol
-        ? `AND ([${activeCol}] = 1 OR UPPER(CAST([${activeCol}] AS varchar(50))) IN ('ACTIVE','AKTIF','1','TRUE'))`
+      const delStateWhere = delStateCol ? `AND ([${delStateCol}] = 0 OR [${delStateCol}] IS NULL)` : '';
+      const blockWhere = blockCol ? `AND ([${blockCol}] IS NULL OR [${blockCol}] = 0 OR UPPER(CAST([${blockCol}] AS varchar(50))) IN ('UNBLOCK','FALSE','0'))` : '';
+      const orderBy = activeCol
+        ? `ORDER BY CASE WHEN ([${activeCol}] = 1 OR UPPER(CAST([${activeCol}] AS varchar(50))) IN ('ACTIVE','AKTIF','1','TRUE')) THEN 0 ELSE 1 END`
         : '';
 
-      const delStateWhere = '';
-
       const cardResult = await req2.query(
-        `SELECT TOP 1 [${cardCol}] AS card_no FROM [${schema}].[${table}] WHERE [${empCol}] = @id ${activeWhere} ${delStateWhere}`
+        `SELECT TOP 1 [${cardCol}] AS card_no FROM [${schema}].[${table}] WHERE [${empCol}] = @id ${delStateWhere} ${blockWhere} ${orderBy}`
       );
       await pool.close();
 
