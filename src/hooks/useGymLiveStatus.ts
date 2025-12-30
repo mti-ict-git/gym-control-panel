@@ -22,11 +22,20 @@ export function useGymLiveStatus() {
         if (r.status >= 500) throw new Error(j?.error || 'Server error');
         return j;
       };
+      const endpoint = String(import.meta.env.VITE_BACKEND_URL || '').trim();
+      const candidates: string[] = [];
+      if (endpoint) {
+        candidates.push(`${endpoint}/api/gym-live-status`);
+        candidates.push(`${endpoint}/gym-live-status`);
+      }
+      candidates.push('/api/gym-live-status');
+      candidates.push('/gym-live-status');
       let json: LiveStatusResponse = null;
-      try {
-        json = await tryFetch('/api/gym-live-status');
-      } catch (_) {
-        json = await tryFetch('/gym-live-status');
+      for (const url of candidates) {
+        try {
+          json = await tryFetch(url);
+          break;
+        } catch (_) { continue; }
       }
       if (!json || !json.ok) throw new Error(json?.error || 'Failed to load live status');
       return Array.isArray(json.people) ? json.people : [];
@@ -34,4 +43,3 @@ export function useGymLiveStatus() {
     refetchInterval: 2000,
   });
 }
-

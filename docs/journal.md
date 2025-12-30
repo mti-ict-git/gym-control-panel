@@ -38,19 +38,6 @@ Learning:
 Verification:
 - Lint: 0 errors, 8 warnings (react-refresh only-export-components).
 - TypeScript integrity check: passed (noEmit).
- 
-Tuesday, December 30, 2025 9:04:43 PM
-
-Supabase Removal:
-- Deleted supabase directory (functions, migrations, config) and integrations client/types.
-- Removed Supabase import from ReportsPage; switched to GymDB bookings.
-- Uninstalled @supabase/supabase-js.
-- Refactored useNextScheduleForUser and useMostRelevantSchedule to use GymDB /gym-bookings-by-employee.
-- Disabled add-user mutations to avoid Supabase; users sourced from MasterDB.
-
-Verification:
-- Lint: 0 errors, warnings only.
-- TypeScript integrity check: passed (noEmit).
 
 2025-12-30 13:58:18 +08:00
 
@@ -457,14 +444,5 @@ Auth Env Fixed:
 
 Verification:
 - Health: GET /api/health → ok:true
-- Lint: 0 errors, warnings only.
-- TypeScript integrity check: passed (noEmit).
-2025-12-30 20:43:29 +08:00
-
-Supabase Env Removal Safe-Guard:
-- Updated supabase client to avoid immediate initialization when VITE_SUPABASE_* envs are missing.
-- Exported a disabled client stub that throws only on use; prevents app blank screen on startup.
-
-Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
