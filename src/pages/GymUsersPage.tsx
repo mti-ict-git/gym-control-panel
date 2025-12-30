@@ -57,9 +57,9 @@ export default function GymUsersPage() {
   const pageSize = 10;
 
   const { data, isLoading } = useGymUsers(search, page, pageSize);
-  const users = data?.data ?? [];
-  const total = data?.total ?? 0;
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / pageSize)), [total]);
+  const users = [];
+  const total = 0;
+  const totalPages = 1;
   const { data: liveTx, isLoading: isLoadingTx } = useCardTransactions();
 
   return (
@@ -107,83 +107,7 @@ export default function GymUsersPage() {
               </Table>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                  placeholder="Search name, employee ID, department"
-                  className="pl-9"
-                />
-              </div>
-            </div>
-
-            {users && users.length > 0 ? (
-              <div className="rounded-lg border bg-card overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12 text-right">No</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>ID Employee</TableHead>
-                      <TableHead>Department</TableHead>
-                      <TableHead>Schedule</TableHead>
-                      <TableHead>Time In</TableHead>
-                      <TableHead>Time Out</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {users.map((user, idx) => (
-                      <UserRow 
-                        key={user.id} 
-                        user={user}
-                        index={(page - 1) * pageSize + idx + 1}
-                        onClick={() => navigate(`/users/${user.id}`)}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <EmptyState
-                icon={Users}
-                title="No results"
-                description="Try adjusting your search keywords."
-              />
-            )}
-
-            <Pagination className="mt-2">
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious
-                    href="#"
-                    onClick={(e) => { e.preventDefault(); setPage((p) => Math.max(1, p - 1)); }}
-                  />
-                </PaginationItem>
-                {Array.from({ length: totalPages }).slice(Math.max(0, page - 3), Math.min(totalPages, page + 2)).map((_, idx) => {
-                  const pageNumber = Math.max(1, Math.min(totalPages, (page - 2) + idx));
-                  return (
-                    <PaginationItem key={pageNumber}>
-                      <PaginationLink
-                        href="#"
-                        isActive={pageNumber === page}
-                        onClick={(e) => { e.preventDefault(); setPage(pageNumber); }}
-                      >
-                        {pageNumber}
-                      </PaginationLink>
-                    </PaginationItem>
-                  );
-                })}
-                <PaginationItem>
-                  <PaginationNext
-                    href="#"
-                    onClick={(e) => { e.preventDefault(); setPage((p) => Math.min(totalPages, p + 1)); }}
-                  />
-                </PaginationItem>
-              </PaginationContent>
-            </Pagination>
+            
           </div>
         )}
       </div>

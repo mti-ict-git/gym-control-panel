@@ -30,9 +30,14 @@ export function useCardTransactions() {
       params.set('limit', '100');
       if (lastSeenRef.current) params.set('since', lastSeenRef.current);
       try {
-        json = await tryFetch(`/api/gym-live-transactions?${params.toString()}`);
+        await tryFetch(`/api/gym-live-sync?${params.toString()}`);
       } catch (_) {
-        json = await tryFetch(`/gym-live-transactions?${params.toString()}`);
+        await tryFetch(`/gym-live-sync?${params.toString()}`);
+      }
+      try {
+        json = await tryFetch(`/api/gym-live-persisted?${params.toString()}`);
+      } catch (_) {
+        json = await tryFetch(`/gym-live-persisted?${params.toString()}`);
       }
 
       if (!json || !json.ok) throw new Error(json?.error || 'Failed to load live transactions');
