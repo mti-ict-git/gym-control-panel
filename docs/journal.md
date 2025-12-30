@@ -415,3 +415,13 @@ UI:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:29:18 +08:00
+
+UI:
+- Fixed sidebar flicker: Management Account visibility now derives directly from user.role and stays constant.
+- Also changed sidebar display name to use username or email.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).

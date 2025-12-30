@@ -23,7 +23,6 @@ import {
   SidebarFooter,
 } from '@/components/ui/sidebar';
 import { useAuth } from '@/contexts/AuthContext';
-import { useUserRole } from '@/hooks/useUserRole';
 import { Button } from '@/components/ui/button';
 import { Sun, Moon } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
@@ -42,7 +41,7 @@ export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const { isSuperAdmin } = useUserRole();
+  const isSuperAdmin = (user?.role || '').toLowerCase() === 'superadmin';
   const [isDark, setIsDark] = useState(false);
 
   useEffect(() => {
@@ -64,7 +63,7 @@ export function AppSidebar() {
     navigate('/login');
   };
 
-  const displayName = user?.user_metadata?.username || user?.email || 'Admin';
+  const displayName = user?.username || user?.email || 'Admin';
 
   return (
     <Sidebar className="border-r border-sidebar-border">
