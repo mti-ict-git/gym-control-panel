@@ -13,9 +13,7 @@ export function useGymDbSessions() {
   return useQuery({
     queryKey: ['gymdb-sessions'],
     queryFn: async (): Promise<GymDbSession[]> => {
-      const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
-      const base = endpoint && endpoint.trim().length > 0 ? endpoint : '/api';
-      const resp = await fetch(`${base}/gym-sessions`);
+      const resp = await fetch(`/api/gym-sessions`);
       const json = (await resp.json()) as ResponsePayload;
       if (!json || !json.ok) throw new Error(json?.error || 'Failed to load GymDB sessions');
       return Array.isArray(json.sessions) ? json.sessions : [];

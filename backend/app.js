@@ -15,6 +15,10 @@ app.use('/api', testerRouter);
 app.use('/api', masterRouter);
 app.use('/api', gymRouter);
 
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true });
+});
+
 const PORT = process.env.PORT || 5055;
 app.listen(PORT, () => {
   console.log(`DB tester listening on http://localhost:${PORT}`);

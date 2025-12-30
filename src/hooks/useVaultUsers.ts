@@ -70,10 +70,27 @@ export function useVaultUsers() {
       const from = toYmd(todayJakarta);
       const to = toYmd(dayAfter);
 
+
       const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
       const base = endpoint && endpoint.trim().length > 0 ? endpoint : '/api';
       const resp = await fetch(`${base}/gym-bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
       const json = (await resp.json()) as GymDbBookingResponse;
+
+      const urlParams = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+      const tryFetch = async (url: string): Promise<GymDbBookingResponse> => {
+        const r = await fetch(url);
+        const j = (await r.json()) as GymDbBookingResponse;
+        if (r.status >= 500) throw new Error(j?.error || 'Server error');
+        return j;
+      };
+
+      let json: GymDbBookingResponse = null;
+      try {
+        json = await tryFetch(`/api/gym-bookings?${urlParams}`);
+      } catch (_) {
+        json = await tryFetch(`/gym-bookings?${urlParams}`);
+      }
+
       if (!json || !json.ok) throw new Error(json?.error || 'Failed to load GymDB bookings');
 
       const rows = Array.isArray(json.bookings) ? json.bookings : [];

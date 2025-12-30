@@ -194,17 +194,27 @@ export default function SchedulesPage() {
         onOpenChange={setSessionDialogOpen}
         onSubmit={async (data) => {
           try {
-            const resp = await fetch(`${endpoint}/gym-session-create`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                session_name: data.session_name,
-                time_start: data.time_start,
-                time_end: data.time_end,
-                quota: data.quota,
-              }),
-            });
-            const json = await resp.json();
+            const tryPost = async (url: string) => {
+              const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  session_name: data.session_name,
+                  time_start: data.time_start,
+                  time_end: data.time_end,
+                  quota: data.quota,
+                }),
+              });
+              const j = await r.json();
+              if (r.status >= 500) throw new Error(j?.error || 'Server error');
+              return j;
+            };
+            let json: { ok: boolean; error?: string } = { ok: false };
+            try {
+              json = await tryPost(`${endpoint}/gym-session-create`);
+            } catch (_) {
+              json = await tryPost(`/gym-session-create`);
+            }
             if (!json?.ok) throw new Error(json?.error || 'Failed to create session');
             toast.success('Session created');
             setSessionDialogOpen(false);
@@ -227,20 +237,30 @@ export default function SchedulesPage() {
           if (!editingSession) return;
           setIsSaving(true);
           try {
-            const resp = await fetch(`${endpoint}/gym-session-update`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                original_session_name: editingSession.session_name,
-                original_time_start: editingSession.time_start,
-                session_name: data.session_name,
-                time_start: data.time_start,
-                time_end: data.time_end,
-                quota: data.quota,
-              }),
-            });
-            const json = await resp.json();
-            if (!json?.ok) throw new Error(json?.error || 'Failed to update session');
+            const tryPost2 = async (url: string) => {
+              const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  original_session_name: editingSession.session_name,
+                  original_time_start: editingSession.time_start,
+                  session_name: data.session_name,
+                  time_start: data.time_start,
+                  time_end: data.time_end,
+                  quota: data.quota,
+                }),
+              });
+              const j = await r.json();
+              if (r.status >= 500) throw new Error(j?.error || 'Server error');
+              return j;
+            };
+            let json2: { ok: boolean; error?: string } = { ok: false };
+            try {
+              json2 = await tryPost2(`${endpoint}/gym-session-update`);
+            } catch (_) {
+              json2 = await tryPost2(`/gym-session-update`);
+            }
+            if (!json2?.ok) throw new Error(json2?.error || 'Failed to update session');
             toast.success('Session updated');
             setEditDialogOpen(false);
             setEditingSession(null);
@@ -275,16 +295,26 @@ export default function SchedulesPage() {
                 if (!deletingSession) return;
                 setIsDeleting(true);
                 try {
-                  const resp = await fetch(`${endpoint}/gym-session-delete`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      session_name: deletingSession.session_name,
-                      time_start: deletingSession.time_start,
-                    }),
-                  });
-                  const json = await resp.json();
-                  if (!json?.ok) throw new Error(json?.error || 'Failed to delete session');
+                  const tryPost3 = async (url: string) => {
+                    const r = await fetch(url, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        session_name: deletingSession.session_name,
+                        time_start: deletingSession.time_start,
+                      }),
+                    });
+                    const j = await r.json();
+                    if (r.status >= 500) throw new Error(j?.error || 'Server error');
+                    return j;
+                  };
+                  let json3: { ok: boolean; error?: string } = { ok: false };
+                  try {
+                    json3 = await tryPost3(`${endpoint}/gym-session-delete`);
+                  } catch (_) {
+                    json3 = await tryPost3(`/gym-session-delete`);
+                  }
+                  if (!json3?.ok) throw new Error(json3?.error || 'Failed to delete session');
                   toast.success('Session deleted');
                   setDeleteDialogOpen(false);
                   setDeletingSession(null);
