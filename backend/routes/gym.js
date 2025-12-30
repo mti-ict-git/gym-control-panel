@@ -4,6 +4,17 @@ import { envTrim, envBool } from '../lib/env.js';
 
 const router = express.Router();
 
+router.get('/env-dump', (req, res) => {
+  const out = {
+    CARD_DB_TX_TABLE: envTrim(process.env.CARD_DB_TX_TABLE),
+    CARD_DB_TX_SCHEMA: envTrim(process.env.CARD_DB_TX_SCHEMA),
+    CARDDB_SCHEMA: envTrim(process.env.CARDDB_SCHEMA),
+    CARDDB_SERVER: envTrim(process.env.CARDDB_SERVER),
+    CARDDB_NAME: envTrim(process.env.CARDDB_NAME),
+  };
+  res.json({ ok: true, env: out });
+});
+
 router.get('/gym-availability', async (req, res) => {
   const {
     DB_SERVER,
@@ -819,7 +830,7 @@ router.post('/gym-booking-create', async (req, res) => {
     const bookingDate = new Date(bookingDateStr);
     if (isNaN(bookingDate.getTime())) throw new Error('Invalid booking_date');
 
-    const gymPool = await sql.connect(gymConfig);
+    const gymPool = await new sql.ConnectionPool(gymConfig).connect();
     const scheduleReq = gymPool.request();
     scheduleReq.input('session_name', sql.VarChar(50), sessionName);
     scheduleReq.input('time_start', sql.VarChar(5), timeStart);
@@ -1170,6 +1181,7 @@ router.get('/gym-live-sync', async (req, res) => {
     CARD_DB_TX_CARD_COL,
     CARD_DB_TX_STAFF_COL,
     CARD_DB_TX_EVENT_COL,
+    CARD_DB_TX_UNIT_COL,
   } = process.env;
 
   const gymServer = envTrim(DB_SERVER);
@@ -1229,12 +1241,16 @@ router.get('/gym-live-sync', async (req, res) => {
     const explicitCard = envTrim(CARD_DB_TX_CARD_COL);
     const explicitStaff = envTrim(CARD_DB_TX_STAFF_COL);
     const explicitEvent = envTrim(CARD_DB_TX_EVENT_COL);
-    const explicitUnit = null;
+    const explicitUnit = envTrim(CARD_DB_TX_UNIT_COL);
     if (explicitTable) {
+      const existsRes = await pool.request().query(`SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='${explicitSchema.replace(/'/g,"''")}' AND TABLE_NAME='${explicitTable.replace(/'/g,"''")}'`);
+      const exists = Array.isArray(existsRes?.recordset) && existsRes.recordset.length > 0;
+      if (!exists) {
+        
+      } else {
       const colsRes = await pool.request().query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${explicitSchema.replace(/'/g,"''")}' AND TABLE_NAME='${explicitTable.replace(/'/g,"''")}'`);
       const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
       const timeCol = explicitTime ? pickColumn(cols, [explicitTime]) : pickColumn(cols, ['TrDateTime','TransDateTime','EventTime','LogTime','DateTime','Time','timestamp','datetime','TransTime']);
-      if (!timeCol) return null;
       const deviceCol = explicitDevice ? pickColumn(cols, [explicitDevice]) : pickColumn(cols, ['TrController','Device','Reader','Terminal','Door','DeviceName']);
       const cardCol = explicitCard ? pickColumn(cols, [explicitCard]) : pickColumn(cols, ['CardNo','TrCardID','CardNumber','Card','CardID','IDCard']);
       const staffCol = explicitStaff ? pickColumn(cols, [explicitStaff]) : pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
@@ -1242,26 +1258,51 @@ router.get('/gym-live-sync', async (req, res) => {
       const nameCol = pickColumn(cols, ['TrName','Name','EmployeeName','EmpName','StaffName']);
       const controllerCol = pickColumn(cols, ['TrController','Controller','Device','Reader','Terminal','Door','DeviceName']);
       const unitCol = explicitUnit ? pickColumn(cols, [explicitUnit]) : pickColumn(cols, ['UnitNo','Unit','ControllerID','DeviceID','ReaderID','DeviceNo','ReaderNo']);
-      return { schema: explicitSchema, table: explicitTable, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol, unitCol };
+      const dateCol = pickColumn(cols, ['TrDate','Date','TransDate']);
+      const timeOnlyCol = pickColumn(cols, ['TrTime','Time']);
+      return { schema: explicitSchema, table: explicitTable, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol, unitCol, dateCol, timeOnlyCol };
+      }
     }
     const candidates = ['tblTransaction','tblTransactionLive','Transaction','Transactions','AccessLog','EventLog','Logs','Attendance','History','CardTransaction'];
     const r = await pool.request().query(`SELECT TABLE_SCHEMA, TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE='BASE TABLE' AND TABLE_NAME IN (${candidates.map((t)=>`'${t}'`).join(',')}) ORDER BY CASE WHEN TABLE_SCHEMA='dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA, TABLE_NAME`);
-    const row = r?.recordset?.[0];
-    if (!row) return null;
-    const schema = String(row.TABLE_SCHEMA);
-    const table = String(row.TABLE_NAME);
-    const colsRes = await pool.request().query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${schema.replace(/'/g,"''")}' AND TABLE_NAME='${table.replace(/'/g,"''")}'`);
-    const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
-    const timeCol = pickColumn(cols, ['TrDateTime','TransDateTime','EventTime','LogTime','DateTime','Time','timestamp','datetime','TransTime']);
-    const deviceCol = pickColumn(cols, ['TrController','Device','Reader','Terminal','Door','DeviceName']);
-    const cardCol = pickColumn(cols, ['CardNo','TrCardID','CardNumber','Card','CardID','IDCard']);
-    const staffCol = pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
-    const eventCol = pickColumn(cols, ['Transaction','Event','EventType','Status','Action','Result']);
-    const nameCol = pickColumn(cols, ['TrName','Name','EmployeeName','EmpName','StaffName']);
-    const controllerCol = pickColumn(cols, ['TrController','Controller','Device','Reader','Terminal','Door','DeviceName']);
-    const unitCol = pickColumn(cols, ['UnitNo','Unit','ControllerID','DeviceID','ReaderID','DeviceNo','ReaderNo']);
-    if (!timeCol) return null;
-    return { schema, table, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol, unitCol };
+    const rows = Array.isArray(r?.recordset) ? r.recordset : [];
+    for (const row of rows) {
+      const schema = String(row.TABLE_SCHEMA);
+      const table = String(row.TABLE_NAME);
+      const colsRes = await pool.request().query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${schema.replace(/'/g,"''")}' AND TABLE_NAME='${table.replace(/'/g,"''")}'`);
+      const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+      const timeCol = pickColumn(cols, ['TrDateTime','TransDateTime','EventTime','LogTime','DateTime','timestamp','datetime','TransTime']);
+      const deviceCol = pickColumn(cols, ['TrController','Device','Reader','Terminal','Door','DeviceName']);
+      const cardCol = pickColumn(cols, ['CardNo','TrCardID','CardNumber','Card','CardID','IDCard']);
+      const staffCol = pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
+      const eventCol = pickColumn(cols, ['Transaction','Event','EventType','Status','Action','Result']);
+      const nameCol = pickColumn(cols, ['TrName','Name','EmployeeName','EmpName','StaffName']);
+      const controllerCol = pickColumn(cols, ['TrController','Controller','Device','Reader','Terminal','Door','DeviceName']);
+      const unitCol = pickColumn(cols, ['UnitNo','Unit','ControllerID','DeviceID','ReaderID','DeviceNo','ReaderNo']);
+      const dateCol = pickColumn(cols, ['TrDate','Date','TransDate']);
+      const timeOnlyCol = pickColumn(cols, ['TrTime','Time']);
+      if (!timeCol && !(dateCol && timeOnlyCol)) continue;
+      return { schema, table, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol, unitCol, dateCol, timeOnlyCol };
+    }
+    const defaultSchema = envTrim(process.env.CARD_DB_TX_SCHEMA) || envTrim(process.env.CARDDB_SCHEMA) || 'dbo';
+    for (const table of ['tblTransactionLive','tblTransaction']) {
+      const existsRes = await pool.request().query(`SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='${defaultSchema.replace(/'/g,"''")}' AND TABLE_NAME='${table}'`);
+      const exists = Array.isArray(existsRes?.recordset) && existsRes.recordset.length > 0;
+      if (!exists) continue;
+      const colsRes = await pool.request().query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${defaultSchema.replace(/'/g,"''")}' AND TABLE_NAME='${table}'`);
+      const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+      const timeCol = pickColumn(cols, ['TrDateTime','TransDateTime','EventTime','LogTime','DateTime','Time','timestamp','datetime','TransTime']);
+      if (!timeCol) continue;
+      const deviceCol = pickColumn(cols, ['TrController','Device','Reader','Terminal','Door','DeviceName']);
+      const cardCol = pickColumn(cols, ['CardNo','TrCardID','CardNumber','Card','CardID','IDCard']);
+      const staffCol = pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
+      const eventCol = pickColumn(cols, ['Transaction','Event','EventType','Status','Action','Result']);
+      const nameCol = pickColumn(cols, ['TrName','Name','EmployeeName','EmpName','StaffName']);
+      const controllerCol = pickColumn(cols, ['TrController','Controller','Device','Reader','Terminal','Door','DeviceName']);
+      const unitCol = pickColumn(cols, ['UnitNo','Unit','ControllerID','DeviceID','ReaderID','DeviceNo','ReaderNo']);
+      return { schema: defaultSchema, table, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol, unitCol };
+    }
+    return null;
   };
 
   try {
@@ -1290,7 +1331,7 @@ router.get('/gym-live-sync', async (req, res) => {
     END`);
     await tx.commit();
 
-    const cardPool = await sql.connect(cardConfig);
+    const cardPool = await new sql.ConnectionPool(cardConfig).connect();
     const src = await discoverSource(cardPool);
     if (!src) {
       await cardPool.close();
@@ -1307,20 +1348,25 @@ router.get('/gym-live-sync', async (req, res) => {
         where = `WHERE [${src.timeCol}] > @since`;
       }
     }
-    if (src.unitCol) {
-      const unitFilter = '0041';
-      where = where ? `${where} AND [${src.unitCol}] = '${unitFilter.replace(/'/g,"''")}'` : `WHERE [${src.unitCol}] = '${unitFilter.replace(/'/g,"''")}'`;
+    const unitFilterRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
+    const unitFilters = unitFilterRaw ? unitFilterRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
+    if (src.unitCol && unitFilters.length > 0) {
+      const list = unitFilters.map((v) => `'${v.replace(/'/g, "''")}'`).join(',');
+      where = where ? `${where} AND [${src.unitCol}] IN (${list})` : `WHERE [${src.unitCol}] IN (${list})`;
     }
-    const orderBy = `[${src.timeCol}] DESC`;
+    const orderBy = src.timeCol ? `[${src.timeCol}] DESC` : `IDRow DESC`;
+    const trDateExpr = src.timeCol ? `CONVERT(date, [${src.timeCol}])` : (src.dateCol ? `[${src.dateCol}]` : `CAST(NULL AS date)`);
+    const trTimeExpr = src.timeCol ? `CONVERT(varchar(8), [${src.timeCol}], 108)` : (src.timeOnlyCol ? `[${src.timeOnlyCol}]` : `CAST(NULL AS varchar(8))`);
+    const txnTimeExpr = src.timeCol ? `[${src.timeCol}]` : (src.dateCol && src.timeOnlyCol ? `TRY_CONVERT(datetime, CONCAT([${src.dateCol}], ' ', [${src.timeOnlyCol}]))` : `NULL`);
     const query = `SELECT TOP ${maxRows} ${[
       src.nameCol ? `[${src.nameCol}] AS TrName` : `CAST(NULL AS nvarchar(200)) AS TrName`,
       src.controllerCol ? `[${src.controllerCol}] AS TrController` : `CAST(NULL AS nvarchar(200)) AS TrController`,
       src.eventCol ? `[${src.eventCol}] AS [Transaction]` : `CAST(NULL AS nvarchar(100)) AS [Transaction]`,
       src.cardCol ? `[${src.cardCol}] AS CardNo` : `CAST(NULL AS nvarchar(100)) AS CardNo`,
       src.unitCol ? `[${src.unitCol}] AS UnitNo` : `CAST(NULL AS nvarchar(100)) AS UnitNo`,
-      `CONVERT(date, [${src.timeCol}]) AS TrDate`,
-      `CONVERT(varchar(8), [${src.timeCol}], 108) AS TrTime`,
-      `[${src.timeCol}] AS TxnTime`
+      `${trDateExpr} AS TrDate`,
+      `${trTimeExpr} AS TrTime`,
+      `${txnTimeExpr} AS TxnTime`
     ].join(', ')} FROM [${src.schema}].[${src.table}] ${where} ORDER BY ${orderBy}`;
     const result = await req2.query(query);
     await cardPool.close();
@@ -1337,7 +1383,7 @@ router.get('/gym-live-sync', async (req, res) => {
       ins.input('TrTime', sql.VarChar(8), r.TrTime != null ? String(r.TrTime) : null);
       ins.input('TxnTime', sql.DateTime, r.TxnTime instanceof Date ? r.TxnTime : new Date(String(r.TxnTime)));
       const staffVal = typeof r.StaffNo !== 'undefined' && r.StaffNo != null ? String(r.StaffNo) : (typeof r.EmployeeID !== 'undefined' && r.EmployeeID != null ? String(r.EmployeeID) : null);
-      if (staffVal != null) ins.input('EmployeeID', sql.NVarChar(50), staffVal);
+      ins.input('EmployeeID', sql.NVarChar(50), staffVal != null ? staffVal : null);
       await ins.query(`IF NOT EXISTS (
         SELECT 1 FROM dbo.gym_live_taps WHERE ISNULL(CardNo,'') = ISNULL(@CardNo,'') AND TxnTime = @TxnTime AND ISNULL(TrController,'') = ISNULL(@TrController,'')
       ) BEGIN
@@ -1367,7 +1413,7 @@ router.get('/gym-live-persisted', async (req, res) => {
   const limit = Number(String(req.query.limit || '100'));
   const maxRows = Number.isFinite(limit) && limit > 0 && limit <= 1000 ? limit : 100;
   try {
-    const pool = await sql.connect(config);
+    const pool = await new sql.ConnectionPool(config).connect();
     const req2 = pool.request();
     let where = '';
     if (sinceStr) {
@@ -1421,12 +1467,15 @@ router.get('/gym-live-status', async (req, res) => {
   const masterCfg = hasMaster ? { server: mServer, port: Number(MASTER_DB_PORT || 1433), database: mDatabase, user: mUser, password: mPassword, options: { encrypt: envBool(MASTER_DB_ENCRYPT, false), trustServerCertificate: envBool(MASTER_DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } } : null;
 
   try {
-    const gymPool = await sql.connect(gymCfg);
+    const gymPool = await new sql.ConnectionPool(gymCfg).connect();
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const req2 = gymPool.request();
     req2.input('since', sql.DateTime, startOfDay);
-    const q = `SELECT TrName, CardNo, UnitNo, TrController, [Transaction], TxnTime, ISNULL(EmployeeID,'') AS EmployeeID FROM dbo.gym_live_taps WHERE UnitNo = '0041' AND TxnTime >= @since ORDER BY TxnTime ASC`;
+    const unitFilterRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
+    const unitFilters = unitFilterRaw ? unitFilterRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
+    const unitWhere = unitFilters.length > 0 ? `AND UnitNo IN (${unitFilters.map((v) => `'${v.replace(/'/g, "''")}'`).join(',')})` : '';
+    const q = `SELECT TrName, CardNo, UnitNo, TrController, [Transaction], TxnTime, ISNULL(EmployeeID,'') AS EmployeeID FROM dbo.gym_live_taps WHERE TxnTime >= @since ${unitWhere} ORDER BY TxnTime ASC`;
     const r = await req2.query(q);
     const rows = Array.isArray(r?.recordset) ? r.recordset : [];
 
@@ -1445,7 +1494,7 @@ router.get('/gym-live-status', async (req, res) => {
     const results = Array.from(byPerson.values());
 
     if (hasMaster && results.length > 0) {
-      const masterPool = await sql.connect(masterCfg);
+      const masterPool = await new sql.ConnectionPool(masterCfg).connect();
       try {
         const ids = results.map((x) => x.employee_id).filter((v) => !!v);
         if (ids.length > 0) {
