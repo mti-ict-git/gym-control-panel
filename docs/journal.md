@@ -425,3 +425,30 @@ UI:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:32:14 +08:00
+
+UI:
+- Dynamic role label in sidebar footer: shows Super Admin, Committee, Administrator, or User based on user.role.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:34:32 +08:00
+
+UI:
+- Highlighted sidebar role text in flat red when user.role is Super Admin.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:36:43 +08:00
+
+UI:
+- Styled Super Admin role label as soft red pill (bg-red-100, text-red-700, rounded) to match theme shown.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
