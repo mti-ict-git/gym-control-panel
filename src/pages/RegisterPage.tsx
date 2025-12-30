@@ -145,15 +145,25 @@ export default function RegisterPage() {
   }, [employeeIdInput]);
 
   const fetchAvailability = useCallback(async (dateStr: string) => {
-    const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
-    if (!endpoint || !dateStr) {
+    if (!dateStr) {
       setAvailability({});
       return;
     }
     setAvailabilityLoading(true);
     try {
-      const resp = await fetch(`${endpoint}/gym-availability?date=${encodeURIComponent(dateStr)}`);
-      const json = (await resp.json()) as { success: boolean; error?: string; sessions?: { time_start: string; available: number; booked_count: number; quota: number }[] } | null;
+      const params = `date=${encodeURIComponent(dateStr)}`;
+      const tryFetch = async (url: string) => {
+        const resp = await fetch(`${url}?${params}`);
+        const json = (await resp.json()) as { success: boolean; error?: string; sessions?: { time_start: string; available: number; booked_count: number; quota: number }[] } | null;
+        if (resp.status >= 500) throw new Error(json?.error || 'Server error');
+        return json;
+      };
+      let json: { success: boolean; error?: string; sessions?: { time_start: string; available: number; booked_count: number; quota: number }[] } | null = null;
+      try {
+        json = await tryFetch(`/api/gym-availability`);
+      } catch (_) {
+        json = await tryFetch(`/gym-availability`);
+      }
       if (!json || !json.success) {
         setAvailability({});
         return;
@@ -187,17 +197,26 @@ export default function RegisterPage() {
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
-      const resp = await fetch(`/api/gym-booking-create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          employee_id: data.employeeId,
-          session_id: data.sessionId,
-          booking_date: format(data.date, 'yyyy-MM-dd'),
-        }),
-      });
-
-      const payload = (await resp.json()) as { ok: boolean; error?: string } | null;
+      const tryPost = async (url: string) => {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            employee_id: data.employeeId,
+            session_id: data.sessionId,
+            booking_date: format(data.date, 'yyyy-MM-dd'),
+          }),
+        });
+        const payload = (await resp.json()) as { ok: boolean; error?: string } | null;
+        if (resp.status >= 500) throw new Error(payload?.error || 'Server error');
+        return payload;
+      };
+      let payload: { ok: boolean; error?: string } | null = null;
+      try {
+        payload = await tryPost(`/api/gym-booking-create`);
+      } catch (_) {
+        payload = await tryPost(`/gym-booking-create`);
+      }
       if (!payload || !payload.ok) {
         toast({
           title: 'Registration failed',

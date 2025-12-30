@@ -34,12 +34,22 @@ export default function VaultPage() {
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({ booking_id, status }: { booking_id: number; status: 'APPROVED' | 'REJECTED' }) => {
-      const resp = await fetch(`/api/gym-booking-update-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ booking_id, approval_status: status }),
-      });
-      const json = await resp.json();
+      const tryPost = async (url: string) => {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ booking_id, approval_status: status }),
+        });
+        const j = await r.json();
+        if (r.status >= 500) throw new Error(j?.error || 'Server error');
+        return j;
+      };
+      let json: { ok: boolean; error?: string } = { ok: false };
+      try {
+        json = await tryPost(`/api/gym-booking-update-status`);
+      } catch (_) {
+        json = await tryPost(`/gym-booking-update-status`);
+      }
       if (!json.ok) throw new Error(json.error || 'Failed to update status');
       return json;
     },
