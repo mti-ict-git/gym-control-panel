@@ -1687,4 +1687,43 @@ router.delete('/gym-accounts/:id', async (req, res) => {
   }
 });
 
+router.get('/gym-live-status', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', people: [] });
+  }
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const request = pool.request();
+    request.input('today', sql.Date, new Date());
+    const result = await request.query(
+      "SELECT ec.name AS employee_name, gb.EmployeeID AS employee_id, ee.department AS department, s.Session AS session_name, CONVERT(varchar(5), s.StartTime, 108) AS time_start, CONVERT(varchar(5), s.EndTime, 108) AS time_end, gb.Status AS booking_status FROM dbo.gym_booking gb LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID LEFT JOIN MTIMasterEmployeeDB.dbo.employee_core ec ON gb.EmployeeID = ec.employee_id LEFT JOIN MTIMasterEmployeeDB.dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE' WHERE gb.BookingDate = @today AND gb.Status IN ('CHECKIN','COMPLETED') ORDER BY s.StartTime ASC, ec.name ASC"
+    );
+    await pool.close();
+    const people = Array.isArray(result?.recordset)
+      ? result.recordset.map((r) => {
+          const name = r?.employee_name != null ? String(r.employee_name).trim() : null;
+          const empId = r?.employee_id != null ? String(r.employee_id).trim() : null;
+          const dept = r?.department != null ? String(r.department).trim() : null;
+          const sess = r?.session_name != null ? String(r.session_name).trim() : '';
+          const ts = r?.time_start != null ? String(r.time_start).trim() : null;
+          const te = r?.time_end != null ? String(r.time_end).trim() : null;
+          const sched = sess ? (ts && te ? `${sess} ${ts}-${te}` : sess) : null;
+          const bookingStatus = r?.booking_status != null ? String(r.booking_status).trim().toUpperCase() : '';
+          const status = bookingStatus === 'CHECKIN' ? 'IN_GYM' : 'LEFT';
+          return { name, employee_id: empId, department: dept, schedule: sched, time_in: null, time_out: null, status };
+        })
+      : [];
+    return res.json({ ok: true, people });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, people: [] });
+  }
+});
+
 export default router;

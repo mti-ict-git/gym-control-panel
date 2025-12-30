@@ -23,6 +23,10 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get('/api/gym-live-status', (_req, res) => {
+  res.json({ ok: true, people: [] });
+});
+
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });

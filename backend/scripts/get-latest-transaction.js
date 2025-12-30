@@ -36,14 +36,16 @@ async function discoverSource(pool) {
       `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${explicitSchema.replace(/'/g,"''")}' AND TABLE_NAME='${explicitTable.replace(/'/g,"''")}'`
     );
     const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
-    const timeCol = explicitTime ? pickColumn(cols, [explicitTime]) : pickColumn(cols, ['TransDateTime','EventTime','LogTime','DateTime','Time','timestamp','datetime','TransTime']);
+    const timeCol = explicitTime ? pickColumn(cols, [explicitTime]) : pickColumn(cols, ['TrDateTime','TransDateTime','EventTime','LogTime','DateTime','Time','timestamp','datetime','TransTime']);
     if (!timeCol) return null;
     const deviceCol = explicitDevice ? pickColumn(cols, [explicitDevice]) : pickColumn(cols, ['Device','Reader','Terminal','Door','DeviceName']);
     const cardCol = explicitCard ? pickColumn(cols, [explicitCard]) : pickColumn(cols, ['CardNo','CardNumber','Card','CardID','IDCard']);
     const staffCol = explicitStaff ? pickColumn(cols, [explicitStaff]) : pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
-    const eventCol = explicitEvent ? pickColumn(cols, [explicitEvent]) : pickColumn(cols, ['Event','EventType','Status','Action','Result']);
+    const eventCol = explicitEvent ? pickColumn(cols, [explicitEvent]) : pickColumn(cols, ['Transaction','Event','EventType','Status','Action','Result']);
+    const nameCol = pickColumn(cols, ['TrName','Name','EmployeeName','EmpName','StaffName']);
+    const controllerCol = pickColumn(cols, ['TrController','Controller','Device','Reader','Terminal','Door','DeviceName']);
     const unitCol = explicitUnit ? pickColumn(cols, [explicitUnit]) : pickColumn(cols, ['UnitNo','Unit','ControllerID','DeviceID','ReaderID','DeviceNo','ReaderNo']);
-    return { schema: explicitSchema, table: explicitTable, timeCol, deviceCol, cardCol, staffCol, eventCol, unitCol };
+    return { schema: explicitSchema, table: explicitTable, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol, unitCol };
   }
 
   const candidates = ['tblTransaction','Transaction','Transactions','AccessLog','EventLog','Logs','Attendance','History','CardTransaction'];
@@ -112,6 +114,8 @@ async function run() {
       return;
     }
     const orderBy = `[${src.timeCol}] DESC`;
+    const units = ['0040','0041','0031'];
+    const where = src.unitCol ? `WHERE [${src.unitCol}] IN (${units.map((u)=>`'${u}'`).join(',')})` : '';
     const query = `SELECT TOP 1 ${[
       src.nameCol ? `[${src.nameCol}] AS TrName` : `CAST(NULL AS nvarchar(200)) AS TrName`,
       src.controllerCol ? `[${src.controllerCol}] AS TrController` : `CAST(NULL AS nvarchar(200)) AS TrController`,
@@ -120,7 +124,7 @@ async function run() {
       src.unitCol ? `[${src.unitCol}] AS UnitNo` : `CAST(NULL AS nvarchar(100)) AS UnitNo`,
       `CONVERT(date, [${src.timeCol}]) AS TrDate`,
       `CONVERT(varchar(8), [${src.timeCol}], 108) AS TrTime`,
-    ].join(', ')} FROM [${src.schema}].[${src.table}] ORDER BY ${orderBy}`;
+    ].join(', ')} FROM [${src.schema}].[${src.table}] ${where} ORDER BY ${orderBy}`;
     const res = await pool.request().query(query);
     const row = res?.recordset?.[0] || null;
     const out = {

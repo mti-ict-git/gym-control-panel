@@ -38,6 +38,10 @@ Learning:
 Verification:
 - Lint: 0 errors, 8 warnings (react-refresh only-export-components).
 - TypeScript integrity check: passed (noEmit).
+2025-12-30 18:58:20 +08:00
+
+Verification:
+- Restarted backend on :5055 and confirmed GET /api/gym-live-status returns 200 with empty people list.
 
 2025-12-30 13:58:18 +08:00
 
@@ -368,3 +372,38 @@ Database:
 
 Verification:
 - Script output confirms updated schema.
+
+2025-12-30 17:44:43 +08:00
+
+Enhancement:
+- Updated backend/scripts/get-latest-transaction.js to filter CardDB transactions to UnitNo IN ('0040','0041').
+
+Verification:
+- Ran the script; output reflects filtered query execution.
+
+2025-12-30 17:48:03 +08:00
+
+Fix:
+- Added name/controller column detection to backend/scripts/get-latest-transaction.js for explicit table discovery, ensuring TrName and TrController return when present.
+
+Verification:
+- Ran the script; TrName and TrController are populated from tblTransaction with UnitNo 0041.
+2025-12-30 18:44:25 +08:00
+
+Fix:
+- Added backend route GET /gym-live-status to resolve 404 from frontend hook.
+- Route returns people with name, employee_id, department, schedule, status mapped from gym_booking statuses for today.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+- Backend health endpoint responds OK; gym-live-status available under both /api and root.
+ - Verified GET /api/gym-live-status returns 200 on local server (http://localhost:5060).
+2025-12-30 18:55:00 +08:00
+
+Fix:
+- Updated frontend hook useGymLiveStatus to try import.meta.env.VITE_BACKEND_URL first, then /api, then root.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
