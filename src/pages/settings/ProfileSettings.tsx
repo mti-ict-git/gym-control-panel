@@ -1,8 +1,7 @@
 import { User } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 export default function ProfileSettings() {
   const { user } = useAuth();
@@ -43,21 +42,6 @@ export default function ProfileSettings() {
     enabled: !!user?.account_id,
   });
 
-  const qc = useQueryClient();
-  useEffect(() => {
-    const run = async () => {
-      try {
-        if (!token) return;
-        const resp = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } }).catch(() => fetch('/auth/me', { headers: { Authorization: `Bearer ${token}` } }));
-        await resp.json().catch(() => ({}));
-        await qc.invalidateQueries({ queryKey: ['profile-account', user?.account_id] });
-      } catch {
-        // ignore
-      }
-    };
-    void run();
-  }, [qc, token, user?.account_id]);
-
   return (
     <div className="space-y-6">
       <div>
@@ -91,14 +75,7 @@ export default function ProfileSettings() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Last Sign In</p>
-              <p className="text-sm">{(() => {
-                const server = accountInfo?.last_sign_in
-                  ? new Date(accountInfo.last_sign_in)
-                  : (accountInfo?.last_sign_in_at ? new Date(accountInfo.last_sign_in_at) : null);
-                const client = typeof payload?.iat === 'number' ? new Date(payload.iat * 1000) : null;
-                const best = server && client ? (server.getTime() >= client.getTime() ? server : client) : (server || client);
-                return best ? best.toLocaleString() : 'N/A';
-              })()}</p>
+              <p className="text-sm">{accountInfo?.last_sign_in ? new Date(accountInfo.last_sign_in).toLocaleString() : (accountInfo?.last_sign_in_at ? new Date(accountInfo.last_sign_in_at).toLocaleString() : lastSignIn)}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Last Sign In (legacy)</p>
