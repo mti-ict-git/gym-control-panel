@@ -1384,4 +1384,81 @@ router.get('/gym-live-persisted', async (req, res) => {
   }
 });
 
+router.post('/gym-accounts-init', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await sql.connect(config);
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    const exec = async (q) => tx.request().query(q);
+    await exec('SET NOCOUNT ON;');
+    await exec(`IF OBJECT_ID('dbo.gym_account','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_account (
+        AccountID INT IDENTITY(1,1) PRIMARY KEY,
+        Username VARCHAR(100) NOT NULL,
+        Email VARCHAR(200) NOT NULL,
+        Role VARCHAR(20) NOT NULL CONSTRAINT CK_gym_account_Role CHECK (Role IN ('superadmin','committee','admin','user')),
+        IsActive BIT NOT NULL CONSTRAINT DF_gym_account_IsActive DEFAULT (1),
+        PasswordHash VARBINARY(512) NULL,
+        PasswordAlgorithm VARCHAR(50) NULL,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_account_CreatedAt DEFAULT GETDATE(),
+        UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_account_UpdatedAt DEFAULT GETDATE()
+      );
+    END`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_gym_account_Email' AND object_id = OBJECT_ID('dbo.gym_account')) BEGIN
+      CREATE UNIQUE INDEX UX_gym_account_Email ON dbo.gym_account (Email);
+    END`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_gym_account_Username' AND object_id = OBJECT_ID('dbo.gym_account')) BEGIN
+      CREATE UNIQUE INDEX UX_gym_account_Username ON dbo.gym_account (Username);
+    END`);
+    await tx.commit();
+    await pool.close();
+    return res.json({ ok: true });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.get('/gym-accounts', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await sql.connect(config);
+    const result = await pool.request().query(
+      'SELECT AccountID, Username, Email, Role, IsActive, CreatedAt, UpdatedAt FROM dbo.gym_account ORDER BY CreatedAt DESC'
+    );
+    await pool.close();
+    const rows = Array.isArray(result?.recordset) ? result.recordset : [];
+    const accounts = rows.map((r) => ({
+      account_id: Number(r.AccountID),
+      username: r.Username != null ? String(r.Username) : '',
+      email: r.Email != null ? String(r.Email) : '',
+      role: r.Role != null ? String(r.Role) : '',
+      is_active: r.IsActive ? true : false,
+      created_at: r.CreatedAt instanceof Date ? r.CreatedAt.toISOString() : String(r.CreatedAt || ''),
+      updated_at: r.UpdatedAt instanceof Date ? r.UpdatedAt.toISOString() : String(r.UpdatedAt || ''),
+    }));
+    return res.json({ ok: true, accounts });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, accounts: [] });
+  }
+});
+
 export default router;

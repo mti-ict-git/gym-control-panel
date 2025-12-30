@@ -272,3 +272,40 @@ Enhancement:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-30 16:22:15 +08:00
+
+Enhancement:
+- Management page: added Column No before Username and an Actions column with edit (opens dialog to update username and role) and delete (confirm dialog; removes roles and profile from listing).
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 16:23:48 +08:00
+
+Enhancement:
+- Management page: added Email column after Username in the user accounts table. Currently displays '-' if email is not available from profiles.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 16:26:36 +08:00
+
+Enhancement:
+- Edit User dialog: added fields Email, Password, and Re-confirm Password; wired eye toggles; client-side validates matching and complexity, with admin API notices for email/password updates.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 16:29:33 +08:00
+
+Database:
+- Added backend route POST /gym-accounts-init to create dbo.gym_account with columns: AccountID, Username, Email, Role (checked), IsActive (default 1), PasswordHash, PasswordAlgorithm, CreatedAt, UpdatedAt. Unique indexes on Email and Username.
+- Added backend route GET /gym-accounts to list gym accounts.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
