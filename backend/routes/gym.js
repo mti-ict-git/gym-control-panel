@@ -1,5 +1,6 @@
 import express from 'express';
 import sql from 'mssql';
+import bcrypt from 'bcryptjs';
 import { envTrim, envBool } from '../lib/env.js';
 
 const router = express.Router();
@@ -1438,6 +1439,248 @@ router.get('/gym-live-persisted', async (req, res) => {
       TxnTime: x.TxnTime instanceof Date ? x.TxnTime.toISOString() : String(x.TxnTime || '')
     }));
     return res.json({ ok: true, transactions: out });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.post('/gym-accounts-init', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const tx = new sql.Transaction(pool);
+    await tx.begin();
+    const exec = async (q) => tx.request().query(q);
+    await exec('SET NOCOUNT ON;');
+    await exec(`IF OBJECT_ID('dbo.gym_account','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_account (
+        AccountID INT IDENTITY(1,1) PRIMARY KEY,
+        Username VARCHAR(50) NOT NULL UNIQUE,
+        Email VARCHAR(100) NOT NULL UNIQUE,
+        PasswordHash VARCHAR(255) NOT NULL,
+        Role VARCHAR(30) NOT NULL CONSTRAINT CK_gym_account_Role CHECK (Role IN ('SuperAdmin','Admin','Staff')),
+        IsActive BIT NOT NULL CONSTRAINT DF_gym_account_IsActive DEFAULT (1),
+        CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_gym_account_CreatedAt DEFAULT SYSDATETIME(),
+        CreatedBy VARCHAR(50) NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy VARCHAR(50) NULL
+      );
+    END`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'CreatedBy') BEGIN
+      ALTER TABLE dbo.gym_account ADD CreatedBy VARCHAR(50) NULL;
+    END`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'UpdatedBy') BEGIN
+      ALTER TABLE dbo.gym_account ADD UpdatedBy VARCHAR(50) NULL;
+    END`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'PasswordResetRequired') BEGIN
+      ALTER TABLE dbo.gym_account ADD PasswordResetRequired BIT NOT NULL CONSTRAINT DF_gym_account_PasswordResetRequired DEFAULT (0);
+    END`);
+    await exec(`IF EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'PasswordAlgorithm') BEGIN
+      ALTER TABLE dbo.gym_account DROP COLUMN PasswordAlgorithm;
+    END`);
+    await exec(`IF EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'PasswordHash') BEGIN
+      ALTER TABLE dbo.gym_account ALTER COLUMN PasswordHash VARCHAR(255) NULL;
+    END`);
+    await exec(`DECLARE @cn NVARCHAR(256);
+    DECLARE c CURSOR FOR
+      SELECT name FROM sys.check_constraints
+      WHERE parent_object_id = OBJECT_ID('dbo.gym_account');
+    OPEN c;
+    FETCH NEXT FROM c INTO @cn;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+      EXEC('ALTER TABLE dbo.gym_account DROP CONSTRAINT [' + @cn + ']');
+      FETCH NEXT FROM c INTO @cn;
+    END
+    CLOSE c;
+    DEALLOCATE c;`);
+    await exec(`UPDATE dbo.gym_account SET Role = 'SuperAdmin' WHERE Role IN ('superadmin','SUPERADMIN','Super Admin')`);
+    await exec(`UPDATE dbo.gym_account SET Role = 'Admin' WHERE Role IN ('admin','ADMIN')`);
+    await exec(`UPDATE dbo.gym_account SET Role = 'Staff' WHERE Role NOT IN ('SuperAdmin','Admin') OR Role IS NULL`);
+    await exec(`ALTER TABLE dbo.gym_account ADD CONSTRAINT CK_gym_account_Role CHECK (Role IN ('SuperAdmin','Admin','Staff'))`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_gym_account_Email' AND object_id = OBJECT_ID('dbo.gym_account')) BEGIN
+      CREATE UNIQUE INDEX UX_gym_account_Email ON dbo.gym_account (Email);
+    END`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_gym_account_Username' AND object_id = OBJECT_ID('dbo.gym_account')) BEGIN
+      CREATE UNIQUE INDEX UX_gym_account_Username ON dbo.gym_account (Username);
+    END`);
+    await exec(`IF OBJECT_ID('dbo.tr_gym_account_SetUpdatedAt','TR') IS NULL BEGIN
+      EXEC('CREATE TRIGGER dbo.tr_gym_account_SetUpdatedAt ON dbo.gym_account AFTER UPDATE AS BEGIN SET NOCOUNT ON; UPDATE a SET UpdatedAt = SYSDATETIME() FROM dbo.gym_account a INNER JOIN inserted i ON a.AccountID = i.AccountID; END');
+    END`);
+    await tx.commit();
+    await pool.close();
+    return res.json({ ok: true });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.get('/gym-accounts', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const result = await pool.request().query(
+      'SELECT AccountID, Username, Email, Role, IsActive, CreatedAt, UpdatedAt FROM dbo.gym_account ORDER BY CreatedAt DESC'
+    );
+    await pool.close();
+    const rows = Array.isArray(result?.recordset) ? result.recordset : [];
+    const accounts = rows.map((r) => {
+      const dbRole = r.Role != null ? String(r.Role) : '';
+      const role = dbRole === 'SuperAdmin' ? 'superadmin' : dbRole === 'Admin' ? 'admin' : 'committee';
+      return {
+        account_id: Number(r.AccountID),
+        username: r.Username != null ? String(r.Username) : '',
+        email: r.Email != null ? String(r.Email) : '',
+        role,
+        is_active: r.IsActive ? true : false,
+        created_at: r.CreatedAt instanceof Date ? r.CreatedAt.toISOString() : String(r.CreatedAt || ''),
+        updated_at: r.UpdatedAt instanceof Date ? r.UpdatedAt.toISOString() : String(r.UpdatedAt || ''),
+      };
+    });
+    return res.json({ ok: true, accounts });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, accounts: [] });
+  }
+});
+
+router.post('/gym-accounts', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const { username, email, role, is_active, password: rawPassword } = req.body || {};
+  if (!username || !email || !role) {
+    return res.status(400).json({ ok: false, error: 'username, email, role are required' });
+  }
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const req1 = pool.request();
+    const dbRole = String(role).toLowerCase() === 'superadmin' ? 'SuperAdmin' : String(role).toLowerCase() === 'admin' ? 'Admin' : 'Staff';
+    req1.input('Username', sql.VarChar(50), String(username));
+    req1.input('Email', sql.VarChar(100), String(email));
+    req1.input('Role', sql.VarChar(30), dbRole);
+    req1.input('IsActive', sql.Bit, is_active === false ? 0 : 1);
+    let hash = null;
+    if (rawPassword && String(rawPassword).trim().length > 0) {
+      const h = await bcrypt.hash(String(rawPassword), 10);
+      hash = h;
+      req1.input('PasswordHashText', sql.VarChar(255), String(h));
+    }
+    const q = hash
+      ? "INSERT INTO dbo.gym_account (Username, Email, Role, IsActive, PasswordHash) VALUES (@Username, @Email, @Role, @IsActive, @PasswordHashText)"
+      : "INSERT INTO dbo.gym_account (Username, Email, Role, IsActive) VALUES (@Username, @Email, @Role, @IsActive)";
+    await req1.query(q);
+    await pool.close();
+    return res.json({ ok: true });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.put('/gym-accounts/:id', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const id = Number(String(req.params.id || ''));
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: 'Invalid id' });
+  }
+  const { username, email, role, is_active, password: rawPassword } = req.body || {};
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const req1 = pool.request();
+    req1.input('Id', sql.Int, id);
+    if (username != null) req1.input('Username', sql.VarChar(50), String(username));
+    if (email != null) req1.input('Email', sql.VarChar(100), String(email));
+    if (role != null) {
+      const dbRole = String(role).toLowerCase() === 'superadmin' ? 'SuperAdmin' : String(role).toLowerCase() === 'admin' ? 'Admin' : 'Staff';
+      req1.input('Role', sql.VarChar(30), dbRole);
+    }
+    if (is_active != null) req1.input('IsActive', sql.Bit, is_active ? 1 : 0);
+    const setParts = [];
+    if (username != null) setParts.push('Username = @Username');
+    if (email != null) setParts.push('Email = @Email');
+    if (role != null) setParts.push('Role = @Role');
+    if (is_active != null) setParts.push('IsActive = @IsActive');
+    if (rawPassword && String(rawPassword).trim().length > 0) {
+      const h = await bcrypt.hash(String(rawPassword), 10);
+      req1.input('PasswordHashText', sql.VarChar(255), String(h));
+      setParts.push('PasswordHash = @PasswordHashText');
+    }
+    if (setParts.length < 1) {
+      await pool.close();
+      return res.status(400).json({ ok: false, error: 'No fields to update' });
+    }
+    const q = `UPDATE dbo.gym_account SET ${setParts.join(', ')}, UpdatedAt = SYSDATETIME() WHERE AccountID = @Id`;
+    const r = await req1.query(q);
+    await pool.close();
+    const affected = Array.isArray(r?.rowsAffected) ? Number(r.rowsAffected[0] || 0) : 0;
+    if (affected < 1) {
+      return res.status(200).json({ ok: false, error: 'Account not found or not updated' });
+    }
+    return res.json({ ok: true, affected });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.delete('/gym-accounts/:id', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const id = Number(String(req.params.id || ''));
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: 'Invalid id' });
+  }
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const req1 = pool.request();
+    req1.input('Id', sql.Int, id);
+    const r = await req1.query('DELETE FROM dbo.gym_account WHERE AccountID = @Id');
+    await pool.close();
+    const affected = Array.isArray(r?.rowsAffected) ? Number(r.rowsAffected[0] || 0) : 0;
+    if (affected < 1) {
+      return res.status(200).json({ ok: false, error: 'Account not found or not deleted' });
+    }
+    return res.json({ ok: true, affected });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });

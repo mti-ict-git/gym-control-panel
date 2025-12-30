@@ -368,3 +368,44 @@ Database:
 
 Verification:
 - Script output confirms updated schema.
+
+2025-12-30 16:42:35 +08:00
+
+Backend:
+- Fixed parsing error in backend/routes/gym.js by removing invalid TypeScript-style annotation from setParts.
+- Restarted backend server and verified health at http://localhost:5055/health.
+- Initialized GymDB accounts table via POST /api/gym-accounts-init (idempotent): created dbo.gym_account, unique indexes, and UpdatedAt trigger.
+
+Verification:
+- Ran lint: 0 errors, warnings only.
+- Ran TypeScript integrity check: passed (noEmit).
+- GET /api/gym-accounts → ok:true, accounts: [].
+
+2025-12-30 16:48:36 +08:00
+
+Database:
+- Executed POST /api/gym-accounts-init to create/ensure dbo.gym_account with columns: AccountID, Username, Email, Role, IsActive, PasswordHash, PasswordAlgorithm, CreatedAt, UpdatedAt.
+- Unique indexes ensured on Email and Username; UpdatedAt trigger applied.
+
+Verification:
+- GET /api/gym-accounts → ok:true, shows 1 seeded account.
+
+2025-12-30 16:52:11 +08:00
+
+Database:
+- Seeded committee and admin accounts into dbo.gym_account using backend/scripts/seed-accounts.js.
+
+Verification:
+- GET /api/gym-accounts → ok:true, accounts include committee_user and admin_user.
+
+2025-12-30 16:56:48 +08:00
+
+Database:
+- Updated /api/gym-accounts-init to create/align dbo.gym_account with requested spec (Username 50, Email 100, PasswordHash VARCHAR(255), Role check to SuperAdmin/Admin/Staff, DATETIME2 with SYSDATETIME, CreatedBy/UpdatedBy).
+- Adjusted trigger to set UpdatedAt via SYSDATETIME().
+- Updated backend CRUD to store text bcrypt hash and map front-end roles to DB roles and back.
+
+Verification:
+- Ran lint and TypeScript checks: passed.
+- POST /api/gym-accounts-init → ok:true.
+- GET /api/gym-accounts → ok:true, existing and seeded accounts preserved; roles mapped for UI.
