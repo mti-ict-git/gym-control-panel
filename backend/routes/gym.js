@@ -942,8 +942,9 @@ router.post('/gym-booking-create', async (req, res) => {
     const staffIdForCard = empRow.staff_no != null && String(empRow.staff_no).trim().length > 0
       ? String(empRow.staff_no).trim()
       : employeeId;
-    const cardNoCardDb = await tryLoadActiveCardNo(staffIdForCard);
-    const cardNo = cardNoCardDb || cardNoMaster;
+    const cardNoCardDbPrimary = await tryLoadActiveCardNo(staffIdForCard);
+    const cardNoCardDbFallback = cardNoCardDbPrimary != null ? null : await tryLoadActiveCardNo(employeeId);
+    const cardNo = (cardNoCardDbPrimary || cardNoCardDbFallback) ?? cardNoMaster;
     const gender = empRow.gender != null && String(empRow.gender).trim() ? String(empRow.gender).trim() : 'UNKNOWN';
 
     const gymPool2 = await sql.connect(gymConfig);
