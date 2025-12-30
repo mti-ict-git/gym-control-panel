@@ -1,9 +1,11 @@
-import { Database, AlertCircle, CheckCircle, XCircle, Clock, Check, X } from 'lucide-react';
+import { Database, AlertCircle, CheckCircle, XCircle, Clock, Check, X, IdCard, Users as UsersIcon, CalendarDays } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useVaultUsers, VaultUser } from '@/hooks/useVaultUsers';
 import { useGymDbSessions } from '@/hooks/useGymDbSessions';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
@@ -101,71 +103,156 @@ export default function VaultPage() {
             <Skeleton className="h-12 w-full" />
           </div>
         ) : vaultUsers && vaultUsers.length > 0 ? (
-          <div className="rounded-lg border bg-card overflow-hidden">
-            <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-12 text-right">No</TableHead>
-              <TableHead className="hidden md:table-cell">ID Card</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead className="hidden md:table-cell">Gender</TableHead>
-              <TableHead>Employee ID</TableHead>
-              <TableHead className="hidden md:table-cell">Department</TableHead>
-              <TableHead className="hidden md:table-cell">Session</TableHead>
-              <TableHead className="hidden md:table-cell">Time</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead className="text-center">Status</TableHead>
-              <TableHead className="text-center">Action</TableHead>
-            </TableRow>
-          </TableHeader>
-              <TableBody>
+          <>
+            <div className="md:hidden">
+              <div className="space-y-3">
                 {vaultUsers.map((user, index) => (
-                  <TableRow key={`${user.employee_id}__${user.schedule_time}__${index}`}>
-                    <TableCell className="w-12 text-right">{index + 1}</TableCell>
-                    <TableCell className="hidden md:table-cell">{user.card_no || '-'}</TableCell>
-                    <TableCell className="font-medium">{user.name || '-'}</TableCell>
-                    <TableCell className="hidden md:table-cell">{user.gender || '-'}</TableCell>
-                    <TableCell>{user.employee_id}</TableCell>
-                    <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
-                    <TableCell className="hidden md:table-cell">{sessionNameFor(user)}</TableCell>
-                    <TableCell className="hidden md:table-cell">
-                      {user.time_start && user.time_end ? `${user.time_start} - ${user.time_end}` : user.time_start || '-'}
-                    </TableCell>
-                    <TableCell>{user.booking_date}</TableCell>
-                    <TableCell className="text-center">
-                      <div className="flex justify-center items-center">
+                  <Card key={`${user.employee_id}__${user.schedule_time}__${index}`}>
+                    <CardHeader className="p-3 pb-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <CardTitle className="text-base font-semibold leading-tight line-clamp-1">{user.name || '-'}</CardTitle>
+                          <div className="mt-1 flex items-center gap-1 text-muted-foreground text-xs">
+                            <IdCard className="h-3.5 w-3.5" />
+                            <span className="font-mono">{user.card_no || '-'}</span>
+                          </div>
+                        </div>
                         <StatusBadge status={user.approval_status} />
                       </div>
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <div className="flex justify-center gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
-                          onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'APPROVED' })}
-                          disabled={updateStatusMutation.isPending || user.approval_status === 'APPROVED'}
-                          title="Approve"
-                        >
-                          <Check className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                          onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'REJECTED' })}
-                          disabled={updateStatusMutation.isPending || user.approval_status === 'REJECTED'}
-                          title="Reject"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
+                    </CardHeader>
+                    <CardContent className="p-3 pt-1 space-y-2">
+                      <div className="grid grid-cols-12 gap-2 text-xs">
+                        <div className="col-span-6">
+                          <div className="text-muted-foreground">ID</div>
+                          <div className="font-mono">{user.employee_id}</div>
+                        </div>
+                        <div className="col-span-6">
+                          <div className="text-muted-foreground">Session</div>
+                          <div>{sessionNameFor(user)}</div>
+                        </div>
+                        <div className="col-span-6">
+                          <div className="text-muted-foreground">Time</div>
+                          <div>{user.time_start && user.time_end ? `${user.time_start} - ${user.time_end}` : user.time_start || '-'}</div>
+                        </div>
+                        <div className="col-span-6">
+                          <div className="text-muted-foreground">Date</div>
+                          <div>{user.booking_date}</div>
+                        </div>
                       </div>
-                    </TableCell>
-                  </TableRow>
+
+                      <Accordion type="single" collapsible>
+                        <AccordionItem value="details">
+                          <AccordionTrigger className="text-xs">Details</AccordionTrigger>
+                          <AccordionContent>
+                            <div className="grid grid-cols-12 gap-2 text-xs">
+                              <div className="col-span-6">
+                                <div className="text-muted-foreground">Gender</div>
+                                <div>{user.gender || '-'}</div>
+                              </div>
+                              <div className="col-span-12">
+                                <div className="text-muted-foreground">Department</div>
+                                <div>{user.department || '-'}</div>
+                              </div>
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    </CardContent>
+                    <CardFooter className="p-3 pt-1 flex items-center justify-end gap-2">
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                        onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'APPROVED' })}
+                        disabled={updateStatusMutation.isPending || user.approval_status === 'APPROVED'}
+                        aria-label={`Approve booking for ${user.name || user.employee_id}`}
+                      >
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'REJECTED' })}
+                        disabled={updateStatusMutation.isPending || user.approval_status === 'REJECTED'}
+                        aria-label={`Reject booking for ${user.name || user.employee_id}`}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </CardFooter>
+                  </Card>
                 ))}
-              </TableBody>
-            </Table>
-          </div>
+              </div>
+            </div>
+
+            <div className="hidden md:block">
+              <div className="rounded-lg border bg-card overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-12 text-right">No</TableHead>
+                      <TableHead className="hidden md:table-cell">ID Card</TableHead>
+                      <TableHead>Name</TableHead>
+                      <TableHead className="hidden md:table-cell">Gender</TableHead>
+                      <TableHead>Employee ID</TableHead>
+                      <TableHead className="hidden md:table-cell">Department</TableHead>
+                      <TableHead className="hidden md:table-cell">Session</TableHead>
+                      <TableHead className="hidden md:table-cell">Time</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead className="text-center">Status</TableHead>
+                      <TableHead className="text-center">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {vaultUsers.map((user, index) => (
+                      <TableRow key={`${user.employee_id}__${user.schedule_time}__${index}`}>
+                        <TableCell className="w-12 text-right">{index + 1}</TableCell>
+                        <TableCell className="hidden md:table-cell">{user.card_no || '-'}</TableCell>
+                        <TableCell className="font-medium">{user.name || '-'}</TableCell>
+                        <TableCell className="hidden md:table-cell">{user.gender || '-'}</TableCell>
+                        <TableCell>{user.employee_id}</TableCell>
+                        <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
+                        <TableCell className="hidden md:table-cell">{sessionNameFor(user)}</TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {user.time_start && user.time_end ? `${user.time_start} - ${user.time_end}` : user.time_start || '-'}
+                        </TableCell>
+                        <TableCell>{user.booking_date}</TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex justify-center items-center">
+                            <StatusBadge status={user.approval_status} />
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex justify-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+                              onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'APPROVED' })}
+                              disabled={updateStatusMutation.isPending || user.approval_status === 'APPROVED'}
+                              title="Approve"
+                            >
+                              <Check className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'REJECTED' })}
+                              disabled={updateStatusMutation.isPending || user.approval_status === 'REJECTED'}
+                              title="Reject"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          </>
         ) : (
           <Alert>
             <AlertCircle className="h-4 w-4" />

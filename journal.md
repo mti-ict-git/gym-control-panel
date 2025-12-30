@@ -255,3 +255,34 @@ This journal tracks decisions, notes, and progress for the project.
   - Use employee_core staff_no for CardDB lookup on booking-create when present
   - Fallback to employee_id if staff_no missing
   - File: [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L877-L881)
+
+- 2025-12-30 14:03:28
+  - Relax CardDB active filter and respect Block/del_state in booking-create
+    - Add Block column handling; prefer active cards via ORDER BY instead of WHERE
+    - Allow del_state NULL/0; avoid excluding valid cards with nonstandard status
+    - Ensures CardNo is stored on insert for cases like MTI240369
+  - File: [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L783-L805)
+
+- 2025-12-30 14:05:45
+  - Make Gym Booking menu mobile-friendly with card layout
+    - Replace table with responsive card grid (12-column responsive)
+    - Show key fields: name, ID card, employee ID, gender, dept, session, time, date, status
+    - Keep Approve/Reject actions accessible with icons and labels
+  - File: [VaultPage.tsx](file:///c:/Scripts/Projects/gym-control-panel/src/pages/VaultPage.tsx#L104-L178)
+
+- 2025-12-30 14:08:25
+  - Restrict card layout to mobile only; keep table for desktop
+    - Mobile: md:hidden card grid per booking item
+    - Desktop: hidden md:block table with full columns
+  - File: [VaultPage.tsx](file:///c:/Scripts/Projects/gym-control-panel/src/pages/VaultPage.tsx#L104-L178)
+
+- 2025-12-30 14:11:26
+  - Condense mobile cards with collapsible details to reduce height
+    - Compact paddings, text sizes, icon-only actions
+    - Accordion for gender/department details on demand
+  - File: [VaultPage.tsx](file:///c:/Scripts/Projects/gym-control-panel/src/pages/VaultPage.tsx#L132-L198)
+
+- 2025-12-30 14:21:36
+  - Fix Dialog accessibility warning: add DialogTitle to CommandDialog
+    - Hidden title with sr-only to satisfy Radix requirement
+  - File: [command.tsx](file:///c:/Scripts/Projects/gym-control-panel/src/components/ui/command.tsx#L26-L36)
