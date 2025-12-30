@@ -119,7 +119,16 @@ This journal tracks decisions, notes, and progress for the project.
     - Issue: `net::ERR_CONNECTION_REFUSED` on Gym Booking page.
     - Cause: Backend server (`db-tester.js`) was not running.
     - Fix: Restarted backend server using `npm run dbtester`.
-    - Backend ([db-tester.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/server/db-tester.js)):
+  - Dockerization:
+    - Created `Dockerfile.backend` for Node.js/Express server.
+    - Created `Dockerfile.frontend` for Vite/React app.
+    - Created `docker-compose.yml` to orchestrate both services.
+    - Added `.dockerignore` to exclude `node_modules` and `.env`.
+    - Troubleshooting:
+      - Issue: Port 5055 conflict when starting Docker (`bind: Only one usage...`).
+      - Cause: Local backend server (`npm run dbtester`) was still running.
+      - Fix: Stopped local server and successfully ran `docker compose up -d`.
+      - Backend ([db-tester.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/server/db-tester.js)):
       - Added `/gym-booking-update-status` POST endpoint.
       - Updated `/gym-bookings` GET query with `OUTER APPLY` / `LEFT JOIN` for `DataDBEnt`.
     - Files:
