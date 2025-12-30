@@ -96,20 +96,21 @@ export default function VaultPage() {
         ) : vaultUsers && vaultUsers.length > 0 ? (
           <div className="rounded-lg border bg-card overflow-hidden">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-12 text-right">No</TableHead>
-                  <TableHead className="hidden md:table-cell">ID Card</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead className="hidden md:table-cell">Gender</TableHead>
-                  <TableHead>Employee ID</TableHead>
-                  <TableHead className="hidden md:table-cell">Department</TableHead>
-                  <TableHead className="hidden md:table-cell">Session</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead className="text-center">Status</TableHead>
-                  <TableHead className="text-center">Action</TableHead>
-                </TableRow>
-              </TableHeader>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-12 text-right">No</TableHead>
+              <TableHead className="hidden md:table-cell">ID Card</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead className="hidden md:table-cell">Gender</TableHead>
+              <TableHead>Employee ID</TableHead>
+              <TableHead className="hidden md:table-cell">Department</TableHead>
+              <TableHead className="hidden md:table-cell">Session</TableHead>
+              <TableHead className="hidden md:table-cell">Time</TableHead>
+              <TableHead>Date</TableHead>
+              <TableHead className="text-center">Status</TableHead>
+              <TableHead className="text-center">Action</TableHead>
+            </TableRow>
+          </TableHeader>
               <TableBody>
                 {vaultUsers.map((user, index) => (
                   <TableRow key={`${user.employee_id}__${user.schedule_time}__${index}`}>
@@ -120,6 +121,9 @@ export default function VaultPage() {
                     <TableCell>{user.employee_id}</TableCell>
                     <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
                     <TableCell className="hidden md:table-cell">{sessionNameFor(user)}</TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {user.time_start && user.time_end ? `${user.time_start} - ${user.time_end}` : user.time_start || '-'}
+                    </TableCell>
                     <TableCell>{user.booking_date}</TableCell>
                     <TableCell className="text-center">
                       <div className="flex justify-center items-center">

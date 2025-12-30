@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 export interface VaultUser {
   booking_id: number;
   schedule_time: string;
+  time_start: string | null;
+  time_end: string | null;
   employee_id: string;
   name: string;
   department: string | null;
@@ -91,6 +93,8 @@ export function useVaultUsers() {
           return {
             booking_id: r.booking_id,
             schedule_time,
+            time_start: r.time_start != null ? String(r.time_start).trim() : null,
+            time_end: r.time_end != null ? String(r.time_end).trim() : null,
             employee_id: String(r.employee_id || '').trim(),
             name: String(r.employee_name || '').trim(),
             department: r.department != null ? String(r.department).trim() : null,
