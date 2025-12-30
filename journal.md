@@ -137,6 +137,10 @@ This journal tracks decisions, notes, and progress for the project.
       - [VaultPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/VaultPage.tsx)
       - [useVaultUsers.ts](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/hooks/useVaultUsers.ts)
       - [db-tester.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/server/db-tester.js)
+      - [backend/routes/gym.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/backend/routes/gym.js)
+    - Dedupe fix:
+      - Changed `/gym-bookings` join to `OUTER APPLY` selecting TOP 1 card from `DataDBEnt.dbo.CardDB` with `Status = 1`, `Block = 0`, and `del_state = 1`.
+      - Result: booking list no longer shows duplicate rows per employee.
 - Decisions:
   - Use `ISNULL` in SQL to prioritize `DataDBEnt` data while maintaining backward compatibility with existing `gym_booking` data.
   - Implement Action column buttons directly in the table row for quick status updates.

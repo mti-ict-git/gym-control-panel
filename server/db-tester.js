@@ -765,10 +765,14 @@ app.get('/gym-bookings', async (req, res) => {
       LEFT JOIN MTIMasterEmployeeDB.dbo.employee_employment ee
         ON gb.EmployeeID = ee.employee_id
         AND ee.status = 'ACTIVE'
-      LEFT JOIN DataDBEnt.dbo.CardDB cd
-        ON cd.StaffNo = gb.EmployeeID
-        AND cd.Status = 1
-        AND (cd.Block IS NULL OR cd.Block = 0)
+      OUTER APPLY (
+        SELECT TOP 1 c.*
+        FROM DataDBEnt.dbo.CardDB c
+        WHERE c.StaffNo = gb.EmployeeID
+          AND c.Status = 1
+          AND (c.Block IS NULL OR c.Block = 0)
+          AND c.del_state = 1
+      ) cd
       WHERE gb.BookingDate >= @fromDate
         AND gb.BookingDate <= @toDate
         AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')

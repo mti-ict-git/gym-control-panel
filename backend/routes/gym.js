@@ -436,7 +436,41 @@ router.get('/gym-bookings', async (req, res) => {
     request.input('toDate', sql.Date, new Date(to));
 
     const result = await request.query(
-      "SELECT gb.BookingID AS booking_id, gb.EmployeeID AS employee_id, cd.CardNo AS card_no, ec.name AS employee_name, ISNULL(cd.Department, ee.department) AS department, ec.gender AS gender, gb.SessionName AS session_name, gb.ScheduleID AS schedule_id, CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date, gb.Status AS status, gb.ApprovalStatus AS approval_status, gb.CreatedAt AS created_at, CONVERT(varchar(5), s.StartTime, 108) AS time_start, CONVERT(varchar(5), s.EndTime, 108) AS time_end FROM dbo.gym_booking gb LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID LEFT JOIN MTIMasterEmployeeDB.dbo.employee_core ec ON gb.EmployeeID = ec.employee_id LEFT JOIN MTIMasterEmployeeDB.dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE' LEFT JOIN DataDBEnt.dbo.CardDB cd ON cd.StaffNo = gb.EmployeeID AND cd.Status = 1 AND (cd.Block IS NULL OR cd.Block = 0) WHERE gb.BookingDate >= @fromDate AND gb.BookingDate <= @toDate AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED') ORDER BY gb.BookingDate ASC, time_start ASC, gb.CreatedAt ASC"
+      `SELECT
+        gb.BookingID AS booking_id,
+        gb.EmployeeID AS employee_id,
+        cd.CardNo AS card_no,
+        ec.name AS employee_name,
+        ISNULL(cd.Department, ee.department) AS department,
+        ec.gender AS gender,
+        gb.SessionName AS session_name,
+        gb.ScheduleID AS schedule_id,
+        CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date,
+        gb.Status AS status,
+        gb.ApprovalStatus AS approval_status,
+        gb.CreatedAt AS created_at,
+        CONVERT(varchar(5), s.StartTime, 108) AS time_start,
+        CONVERT(varchar(5), s.EndTime, 108) AS time_end
+      FROM dbo.gym_booking gb
+      LEFT JOIN dbo.gym_schedule s
+        ON s.ScheduleID = gb.ScheduleID
+      LEFT JOIN MTIMasterEmployeeDB.dbo.employee_core ec
+        ON gb.EmployeeID = ec.employee_id
+      LEFT JOIN MTIMasterEmployeeDB.dbo.employee_employment ee
+        ON gb.EmployeeID = ee.employee_id
+        AND ee.status = 'ACTIVE'
+      OUTER APPLY (
+        SELECT TOP 1 c.*
+        FROM DataDBEnt.dbo.CardDB c
+        WHERE c.StaffNo = gb.EmployeeID
+          AND c.Status = 1
+          AND (c.Block IS NULL OR c.Block = 0)
+          AND c.del_state = 1
+      ) cd
+      WHERE gb.BookingDate >= @fromDate
+        AND gb.BookingDate <= @toDate
+        AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+      ORDER BY gb.BookingDate ASC, time_start ASC, gb.CreatedAt ASC`
     );
     await pool.close();
 
