@@ -445,7 +445,7 @@ router.get('/gym-bookings', async (req, res) => {
       `SELECT
         gb.BookingID AS booking_id,
         gb.EmployeeID AS employee_id,
-        cd.CardNo AS card_no,
+        COALESCE(cd.CardNo, gb.CardNo) AS card_no,
         ec.name AS employee_name,
         COALESCE(ee.department, gb.Department, cd.Department) AS department,
         ec.gender AS gender,
@@ -569,6 +569,60 @@ router.post('/gym-booking-update-status', async (req, res) => {
   }
 });
 
+router.post('/gym-booking-backfill-cardno', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: envBool(DB_ENCRYPT, false),
+      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const result = await pool.request().query(
+      `UPDATE gb
+       SET gb.CardNo = cd.CardNo
+       FROM dbo.gym_booking gb
+       OUTER APPLY (
+         SELECT TOP 1 c.CardNo
+         FROM DataDBEnt.dbo.CardDB c
+         WHERE c.StaffNo = gb.EmployeeID
+           AND c.Status = 1
+           AND (c.Block IS NULL OR c.Block = 0)
+           AND c.del_state = 1
+       ) cd
+       WHERE gb.CardNo IS NULL AND cd.CardNo IS NOT NULL`
+    );
+    await pool.close();
+
+    const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
+    return res.json({ ok: true, affected });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
 router.post('/gym-booking-create', async (req, res) => {
   const {
     DB_SERVER,
@@ -592,6 +646,13 @@ router.post('/gym-booking-create', async (req, res) => {
     CARD_DB_PASSWORD,
     CARD_DB_ENCRYPT,
     CARD_DB_TRUST_SERVER_CERTIFICATE,
+    CARDDB_SERVER,
+    CARDDB_PORT,
+    CARDDB_NAME,
+    CARDDB_USER,
+    CARDDB_PASSWORD,
+    CARDDB_ENCRYPT,
+    CARDDB_TRUST_SERVER_CERTIFICATE,
   } = process.env;
 
   const gymServer = envTrim(DB_SERVER);
@@ -678,22 +739,22 @@ router.post('/gym-booking-create', async (req, res) => {
   };
 
   const tryLoadActiveCardNo = async (empId) => {
-    const cardServer = envTrim(CARD_DB_SERVER);
-    const cardDatabase = envTrim(CARD_DB_DATABASE);
-    const cardUser = envTrim(CARD_DB_USER);
-    const cardPassword = envTrim(CARD_DB_PASSWORD);
+    const cardServer = envTrim(CARD_DB_SERVER) || envTrim(CARDDB_SERVER);
+    const cardDatabase = envTrim(CARD_DB_DATABASE) || envTrim(CARDDB_NAME);
+    const cardUser = envTrim(CARD_DB_USER) || envTrim(CARDDB_USER);
+    const cardPassword = envTrim(CARD_DB_PASSWORD) || envTrim(CARDDB_PASSWORD);
 
     if (!cardServer || !cardDatabase || !cardUser || !cardPassword) return null;
 
     const cardConfig = {
       server: cardServer,
-      port: Number(CARD_DB_PORT || 1433),
+      port: Number(CARD_DB_PORT || CARDDB_PORT || 1433),
       database: cardDatabase,
       user: cardUser,
       password: cardPassword,
       options: {
-        encrypt: envBool(CARD_DB_ENCRYPT, false),
-        trustServerCertificate: envBool(CARD_DB_TRUST_SERVER_CERTIFICATE, true),
+        encrypt: envBool(CARD_DB_ENCRYPT, false) || envBool(CARDDB_ENCRYPT, false),
+        trustServerCertificate: envBool(CARD_DB_TRUST_SERVER_CERTIFICATE, true) || envBool(CARDDB_TRUST_SERVER_CERTIFICATE, true),
       },
       pool: { max: 1, min: 0, idleTimeoutMillis: 5000 },
     };
@@ -719,7 +780,7 @@ router.post('/gym-booking-create', async (req, res) => {
         `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '${schema.replace(/'/g, "''")}' AND TABLE_NAME = '${table.replace(/'/g, "''")}'`
       );
       const cols = (colsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
-      const empCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID']);
+      const empCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
       const cardCol = pickColumn(cols, ['card_no', 'CardNo', 'card_number', 'CardNumber', 'id_card', 'IDCard']);
       const activeCol = pickColumn(cols, ['is_active', 'IsActive', 'active', 'Active', 'status', 'Status']);
       const delStateCol = pickColumn(cols, ['del_state', 'DelState']);
@@ -815,7 +876,8 @@ router.post('/gym-booking-create', async (req, res) => {
     const employeeIdCol = pickColumn(columns, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID']);
     const nameCol = pickColumn(columns, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
     const deptCol = pickColumn(columns, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
-    const cardCol = pickColumn(columns, ['id_card', 'ID Card', 'card_no', 'Card No', 'CardNo']);
+    const cardCol = pickColumn(columns, ['id_card', 'ID Card', 'IDCard', 'card_no', 'Card No', 'CardNo']);
+    const staffNoCol = pickColumn(columns, ['staff_no', 'StaffNo', 'employee_no', 'EmployeeNo']);
     const genderCol = pickColumn(columns, ['gender', 'Gender', 'sex', 'Sex', 'jenis_kelamin', 'Jenis Kelamin']);
 
     if (!employeeIdCol || !nameCol) {
@@ -828,6 +890,7 @@ router.post('/gym-booking-create', async (req, res) => {
       `[${nameCol}] AS name`,
       deptCol ? `[${deptCol}] AS department` : `CAST(NULL AS varchar(255)) AS department`,
       cardCol ? `[${cardCol}] AS card_no` : `CAST(NULL AS varchar(255)) AS card_no`,
+      staffNoCol ? `[${staffNoCol}] AS staff_no` : `CAST(NULL AS varchar(255)) AS staff_no`,
       genderCol ? `[${genderCol}] AS gender` : `CAST(NULL AS varchar(50)) AS gender`,
     ].join(',\n        ');
 
@@ -876,7 +939,10 @@ router.post('/gym-booking-create', async (req, res) => {
 
     const employeeName = String(empRow.name ?? '').trim();
     const cardNoMaster = empRow.card_no != null ? String(empRow.card_no).trim() : null;
-    const cardNoCardDb = await tryLoadActiveCardNo(employeeId);
+    const staffIdForCard = empRow.staff_no != null && String(empRow.staff_no).trim().length > 0
+      ? String(empRow.staff_no).trim()
+      : employeeId;
+    const cardNoCardDb = await tryLoadActiveCardNo(staffIdForCard);
     const cardNo = cardNoCardDb || cardNoMaster;
     const gender = empRow.gender != null && String(empRow.gender).trim() ? String(empRow.gender).trim() : 'UNKNOWN';
 
