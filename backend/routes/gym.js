@@ -471,7 +471,7 @@ router.get('/gym-bookings', async (req, res) => {
         WHERE c.StaffNo = gb.EmployeeID
           AND c.Status = 1
           AND (c.Block IS NULL OR c.Block = 0)
-          AND c.del_state = 1
+          AND c.del_state = 0
       ) cd
       WHERE gb.BookingDate >= @fromDate
         AND gb.BookingDate <= @toDate
@@ -797,7 +797,7 @@ router.post('/gym-booking-create', async (req, res) => {
         ? `AND ([${activeCol}] = 1 OR UPPER(CAST([${activeCol}] AS varchar(50))) IN ('ACTIVE','AKTIF','1','TRUE'))`
         : '';
 
-      const delStateWhere = delStateCol ? `AND [${delStateCol}] = 1` : '';
+      const delStateWhere = '';
 
       const cardResult = await req2.query(
         `SELECT TOP 1 [${cardCol}] AS card_no FROM [${schema}].[${table}] WHERE [${empCol}] = @id ${activeWhere} ${delStateWhere}`
