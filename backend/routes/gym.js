@@ -873,10 +873,11 @@ router.post('/gym-booking-create', async (req, res) => {
     );
     const columns = (columnsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
 
-    const employeeIdCol = pickColumn(columns, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
+    const employeeIdCol = pickColumn(columns, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID']);
     const nameCol = pickColumn(columns, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
     const deptCol = pickColumn(columns, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
     const cardCol = pickColumn(columns, ['id_card', 'ID Card', 'IDCard', 'card_no', 'Card No', 'CardNo']);
+    const staffNoCol = pickColumn(columns, ['staff_no', 'StaffNo', 'employee_no', 'EmployeeNo']);
     const genderCol = pickColumn(columns, ['gender', 'Gender', 'sex', 'Sex', 'jenis_kelamin', 'Jenis Kelamin']);
 
     if (!employeeIdCol || !nameCol) {
@@ -889,6 +890,7 @@ router.post('/gym-booking-create', async (req, res) => {
       `[${nameCol}] AS name`,
       deptCol ? `[${deptCol}] AS department` : `CAST(NULL AS varchar(255)) AS department`,
       cardCol ? `[${cardCol}] AS card_no` : `CAST(NULL AS varchar(255)) AS card_no`,
+      staffNoCol ? `[${staffNoCol}] AS staff_no` : `CAST(NULL AS varchar(255)) AS staff_no`,
       genderCol ? `[${genderCol}] AS gender` : `CAST(NULL AS varchar(50)) AS gender`,
     ].join(',\n        ');
 
@@ -937,7 +939,10 @@ router.post('/gym-booking-create', async (req, res) => {
 
     const employeeName = String(empRow.name ?? '').trim();
     const cardNoMaster = empRow.card_no != null ? String(empRow.card_no).trim() : null;
-    const cardNoCardDb = await tryLoadActiveCardNo(employeeId);
+    const staffIdForCard = empRow.staff_no != null && String(empRow.staff_no).trim().length > 0
+      ? String(empRow.staff_no).trim()
+      : employeeId;
+    const cardNoCardDb = await tryLoadActiveCardNo(staffIdForCard);
     const cardNo = cardNoCardDb || cardNoMaster;
     const gender = empRow.gender != null && String(empRow.gender).trim() ? String(empRow.gender).trim() : 'UNKNOWN';
 

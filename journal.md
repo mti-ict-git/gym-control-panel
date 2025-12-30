@@ -250,3 +250,8 @@ This journal tracks decisions, notes, and progress for the project.
   - Backfill endpoint:
     - Added /gym-booking-backfill-cardno to update missing CardNo from CardDB
     - File: [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L520-L571)
+
+- 2025-12-30 12:22:10
+  - Use employee_core staff_no for CardDB lookup on booking-create when present
+  - Fallback to employee_id if staff_no missing
+  - File: [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L877-L881)
