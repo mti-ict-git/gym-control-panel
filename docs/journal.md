@@ -38,10 +38,6 @@ Learning:
 Verification:
 - Lint: 0 errors, 8 warnings (react-refresh only-export-components).
 - TypeScript integrity check: passed (noEmit).
-2025-12-30 18:58:20 +08:00
-
-Verification:
-- Restarted backend on :5055 and confirmed GET /api/gym-live-status returns 200 with empty people list.
 
 2025-12-30 13:58:18 +08:00
 
@@ -71,6 +67,25 @@ Enhancement:
 
 Verification:
 - Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+2025-12-30 21:07:00 +08:00
+
+Database Connections Refactor:
+- Replaced Supabase calls in useDatabaseConnections with backend GymDB endpoints (/api/db-connections*, see gym.js).
+- Preserved hook interface for DatabaseList and detail page.
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).
+2025-12-30 21:15:30 +08:00
+
+Supabase Removal Phase 2:
+- Refactored useGymUsers to source from MasterDB /employee-core and provide paginated list for ScheduleDialog and Dashboard.
+- Refactored dashboard-facing hooks in useGymSchedules (upcoming, today count, occupancy) to GymDB endpoints (/gym-sessions, /gym-bookings).
+- Refactored useGymAnalytics to compute charts from GymDB /gym-bookings.
+
+Verification:
+- Lint: passed (warnings only).
 - TypeScript integrity check: passed (noEmit).
 
 2025-12-30 14:06:20 +08:00
@@ -372,18 +387,3 @@ Database:
 
 Verification:
 - Script output confirms updated schema.
-
-2025-12-30 20:59:52 +08:00
-
-Fix:
-- Fixed /gym-live-sync to actually select and persist EmployeeID from the CardDB staff column.
-
-2025-12-30 21:09:51 +08:00
-
-Fix:
-- Resolved EmployeeID for live taps by mapping CardNo back to employee id via CardDB, with MasterDB fallback.
-
-2025-12-30 21:15:09 +08:00
-
-Fix:
-- Filtered /gym-live-persisted results by GYM_UNIT_FILTER by default (override with ?all=1 or ?unit=...).

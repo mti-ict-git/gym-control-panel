@@ -1732,6 +1732,357 @@ router.get('/gym-accounts', async (req, res) => {
   }
 });
 
+router.get('/gym-bookings-by-employee', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', bookings: [] });
+  }
+  const employeeId = String(req.query.employee_id || '').trim();
+  const from = String(req.query.from || '').trim();
+  const to = String(req.query.to || '').trim();
+  if (!employeeId || !from || !to || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return res.status(400).json({ ok: false, error: 'employee_id, from, to are required (yyyy-MM-dd)', bookings: [] });
+  }
+  const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await sql.connect(config);
+    const request = pool.request();
+    request.input('fromDate', sql.Date, new Date(from));
+    request.input('toDate', sql.Date, new Date(to));
+    request.input('employeeId', sql.VarChar(20), employeeId);
+    const result = await request.query(
+      `SELECT
+        gb.BookingID AS booking_id,
+        gb.EmployeeID AS employee_id,
+        COALESCE(cd.CardNo, gb.CardNo) AS card_no,
+        gb.EmployeeName AS employee_name,
+        gb.Department AS department,
+        gb.Gender AS gender,
+        gb.SessionName AS session_name,
+        gb.ScheduleID AS schedule_id,
+        CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date,
+        gb.Status AS status,
+        gb.ApprovalStatus AS approval_status,
+        s.StartTime AS time_start_raw,
+        s.EndTime AS time_end_raw,
+        CONVERT(varchar(5), s.StartTime, 108) AS time_start,
+        CONVERT(varchar(5), s.EndTime, 108) AS time_end
+      FROM dbo.gym_booking gb
+      LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
+      OUTER APPLY (
+        SELECT TOP 1 c.CardNo FROM dbo.gym_card_registry c WHERE c.EmployeeID = gb.EmployeeID ORDER BY c.UpdatedAt DESC
+      ) cd
+      WHERE gb.EmployeeID = @employeeId AND gb.BookingDate >= @fromDate AND gb.BookingDate <= @toDate AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+      ORDER BY gb.BookingDate DESC, time_start DESC, gb.CreatedAt DESC`
+    );
+    await pool.close();
+    const rows = Array.isArray(result?.recordset) ? result.recordset : [];
+    const bookings = rows.map((r) => ({
+      booking_id: Number(r.booking_id),
+      employee_id: String(r.employee_id ?? '').trim(),
+      card_no: r.card_no != null ? String(r.card_no).trim() : null,
+      employee_name: String(r.employee_name ?? '').trim(),
+      department: r.department != null ? String(r.department).trim() : null,
+      gender: r.gender != null ? String(r.gender).trim() : null,
+      session_name: String(r.session_name ?? '').trim(),
+      schedule_id: Number(r.schedule_id),
+      booking_date: String(r.booking_date ?? '').trim(),
+      status: String(r.status ?? '').trim(),
+      approval_status: r.approval_status != null ? String(r.approval_status).trim() : null,
+      time_start: r.time_start != null ? String(r.time_start).trim() : null,
+      time_end: r.time_end != null ? String(r.time_end).trim() : null,
+    }));
+    return res.json({ ok: true, bookings });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, bookings: [] });
+  }
+});
+
+router.post('/gym-booking-status', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const { booking_id, status } = req.body || {};
+  const valid = ['BOOKED','CHECKIN','COMPLETED','CANCELLED','EXPIRED'];
+  const statusUpper = String(status || '').toUpperCase();
+  if (!booking_id || !valid.includes(statusUpper)) {
+    return res.status(400).json({ ok: false, error: 'booking_id and valid status are required' });
+  }
+  const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await sql.connect(config);
+    const req1 = pool.request();
+    req1.input('id', sql.Int, Number(booking_id));
+    req1.input('status', sql.VarChar(20), statusUpper);
+    const result = await req1.query('UPDATE dbo.gym_booking SET Status = @status WHERE BookingID = @id');
+    await pool.close();
+    const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
+    if (affected < 1) return res.status(200).json({ ok: false, error: 'Not updated' });
+    return res.json({ ok: true, affected });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.delete('/gym-booking/:id', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const id = Number(String(req.params.id || ''));
+  if (!Number.isFinite(id) || id <= 0) {
+    return res.status(400).json({ ok: false, error: 'Invalid id' });
+  }
+  const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await sql.connect(config);
+    const req1 = pool.request();
+    req1.input('id', sql.Int, id);
+    const r = await req1.query('DELETE FROM dbo.gym_booking WHERE BookingID = @id');
+    await pool.close();
+    const affected = Array.isArray(r?.rowsAffected) ? Number(r.rowsAffected[0] || 0) : 0;
+    if (affected < 1) return res.status(200).json({ ok: false, error: 'Not deleted' });
+    return res.json({ ok: true, affected });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.post('/db-connections-init', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const exec = async (q) => { await pool.request().query(q); };
+    await exec(`IF OBJECT_ID('dbo.gym_database_connections','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_database_connections (
+        Id UNIQUEIDENTIFIER NOT NULL DEFAULT NEWID(),
+        DisplayName VARCHAR(100) NOT NULL,
+        DatabaseType VARCHAR(30) NOT NULL,
+        Host VARCHAR(200) NOT NULL,
+        Port INT NOT NULL,
+        DatabaseName VARCHAR(200) NOT NULL,
+        Username VARCHAR(100) NOT NULL,
+        PasswordEncrypted VARCHAR(255) NOT NULL,
+        IsActive BIT NOT NULL DEFAULT 1,
+        ConnectionStatus VARCHAR(20) NOT NULL DEFAULT 'not_tested',
+        LastTestedAt DATETIME NULL,
+        CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
+        UpdatedAt DATETIME NULL,
+        CONSTRAINT PK_gym_database_connections PRIMARY KEY (Id)
+      )
+    END`);
+    await exec(`IF OBJECT_ID('dbo.tr_gym_database_connections_SetUpdatedAt','TR') IS NULL BEGIN
+      EXEC('CREATE TRIGGER dbo.tr_gym_database_connections_SetUpdatedAt ON dbo.gym_database_connections AFTER UPDATE AS BEGIN SET NOCOUNT ON; UPDATE c SET UpdatedAt = SYSDATETIME() FROM dbo.gym_database_connections c INNER JOIN inserted i ON c.Id = i.Id; END');
+    END`);
+    await pool.close();
+    return res.json({ ok: true });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.get('/db-connections', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const r = await pool.request().query(`SELECT Id, DisplayName, DatabaseType, Host, Port, DatabaseName, Username, PasswordEncrypted, IsActive, ConnectionStatus, LastTestedAt, CreatedAt, UpdatedAt FROM dbo.gym_database_connections ORDER BY CreatedAt DESC`);
+    await pool.close();
+    const rows = Array.isArray(r?.recordset) ? r.recordset : [];
+    const connections = rows.map((x) => ({
+      id: String(x.Id),
+      display_name: String(x.DisplayName),
+      database_type: String(x.DatabaseType),
+      host: String(x.Host),
+      port: Number(x.Port || 1433),
+      database_name: String(x.DatabaseName),
+      username: String(x.Username),
+      password_encrypted: String(x.PasswordEncrypted),
+      is_active: x.IsActive ? true : false,
+      connection_status: String(x.ConnectionStatus || 'not_tested'),
+      last_tested_at: x.LastTestedAt ? new Date(x.LastTestedAt).toISOString() : null,
+      created_at: x.CreatedAt ? new Date(x.CreatedAt).toISOString() : new Date().toISOString(),
+      updated_at: x.UpdatedAt ? new Date(x.UpdatedAt).toISOString() : new Date().toISOString(),
+      created_by: null,
+    }));
+    return res.json({ ok: true, connections });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, connections: [] });
+  }
+});
+
+router.post('/db-connections', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const { display_name, database_type, host, port, database_name, username, password_encrypted, is_active } = req.body || {};
+  if (!display_name || !database_type || !host || !database_name || !username || !password_encrypted || typeof port !== 'number') {
+    return res.status(400).json({ ok: false, error: 'Missing required fields' });
+  }
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const req1 = pool.request();
+    req1.input('DisplayName', sql.VarChar(100), String(display_name));
+    req1.input('DatabaseType', sql.VarChar(30), String(database_type));
+    req1.input('Host', sql.VarChar(200), String(host));
+    req1.input('Port', sql.Int, Number(port));
+    req1.input('DatabaseName', sql.VarChar(200), String(database_name));
+    req1.input('Username', sql.VarChar(100), String(username));
+    req1.input('PasswordEncrypted', sql.VarChar(255), String(password_encrypted));
+    req1.input('IsActive', sql.Bit, is_active === false ? 0 : 1);
+    const r = await req1.query(`INSERT INTO dbo.gym_database_connections (DisplayName, DatabaseType, Host, Port, DatabaseName, Username, PasswordEncrypted, IsActive) OUTPUT inserted.Id VALUES (@DisplayName, @DatabaseType, @Host, @Port, @DatabaseName, @Username, @PasswordEncrypted, @IsActive)`);
+    const id = r?.recordset?.[0]?.Id ? String(r.recordset[0].Id) : null;
+    await pool.close();
+    return res.json({ ok: true, id });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.post('/db-connections-update', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const { id, display_name, database_type, host, port, database_name, username, password_encrypted, is_active } = req.body || {};
+  if (!id) return res.status(400).json({ ok: false, error: 'id is required' });
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const req1 = pool.request();
+    req1.input('Id', sql.UniqueIdentifier, id);
+    req1.input('DisplayName', sql.VarChar(100), display_name ?? null);
+    req1.input('DatabaseType', sql.VarChar(30), database_type ?? null);
+    req1.input('Host', sql.VarChar(200), host ?? null);
+    req1.input('Port', sql.Int, typeof port === 'number' ? port : null);
+    req1.input('DatabaseName', sql.VarChar(200), database_name ?? null);
+    req1.input('Username', sql.VarChar(100), username ?? null);
+    req1.input('PasswordEncrypted', sql.VarChar(255), password_encrypted ?? null);
+    req1.input('IsActive', sql.Bit, typeof is_active === 'boolean' ? (is_active ? 1 : 0) : null);
+    await req1.query(`UPDATE dbo.gym_database_connections SET 
+      DisplayName = COALESCE(@DisplayName, DisplayName),
+      DatabaseType = COALESCE(@DatabaseType, DatabaseType),
+      Host = COALESCE(@Host, Host),
+      Port = COALESCE(@Port, Port),
+      DatabaseName = COALESCE(@DatabaseName, DatabaseName),
+      Username = COALESCE(@Username, Username),
+      PasswordEncrypted = COALESCE(@PasswordEncrypted, PasswordEncrypted),
+      IsActive = COALESCE(@IsActive, IsActive),
+      UpdatedAt = SYSDATETIME()
+    WHERE Id = @Id`);
+    await pool.close();
+    return res.json({ ok: true });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.post('/db-connections-delete', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const { id } = req.body || {};
+  if (!id) return res.status(400).json({ ok: false, error: 'id is required' });
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const req1 = pool.request();
+    req1.input('Id', sql.UniqueIdentifier, id);
+    await req1.query(`DELETE FROM dbo.gym_database_connections WHERE Id = @Id`);
+    await pool.close();
+    return res.json({ ok: true });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.post('/db-connections-test', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const { id } = req.body || {};
+  if (!id) return res.status(400).json({ ok: false, error: 'id is required' });
+  const gymConfig = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(gymConfig).connect();
+    const row = await pool.request().input('Id', sql.UniqueIdentifier, id).query(`SELECT TOP 1 Host, Port, DatabaseName, Username, PasswordEncrypted, DatabaseType FROM dbo.gym_database_connections WHERE Id = @Id`);
+    const item = row?.recordset?.[0] || null;
+    if (!item) { await pool.close(); return res.status(200).json({ ok: false, error: 'Not found' }); }
+    const testConfig = {
+      server: String(item.Host),
+      port: Number(item.Port || 1433),
+      database: String(item.DatabaseName),
+      user: String(item.Username),
+      password: String(item.PasswordEncrypted),
+      options: { encrypt: false, trustServerCertificate: true },
+      pool: { max: 1, min: 0, idleTimeoutMillis: 3000 },
+    };
+    let success = false;
+    try {
+      const tpool = await new sql.ConnectionPool(testConfig).connect();
+      await tpool.request().query('SELECT 1 AS ok');
+      await tpool.close();
+      success = true;
+    } catch (_) {
+      success = false;
+    }
+    const req1 = pool.request();
+    req1.input('Id', sql.UniqueIdentifier, id);
+    req1.input('Status', sql.VarChar(20), success ? 'connected' : 'error');
+    req1.input('At', sql.DateTime, new Date());
+    await req1.query(`UPDATE dbo.gym_database_connections SET ConnectionStatus = @Status, LastTestedAt = @At WHERE Id = @Id`);
+    await pool.close();
+    return res.json({ ok: true, success });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
 router.post('/gym-accounts', async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);

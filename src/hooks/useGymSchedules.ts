@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek } from 'date-fns';
 
@@ -29,36 +28,37 @@ export function useGymSchedules(filter: FilterType = 'all') {
   return useQuery({
     queryKey: ['gym-schedules', filter],
     queryFn: async () => {
-      let query = supabase
-        .from('gym_schedules')
-        .select(`
-          *,
-          gym_users (
-            id,
-            name,
-            employee_id
-          )
-        `)
-        .order('schedule_time', { ascending: true });
-
       const now = new Date();
-      
-      if (filter === 'today') {
-        query = query
-          .gte('schedule_time', startOfDay(now).toISOString())
-          .lte('schedule_time', endOfDay(now).toISOString());
-      } else if (filter === 'week') {
-        query = query
-          .gte('schedule_time', startOfWeek(now, { weekStartsOn: 1 }).toISOString())
-          .lte('schedule_time', endOfWeek(now, { weekStartsOn: 1 }).toISOString());
-      } else if (filter === 'BOOKED' || filter === 'IN_GYM' || filter === 'OUT') {
-        query = query.eq('status', filter);
+      let from = format(startOfDay(now), 'yyyy-MM-dd');
+      let to = format(endOfDay(now), 'yyyy-MM-dd');
+      if (filter === 'week') {
+        from = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+        to = format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
       }
-
-      const { data, error } = await query;
-      
-      if (error) throw error;
-      return data as GymScheduleWithUser[];
+      const r = await fetch(`/api/gym-bookings?from=${from}&to=${to}`).catch(() => fetch(`/gym-bookings?from=${from}&to=${to}`));
+      const j: { ok: boolean; bookings?: Array<{ booking_id: number; booking_date: string; time_start: string | null; status: string }>; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
+      const rows = (j.bookings || []).filter((b) => {
+        if (filter === 'BOOKED' || filter === 'IN_GYM' || filter === 'OUT') return String(b.status).toUpperCase() === filter;
+        return true;
+      });
+      const data: GymScheduleWithUser[] = rows.map((b) => {
+        const hhmm = b.time_start || '00:00';
+        const [h, m] = hhmm.split(':').map((x) => Number(x));
+        const d = new Date(b.booking_date);
+        d.setHours(h, m, 0, 0);
+        return {
+          id: String(b.booking_id),
+          gym_user_id: '',
+          schedule_time: d.toISOString(),
+          status: String(b.status).toUpperCase() as ScheduleStatus,
+          check_in_time: null,
+          check_out_time: null,
+          created_at: new Date().toISOString(),
+          gym_users: null,
+        };
+      });
+      return data;
     },
   });
 }
@@ -68,14 +68,28 @@ export function useUserSchedules(userId: string | undefined) {
     queryKey: ['user-schedules', userId],
     queryFn: async () => {
       if (!userId) return [];
-      const { data, error } = await supabase
-        .from('gym_schedules')
-        .select('*')
-        .eq('gym_user_id', userId)
-        .order('schedule_time', { ascending: false });
-      
-      if (error) throw error;
-      return data as GymSchedule[];
+      const today = new Date();
+      const from = format(startOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      const to = format(endOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      const r = await fetch(`/api/gym-bookings-by-employee?employee_id=${encodeURIComponent(userId)}&from=${from}&to=${to}`).catch(() => fetch(`/gym-bookings-by-employee?employee_id=${encodeURIComponent(userId)}&from=${from}&to=${to}`));
+      const j: { ok: boolean; bookings?: Array<{ booking_id: number; booking_date: string; time_start: string | null; status: string }>; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load user bookings');
+      const schedules: GymSchedule[] = (j.bookings || []).map((b) => {
+        const hhmm = b.time_start || '00:00';
+        const [h, m] = hhmm.split(':').map((x) => Number(x));
+        const d = new Date(b.booking_date);
+        d.setHours(h, m, 0, 0);
+        return {
+          id: String(b.booking_id),
+          gym_user_id: userId,
+          schedule_time: d.toISOString(),
+          status: String(b.status).toUpperCase() as ScheduleStatus,
+          check_in_time: null,
+          check_out_time: null,
+          created_at: new Date().toISOString(),
+        };
+      });
+      return schedules;
     },
     enabled: !!userId,
   });
@@ -85,22 +99,20 @@ export function useUpcomingSchedules(limit: number = 5) {
   return useQuery({
     queryKey: ['upcoming-schedules', limit],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('gym_schedules')
-        .select(`
-          *,
-          gym_users (
-            id,
-            name,
-            employee_id
-          )
-        `)
-        .gte('schedule_time', new Date().toISOString())
-        .order('schedule_time', { ascending: true })
-        .limit(limit);
-      
-      if (error) throw error;
-      return data as GymScheduleWithUser[];
+      const r = await fetch('/api/gym-sessions').catch(() => fetch('/gym-sessions'));
+      const j: { ok: boolean; sessions?: Array<{ session_name: string; time_start: string; time_end: string | null; quota: number }>; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load sessions');
+      const sessions = (j.sessions || []).slice(0, limit).map((s, idx) => ({
+        id: `session-${s.session_name}-${s.time_start}-${idx}`,
+        gym_user_id: '',
+        schedule_time: new Date().toISOString(),
+        status: 'BOOKED' as ScheduleStatus,
+        check_in_time: null,
+        check_out_time: null,
+        created_at: new Date().toISOString(),
+        gym_users: null,
+      }));
+      return sessions as GymScheduleWithUser[];
     },
   });
 }
@@ -110,14 +122,11 @@ export function useTodaySchedulesCount() {
     queryKey: ['today-schedules-count'],
     queryFn: async () => {
       const now = new Date();
-      const { count, error } = await supabase
-        .from('gym_schedules')
-        .select('*', { count: 'exact', head: true })
-        .gte('schedule_time', startOfDay(now).toISOString())
-        .lte('schedule_time', endOfDay(now).toISOString());
-      
-      if (error) throw error;
-      return count || 0;
+      const dateStr = format(now, 'yyyy-MM-dd');
+      const r = await fetch(`/api/gym-bookings?from=${dateStr}&to=${dateStr}`).catch(() => fetch(`/gym-bookings?from=${dateStr}&to=${dateStr}`));
+      const j: { ok: boolean; bookings?: unknown[]; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
+      return Array.isArray(j.bookings) ? j.bookings.length : 0;
     },
   });
 }
@@ -126,15 +135,15 @@ export function useGymOccupancy() {
   return useQuery({
     queryKey: ['gym-occupancy'],
     queryFn: async () => {
-      const { count, error } = await supabase
-        .from('gym_schedules')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'IN_GYM');
-      
-      if (error) throw error;
-      return count || 0;
+      const today = new Date();
+      const dateStr = format(today, 'yyyy-MM-dd');
+      const r = await fetch(`/api/gym-bookings?from=${dateStr}&to=${dateStr}`).catch(() => fetch(`/gym-bookings?from=${dateStr}&to=${dateStr}`));
+      const j: { ok: boolean; bookings?: Array<{ status: string }>; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
+      const cnt = (j.bookings || []).filter((b) => String(b.status).toUpperCase() === 'CHECKIN').length;
+      return cnt;
     },
-    refetchInterval: 5000, // Real-time polling every 5 seconds
+    refetchInterval: 5000,
   });
 }
 
@@ -143,18 +152,36 @@ export function useNextScheduleForUser(userId: string | undefined) {
     queryKey: ['next-schedule', userId],
     queryFn: async () => {
       if (!userId) return null;
-      const { data, error } = await supabase
-        .from('gym_schedules')
-        .select('*')
-        .eq('gym_user_id', userId)
-        .gte('schedule_time', new Date().toISOString())
-        .eq('status', 'BOOKED')
-        .order('schedule_time', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      
-      if (error) throw error;
-      return data as GymSchedule | null;
+      const now = new Date();
+      const from = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      const to = format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      const r = await fetch(`/api/gym-bookings-by-employee?employee_id=${encodeURIComponent(userId)}&from=${from}&to=${to}`).catch(() => fetch(`/gym-bookings-by-employee?employee_id=${encodeURIComponent(userId)}&from=${from}&to=${to}`));
+      const j: { ok: boolean; bookings?: Array<{ booking_id: number; booking_date: string; time_start: string | null; status: string }>; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load user bookings');
+      const futureBooked = (j.bookings || [])
+        .map((b) => {
+          const hhmm = b.time_start || '00:00';
+          const [h, m] = hhmm.split(':').map((x) => Number(x));
+          const d = new Date(b.booking_date);
+          d.setHours(h, m, 0, 0);
+          return { b, dt: d };
+        })
+        .filter(({ b, dt }) => String(b.status).toUpperCase() === 'BOOKED' && dt.getTime() > now.getTime())
+        .sort((a, b) => a.dt.getTime() - b.dt.getTime());
+      const first = futureBooked[0];
+      if (!first) return null;
+      const statusUpper = String(first.b.status).toUpperCase();
+      const statusMap: Record<string, ScheduleStatus> = { BOOKED: 'BOOKED', CHECKIN: 'IN_GYM', COMPLETED: 'OUT' };
+      const mappedStatus: ScheduleStatus = statusMap[statusUpper] ?? 'BOOKED';
+      return {
+        id: String(first.b.booking_id),
+        gym_user_id: userId,
+        schedule_time: first.dt.toISOString(),
+        status: mappedStatus,
+        check_in_time: null,
+        check_out_time: null,
+        created_at: new Date().toISOString(),
+      } as GymSchedule;
     },
     enabled: !!userId,
   });
@@ -165,45 +192,88 @@ export function useMostRelevantSchedule(userId: string | undefined) {
     queryKey: ['relevant-schedule', userId],
     queryFn: async () => {
       if (!userId) return null;
-      
-      // First check if user is currently IN_GYM
-      const { data: inGymData } = await supabase
-        .from('gym_schedules')
-        .select('*')
-        .eq('gym_user_id', userId)
-        .eq('status', 'IN_GYM')
-        .maybeSingle();
-        
-      if (inGymData) return inGymData as GymSchedule;
+      const today = new Date();
+      const fromToday = format(startOfDay(today), 'yyyy-MM-dd');
+      const toToday = format(endOfDay(today), 'yyyy-MM-dd');
+      const weekFrom = format(startOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+      const weekTo = format(endOfWeek(today, { weekStartsOn: 1 }), 'yyyy-MM-dd');
 
-      // Then check for next BOOKED schedule
-      const { data: bookedData } = await supabase
-        .from('gym_schedules')
-        .select('*')
-        .eq('gym_user_id', userId)
-        .gte('schedule_time', new Date().toISOString())
-        .eq('status', 'BOOKED')
-        .order('schedule_time', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-        
-      if (bookedData) return bookedData as GymSchedule;
+      const fetchBookings = async (from: string, to: string) => {
+        const r = await fetch(`/api/gym-bookings-by-employee?employee_id=${encodeURIComponent(userId!)}&from=${from}&to=${to}`).catch(() => fetch(`/gym-bookings-by-employee?employee_id=${encodeURIComponent(userId!)}&from=${from}&to=${to}`));
+        const j: { ok: boolean; bookings?: Array<{ booking_id: number; booking_date: string; time_start: string | null; status: string }>; error?: string } = await r.json();
+        if (!j.ok) throw new Error(j.error || 'Failed to load user bookings');
+        return j.bookings || [];
+      };
 
-      // Finally check for last OUT schedule (today only)
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-      
-      const { data: outData } = await supabase
-        .from('gym_schedules')
-        .select('*')
-        .eq('gym_user_id', userId)
-        .eq('status', 'OUT')
-        .gte('schedule_time', startOfToday.toISOString())
-        .order('schedule_time', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const todayBookings = await fetchBookings(fromToday, toToday);
+      const statusMap: Record<string, ScheduleStatus> = { BOOKED: 'BOOKED', CHECKIN: 'IN_GYM', COMPLETED: 'OUT' };
 
-      return (outData as GymSchedule) || null;
+      const inGym = todayBookings.find((b) => String(b.status).toUpperCase() === 'CHECKIN');
+      if (inGym) {
+        const hhmm = inGym.time_start || '00:00';
+        const [h, m] = hhmm.split(':').map((x) => Number(x));
+        const d = new Date(inGym.booking_date);
+        d.setHours(h, m, 0, 0);
+        return {
+          id: String(inGym.booking_id),
+          gym_user_id: userId!,
+          schedule_time: d.toISOString(),
+          status: 'IN_GYM',
+          check_in_time: null,
+          check_out_time: null,
+          created_at: new Date().toISOString(),
+        } as GymSchedule;
+      }
+
+      const weekBookings = await fetchBookings(weekFrom, weekTo);
+      const now = new Date();
+      const nextBooked = weekBookings
+        .map((b) => {
+          const hhmm = b.time_start || '00:00';
+          const [h, m] = hhmm.split(':').map((x) => Number(x));
+          const d = new Date(b.booking_date);
+          d.setHours(h, m, 0, 0);
+          return { b, dt: d };
+        })
+        .filter(({ b, dt }) => String(b.status).toUpperCase() === 'BOOKED' && dt.getTime() > now.getTime())
+        .sort((a, b) => a.dt.getTime() - b.dt.getTime())[0];
+      if (nextBooked) {
+        const statusUpper = String(nextBooked.b.status).toUpperCase();
+        const mappedStatus: ScheduleStatus = statusMap[statusUpper] ?? 'BOOKED';
+        return {
+          id: String(nextBooked.b.booking_id),
+          gym_user_id: userId!,
+          schedule_time: nextBooked.dt.toISOString(),
+          status: mappedStatus,
+          check_in_time: null,
+          check_out_time: null,
+          created_at: new Date().toISOString(),
+        } as GymSchedule;
+      }
+
+      const lastOut = todayBookings
+        .map((b) => {
+          const hhmm = b.time_start || '00:00';
+          const [h, m] = hhmm.split(':').map((x) => Number(x));
+          const d = new Date(b.booking_date);
+          d.setHours(h, m, 0, 0);
+          return { b, dt: d };
+        })
+        .filter(({ b }) => String(b.status).toUpperCase() === 'COMPLETED')
+        .sort((a, b) => b.dt.getTime() - a.dt.getTime())[0];
+      if (lastOut) {
+        return {
+          id: String(lastOut.b.booking_id),
+          gym_user_id: userId!,
+          schedule_time: lastOut.dt.toISOString(),
+          status: 'OUT',
+          check_in_time: null,
+          check_out_time: null,
+          created_at: new Date().toISOString(),
+        } as GymSchedule;
+      }
+
+      return null;
     },
     enabled: !!userId,
     refetchInterval: 30000, // Refetch every 30 seconds
@@ -216,14 +286,31 @@ export function useAddSchedule() {
 
   return useMutation({
     mutationFn: async (scheduleData: { gym_user_id: string; schedule_time: string }) => {
-      const { data, error } = await supabase
-        .from('gym_schedules')
-        .insert({ ...scheduleData, status: 'BOOKED' })
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data as GymSchedule;
+      const dt = new Date(scheduleData.schedule_time);
+      const booking_date = format(dt, 'yyyy-MM-dd');
+      const hh = String(dt.getHours()).padStart(2, '0');
+      const mm = String(dt.getMinutes()).padStart(2, '0');
+      const session_id = `Session__${hh}:${mm}`;
+      const resp = await fetch('/api/gym-booking-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-employee-id': scheduleData.gym_user_id },
+        body: JSON.stringify({ employee_id: scheduleData.gym_user_id, session_id, booking_date }),
+      }).catch(() => fetch('/gym-booking-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-employee-id': scheduleData.gym_user_id },
+        body: JSON.stringify({ employee_id: scheduleData.gym_user_id, session_id, booking_date }),
+      }));
+      const json: { ok: boolean; booking_id?: number; schedule_id?: number; error?: string } = await resp.json();
+      if (!json.ok || !json.booking_id) throw new Error(json.error || 'Failed to create booking');
+      return {
+        id: String(json.booking_id),
+        gym_user_id: scheduleData.gym_user_id,
+        schedule_time: dt.toISOString(),
+        status: 'BOOKED',
+        check_in_time: null,
+        check_out_time: null,
+        created_at: new Date().toISOString(),
+      } as GymSchedule;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['gym-schedules'] });
@@ -252,31 +339,25 @@ export function useCheckIn() {
 
   return useMutation({
     mutationFn: async (scheduleId: string) => {
-      // First check current occupancy
-      const { count: currentCount, error: countError } = await supabase
-        .from('gym_schedules')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'IN_GYM');
-      
-      if (countError) throw countError;
-      
-      if ((currentCount || 0) >= 15) {
-        throw new Error('GYM_FULL');
-      }
-      
-      const { data, error } = await supabase
-        .from('gym_schedules')
-        .update({ 
-          status: 'IN_GYM', 
-          check_in_time: new Date().toISOString() 
-        })
-        .eq('id', scheduleId)
-        .eq('status', 'BOOKED')
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data as GymSchedule;
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const r = await fetch(`/api/gym-bookings?from=${today}&to=${today}`).catch(() => fetch(`/gym-bookings?from=${today}&to=${today}`));
+      const j: { ok: boolean; bookings?: Array<{ status: string }>; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
+      const currentCount = (j.bookings || []).filter((b) => String(b.status).toUpperCase() === 'CHECKIN').length;
+      if (currentCount >= 15) throw new Error('GYM_FULL');
+      const resp = await fetch('/api/gym-booking-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ booking_id: Number(scheduleId), status: 'CHECKIN' }),
+      }).catch(() => fetch('/gym-booking-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ booking_id: Number(scheduleId), status: 'CHECKIN' }),
+      }));
+      const json: { ok: boolean; affected?: number; error?: string } = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Failed to check in');
+      const nowIso = new Date().toISOString();
+      return { id: scheduleId, gym_user_id: '', schedule_time: nowIso, status: 'IN_GYM', check_in_time: nowIso, check_out_time: null, created_at: nowIso } as GymSchedule;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gym-schedules'] });
@@ -307,19 +388,19 @@ export function useCheckOut() {
 
   return useMutation({
     mutationFn: async (scheduleId: string) => {
-      const { data, error } = await supabase
-        .from('gym_schedules')
-        .update({ 
-          status: 'OUT', 
-          check_out_time: new Date().toISOString() 
-        })
-        .eq('id', scheduleId)
-        .eq('status', 'IN_GYM')
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data as GymSchedule;
+      const resp = await fetch('/api/gym-booking-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ booking_id: Number(scheduleId), status: 'COMPLETED' }),
+      }).catch(() => fetch('/gym-booking-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ booking_id: Number(scheduleId), status: 'COMPLETED' }),
+      }));
+      const json: { ok: boolean; affected?: number; error?: string } = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Failed to check out');
+      const nowIso = new Date().toISOString();
+      return { id: scheduleId, gym_user_id: '', schedule_time: nowIso, status: 'OUT', check_in_time: null, check_out_time: nowIso, created_at: nowIso } as GymSchedule;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gym-schedules'] });
@@ -346,12 +427,9 @@ export function useDeleteSchedule() {
 
   return useMutation({
     mutationFn: async (scheduleId: string) => {
-      const { error } = await supabase
-        .from('gym_schedules')
-        .delete()
-        .eq('id', scheduleId);
-      
-      if (error) throw error;
+      const resp = await fetch(`/api/gym-booking/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' }).catch(() => fetch(`/gym-booking/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' }));
+      const json: { ok: boolean; affected?: number; error?: string } = await resp.json();
+      if (!json.ok) throw new Error(json.error || 'Failed to delete booking');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gym-schedules'] });
@@ -381,15 +459,7 @@ export function useUpdateSchedule() {
 
   return useMutation({
     mutationFn: async ({ scheduleId, schedule_time }: { scheduleId: string; schedule_time: string }) => {
-      const { data, error } = await supabase
-        .from('gym_schedules')
-        .update({ schedule_time })
-        .eq('id', scheduleId)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data as GymSchedule;
+      throw new Error('Update schedule not supported');
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['gym-schedules'] });
@@ -398,8 +468,8 @@ export function useUpdateSchedule() {
       queryClient.invalidateQueries({ queryKey: ['today-schedules-count'] });
       queryClient.invalidateQueries({ queryKey: ['next-schedule'] });
       toast({
-        title: "Schedule Updated",
-        description: `Schedule updated to ${format(new Date(data.schedule_time), 'MMM d, h:mm a')}.`,
+        title: "Update Not Supported",
+        description: `Changing booking time is not supported. Please delete and re-create.`,
       });
     },
     onError: (error: Error) => {
