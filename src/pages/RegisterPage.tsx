@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+ 
 import { useForm, FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -51,7 +51,6 @@ export default function RegisterPage() {
   const [empSuggestions, setEmpSuggestions] = useState<string[]>([]);
   const [empLoading, setEmpLoading] = useState(false);
   const [showEmpDropdown, setShowEmpDropdown] = useState(false);
-  const navigate = useNavigate();
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -179,7 +178,6 @@ export default function RegisterPage() {
       });
 
       form.reset();
-      navigate('/gym_booking');
     } catch (error: unknown) {
       console.error('Registration error:', error);
       toast({
