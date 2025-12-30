@@ -1161,6 +1161,13 @@ router.get('/gym-live-sync', async (req, res) => {
     DB_PASSWORD,
     DB_ENCRYPT,
     DB_TRUST_SERVER_CERTIFICATE,
+    MASTER_DB_SERVER,
+    MASTER_DB_PORT,
+    MASTER_DB_DATABASE,
+    MASTER_DB_USER,
+    MASTER_DB_PASSWORD,
+    MASTER_DB_ENCRYPT,
+    MASTER_DB_TRUST_SERVER_CERTIFICATE,
     CARD_DB_SERVER,
     CARD_DB_PORT,
     CARD_DB_DATABASE,
@@ -1202,6 +1209,22 @@ router.get('/gym-live-sync', async (req, res) => {
     options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
+
+  const masterServer = envTrim(MASTER_DB_SERVER);
+  const masterDatabase = envTrim(MASTER_DB_DATABASE);
+  const masterUser = envTrim(MASTER_DB_USER);
+  const masterPassword = envTrim(MASTER_DB_PASSWORD);
+  const masterConfig = masterServer && masterDatabase && masterUser && masterPassword
+    ? {
+        server: masterServer,
+        port: Number(MASTER_DB_PORT || 1433),
+        database: masterDatabase,
+        user: masterUser,
+        password: masterPassword,
+        options: { encrypt: envBool(MASTER_DB_ENCRYPT, false), trustServerCertificate: envBool(MASTER_DB_TRUST_SERVER_CERTIFICATE, true) },
+        pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+      }
+    : null;
 
   const cardServer = envTrim(CARD_DB_SERVER) || envTrim(CARDDB_SERVER);
   const cardDatabase = envTrim(CARD_DB_DATABASE) || envTrim(CARDDB_NAME);
@@ -1320,6 +1343,7 @@ router.get('/gym-live-sync', async (req, res) => {
         [Transaction] NVARCHAR(100) NULL,
         CardNo NVARCHAR(100) NULL,
         UnitNo NVARCHAR(100) NULL,
+        EmployeeID NVARCHAR(50) NULL,
         TrDate DATE NULL,
         TrTime VARCHAR(8) NULL,
         TxnTime DATETIME NOT NULL,
@@ -1327,6 +1351,7 @@ router.get('/gym-live-sync', async (req, res) => {
       );
     END`);
     await exec(`IF COL_LENGTH('dbo.gym_live_taps','UnitNo') IS NULL BEGIN ALTER TABLE dbo.gym_live_taps ADD UnitNo NVARCHAR(100) NULL; END`);
+    await exec(`IF COL_LENGTH('dbo.gym_live_taps','EmployeeID') IS NULL BEGIN ALTER TABLE dbo.gym_live_taps ADD EmployeeID NVARCHAR(50) NULL; END`);
     await exec(`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_gym_live_taps_unique' AND object_id = OBJECT_ID('dbo.gym_live_taps')) BEGIN
       CREATE UNIQUE INDEX UX_gym_live_taps_unique ON dbo.gym_live_taps (CardNo, TxnTime, TrController) WHERE CardNo IS NOT NULL;
     END`);
@@ -1365,6 +1390,7 @@ router.get('/gym-live-sync', async (req, res) => {
       src.eventCol ? `[${src.eventCol}] AS [Transaction]` : `CAST(NULL AS nvarchar(100)) AS [Transaction]`,
       src.cardCol ? `[${src.cardCol}] AS CardNo` : `CAST(NULL AS nvarchar(100)) AS CardNo`,
       src.unitCol ? `[${src.unitCol}] AS UnitNo` : `CAST(NULL AS nvarchar(100)) AS UnitNo`,
+      src.staffCol ? `[${src.staffCol}] AS EmployeeID` : `CAST(NULL AS nvarchar(50)) AS EmployeeID`,
       `${trDateExpr} AS TrDate`,
       `${trTimeExpr} AS TrTime`,
       `${txnTimeExpr} AS TxnTime`
@@ -1373,6 +1399,118 @@ router.get('/gym-live-sync', async (req, res) => {
     await cardPool.close();
 
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
+
+    const pickSchemaForTable = async (pool, tableName) => {
+      const safe = String(tableName || '').trim();
+      if (!/^[A-Za-z0-9_]+$/.test(safe)) return null;
+      const req3 = pool.request();
+      req3.input('tableName', sql.VarChar(128), safe);
+      const r = await req3.query(
+        'SELECT TOP 1 TABLE_SCHEMA AS schema_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName ORDER BY CASE WHEN TABLE_SCHEMA = \'dbo\' THEN 0 ELSE 1 END, TABLE_SCHEMA'
+      );
+      const schemaName = r?.recordset?.[0]?.schema_name ? String(r.recordset[0].schema_name) : null;
+      return schemaName && schemaName.trim().length > 0 ? schemaName : null;
+    };
+
+    const cardToEmployeeId = new Map();
+    const missingCards = Array.from(
+      new Set(
+        rows
+          .filter((r) => r && (r.EmployeeID == null || String(r.EmployeeID).trim().length === 0) && r.CardNo != null)
+          .map((r) => String(r.CardNo).trim())
+          .filter((v) => v.length > 0 && v.toUpperCase() !== 'FFFFFFFFFF')
+      )
+    ).slice(0, 200);
+
+    if (missingCards.length > 0) {
+      const tableCandidates = ['CardDB', 'employee_card', 'employee_cards', 'cards', 'card'];
+      let cardPool2;
+      try {
+        cardPool2 = await new sql.ConnectionPool(cardConfig).connect();
+        const tableRes = await cardPool2.request().query(
+          `SELECT TOP 1 TABLE_SCHEMA AS schema_name, TABLE_NAME AS table_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME IN (${tableCandidates
+            .map((t) => `'${String(t).replace(/'/g, "''")}'`)
+            .join(', ')}) ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA`
+        );
+        const row = tableRes?.recordset?.[0] || null;
+        if (row?.schema_name && row?.table_name) {
+          const schema = String(row.schema_name);
+          const table = String(row.table_name);
+          const colsRes = await cardPool2.request().query(
+            `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${schema.replace(/'/g, "''")}' AND TABLE_NAME='${table.replace(/'/g, "''")}'`
+          );
+          const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+          const empCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
+          const cardCol = pickColumn(cols, ['card_no', 'CardNo', 'card_number', 'CardNumber', 'id_card', 'IDCard', 'CardID', 'cardid']);
+          const delStateCol = pickColumn(cols, ['del_state', 'DelState']);
+          const blockCol = pickColumn(cols, ['block', 'Block', 'is_blocked', 'IsBlocked']);
+
+          if (empCol && cardCol) {
+            const req4 = cardPool2.request();
+            missingCards.forEach((c, idx) => {
+              req4.input(`c${idx}`, sql.VarChar(100), c);
+            });
+            const delStateWhere = delStateCol ? `AND ([${delStateCol}] = 0 OR [${delStateCol}] IS NULL)` : '';
+            const blockWhere = blockCol ? `AND ([${blockCol}] IS NULL OR [${blockCol}] = 0 OR UPPER(CAST([${blockCol}] AS varchar(50))) IN ('UNBLOCK','FALSE','0'))` : '';
+            const inList = missingCards.map((_, idx) => `@c${idx}`).join(',');
+            const q2 = `SELECT [${empCol}] AS employee_id, [${cardCol}] AS card_no FROM [${schema}].[${table}] WHERE [${cardCol}] IN (${inList}) ${delStateWhere} ${blockWhere}`;
+            const r2 = await req4.query(q2);
+            const found = Array.isArray(r2?.recordset) ? r2.recordset : [];
+            for (const x of found) {
+              const cardNo = x?.card_no != null ? String(x.card_no).trim() : '';
+              const empId = x?.employee_id != null ? String(x.employee_id).trim() : '';
+              if (cardNo && empId && !cardToEmployeeId.has(cardNo)) cardToEmployeeId.set(cardNo, empId);
+            }
+          }
+        }
+        await cardPool2.close();
+      } catch (_) {
+        try {
+          if (cardPool2) await cardPool2.close();
+        } catch (_) {}
+      }
+    }
+
+    if (masterConfig && missingCards.length > 0) {
+      const stillMissing = missingCards.filter((c) => !cardToEmployeeId.has(c)).slice(0, 200);
+      if (stillMissing.length > 0) {
+        let masterPool;
+        try {
+          masterPool = await new sql.ConnectionPool(masterConfig).connect();
+          const coreSchema = (await pickSchemaForTable(masterPool, 'employee_core')) || 'dbo';
+          const colsRes = await masterPool.request().query(
+            `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${coreSchema.replace(/'/g, "''")}' AND TABLE_NAME='employee_core'`
+          );
+          const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+          const empIdCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'employeeid', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
+          const cardCol = pickColumn(cols, ['id_card', 'ID Card', 'card_no', 'Card No', 'CardNo', 'IDCard', 'CardID', 'cardid']);
+
+          if (empIdCol && cardCol) {
+            const req5 = masterPool.request();
+            stillMissing.forEach((c, idx) => {
+              req5.input(`c${idx}`, sql.VarChar(100), c);
+            });
+            const inList = stillMissing.map((_, idx) => `@c${idx}`).join(',');
+            const q3 = `SELECT [${empIdCol}] AS employee_id, [${cardCol}] AS card_no FROM [${coreSchema}].[employee_core] WHERE [${cardCol}] IN (${inList})`;
+            const r3 = await req5.query(q3);
+            const found = Array.isArray(r3?.recordset) ? r3.recordset : [];
+            for (const x of found) {
+              const cardNo = x?.card_no != null ? String(x.card_no).trim() : '';
+              const empId = x?.employee_id != null ? String(x.employee_id).trim() : '';
+              if (cardNo && empId && !cardToEmployeeId.has(cardNo)) cardToEmployeeId.set(cardNo, empId);
+            }
+          }
+
+          await masterPool.close();
+        } catch (_) {
+          try {
+            if (masterPool) await masterPool.close();
+          } catch (_) {}
+        }
+      }
+    }
+
+    let inserted = 0;
     for (const r of rows) {
       const ins = gymPool.request();
       ins.input('TrName', sql.NVarChar(200), r.TrName != null ? String(r.TrName) : null);
@@ -1383,17 +1521,24 @@ router.get('/gym-live-sync', async (req, res) => {
       ins.input('TrDate', sql.Date, r.TrDate != null ? new Date(String(r.TrDate)) : null);
       ins.input('TrTime', sql.VarChar(8), r.TrTime != null ? String(r.TrTime) : null);
       ins.input('TxnTime', sql.DateTime, r.TxnTime instanceof Date ? r.TxnTime : new Date(String(r.TxnTime)));
-      const staffVal = typeof r.StaffNo !== 'undefined' && r.StaffNo != null ? String(r.StaffNo) : (typeof r.EmployeeID !== 'undefined' && r.EmployeeID != null ? String(r.EmployeeID) : null);
-      ins.input('EmployeeID', sql.NVarChar(50), staffVal != null ? staffVal : null);
-      await ins.query(`IF NOT EXISTS (
+      const resolvedEmployeeId = r.EmployeeID != null && String(r.EmployeeID).trim().length > 0
+        ? String(r.EmployeeID).trim()
+        : (r.CardNo != null ? (cardToEmployeeId.get(String(r.CardNo).trim()) || null) : null);
+      ins.input('EmployeeID', sql.NVarChar(50), resolvedEmployeeId);
+      const insRes = await ins.query(`IF EXISTS (
         SELECT 1 FROM dbo.gym_live_taps WHERE ISNULL(CardNo,'') = ISNULL(@CardNo,'') AND TxnTime = @TxnTime AND ISNULL(TrController,'') = ISNULL(@TrController,'')
       ) BEGIN
+        UPDATE dbo.gym_live_taps SET EmployeeID = CASE WHEN (EmployeeID IS NULL OR LTRIM(RTRIM(EmployeeID)) = '') AND @EmployeeID IS NOT NULL THEN @EmployeeID ELSE EmployeeID END
+        WHERE ISNULL(CardNo,'') = ISNULL(@CardNo,'') AND TxnTime = @TxnTime AND ISNULL(TrController,'') = ISNULL(@TrController,'');
+      END ELSE BEGIN
         INSERT INTO dbo.gym_live_taps (TrName, TrController, [Transaction], CardNo, UnitNo, EmployeeID, TrDate, TrTime, TxnTime) VALUES (@TrName, @TrController, @Transaction, @CardNo, @UnitNo, @EmployeeID, @TrDate, @TrTime, @TxnTime)
       END`);
+      const affected = Array.isArray(insRes?.rowsAffected) ? Number(insRes.rowsAffected[0] || 0) : 0;
+      if (affected > 0) inserted += affected;
     }
 
     await gymPool.close();
-    return res.json({ ok: true, inserted: rows.length });
+    return res.json({ ok: true, inserted, fetched: rows.length });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
@@ -1411,20 +1556,44 @@ router.get('/gym-live-persisted', async (req, res) => {
   }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
   const sinceStr = String(req.query.since || '').trim();
+  const unitStr = String(req.query.unit || '').trim();
+  const allStr = String(req.query.all || '').trim();
+  const allowAll = allStr.length > 0 && ['1', 'true', 'yes', 'y'].includes(allStr.toLowerCase());
   const limit = Number(String(req.query.limit || '100'));
   const maxRows = Number.isFinite(limit) && limit > 0 && limit <= 1000 ? limit : 100;
   try {
     const pool = await new sql.ConnectionPool(config).connect();
     const req2 = pool.request();
-    let where = '';
+    const whereParts = [];
     if (sinceStr) {
       const sinceDate = new Date(sinceStr);
       if (!isNaN(sinceDate.getTime())) {
         req2.input('since', sql.DateTime, sinceDate);
-        where = 'WHERE TxnTime > @since';
+        whereParts.push('TxnTime > @since');
       }
     }
-    const q = `SELECT TOP ${maxRows} TrName, TrController, [Transaction], CardNo, UnitNo, TrDate, TrTime, TxnTime FROM dbo.gym_live_taps ${where} ORDER BY TxnTime DESC`;
+
+    let units = [];
+    if (unitStr) {
+      units = unitStr.split(',').map((s) => s.trim()).filter((v) => v.length > 0);
+    } else if (!allowAll) {
+      const envUnits = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
+      units = envUnits ? envUnits.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
+    }
+
+    const safeUnits = units
+      .filter((u) => /^[A-Za-z0-9_-]+$/.test(u))
+      .slice(0, 50);
+    if (safeUnits.length > 0) {
+      safeUnits.forEach((u, idx) => {
+        req2.input(`u${idx}`, sql.VarChar(50), u);
+      });
+      const inList = safeUnits.map((_, idx) => `@u${idx}`).join(',');
+      whereParts.push(`UnitNo IN (${inList})`);
+    }
+
+    const where = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+    const q = `SELECT TOP ${maxRows} TrName, TrController, [Transaction], CardNo, UnitNo, EmployeeID, TrDate, TrTime, TxnTime FROM dbo.gym_live_taps ${where} ORDER BY TxnTime DESC`;
     const r = await req2.query(q);
     await pool.close();
     const rows = Array.isArray(r?.recordset) ? r.recordset : [];
@@ -1434,6 +1603,7 @@ router.get('/gym-live-persisted', async (req, res) => {
       Transaction: x.Transaction != null ? String(x.Transaction) : null,
       CardNo: x.CardNo != null ? String(x.CardNo) : null,
       UnitNo: x.UnitNo != null ? String(x.UnitNo) : null,
+      EmployeeID: x.EmployeeID != null ? String(x.EmployeeID) : null,
       TrDate: x.TrDate != null ? String(x.TrDate) : null,
       TrTime: x.TrTime != null ? String(x.TrTime) : null,
       TxnTime: x.TxnTime instanceof Date ? x.TxnTime.toISOString() : String(x.TxnTime || '')
