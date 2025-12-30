@@ -70,7 +70,9 @@ export function useVaultUsers() {
       const from = toYmd(todayJakarta);
       const to = toYmd(dayAfter);
 
-      const resp = await fetch(`/api/gym-bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
+      const base = endpoint && endpoint.trim().length > 0 ? endpoint : '/api';
+      const resp = await fetch(`${base}/gym-bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
       const json = (await resp.json()) as GymDbBookingResponse;
       if (!json || !json.ok) throw new Error(json?.error || 'Failed to load GymDB bookings');
 

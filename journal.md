@@ -189,6 +189,36 @@ This journal tracks decisions, notes, and progress for the project.
     - Local increment on success updates booked and available then refetches.
     - File: [RegisterPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/RegisterPage.tsx#L426-L440)
 
+- 2025-12-30 11:23:53
+  - Backend availability now counts from gym_booking:
+    - Updated /gym-availability to join gym_schedule with gym_booking by date and status.
+    - Returns hhmm, quota, booked_count; frontend shows "booked/quota".
+    - File: [backend/routes/gym.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/backend/routes/gym.js#L43-L76)
+
+- 2025-12-30 11:34:54
+  - Fixed sessions endpoint usage in frontend:
+    - useGymDbSessions now uses VITE_DB_TEST_ENDPOINT or falls back to "/api".
+    - Resolves 404 errors when backend is not prefixed with "/api".
+    - File: [useGymDbSessions.ts](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/hooks/useGymDbSessions.ts#L12-L23)
+
+- 2025-12-30 11:36:50
+  - Fixed bookings endpoint usage in frontend:
+    - useVaultUsers now uses VITE_DB_TEST_ENDPOINT or falls back to "/api".
+    - Resolves 404 for /api/gym-bookings when backend serves /gym-bookings.
+    - File: [useVaultUsers.ts](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/hooks/useVaultUsers.ts#L73-L76)
+
+- 2025-12-30 11:41:07
+  - Availability fallback added:
+    - When /gym-availability lacks a time key, fetches /gym-bookings for that date and computes booked count.
+    - Ensures Register shows accurate "booked/quota" even if availability misses a slot.
+    - File: [RegisterPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/RegisterPage.tsx#L107-L131)
+
+- 2025-12-30 11:42:54
+  - UX helper under Available:
+    - Added "Remaining: X" helper below Available for clarity.
+    - Computes quota − booked for selected session.
+    - File: [RegisterPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/RegisterPage.tsx#L441-L452)
+
   - Documentation:
     - Added "UI UX flow" file to describe user journey, components, responsive guidelines, accessibility, sample code, and backend endpoints
     - File: [UI UX flow.md](file:///c:/Scripts/Projects/gym-control-panel/UI%20UX%20flow.md)

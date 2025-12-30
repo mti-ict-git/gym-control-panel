@@ -184,6 +184,32 @@ export default function RegisterPage() {
     return () => { clearTimeout(t); };
   }, [selectedDate, fetchAvailability]);
 
+  useEffect(() => {
+    const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
+    const base = endpoint && endpoint.trim().length > 0 ? endpoint : '/api';
+    const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
+    const timeStart = selectedGymDbSession?.time_start || '';
+    if (!dateStr || !timeStart) return;
+    if (availability[timeStart]) return;
+    const ctrl = new AbortController();
+    const t = setTimeout(async () => {
+      try {
+        const resp = await fetch(`${base}/gym-bookings?from=${encodeURIComponent(dateStr)}&to=${encodeURIComponent(dateStr)}`, { signal: ctrl.signal });
+        const json = (await resp.json()) as { ok: boolean; bookings?: Array<{ time_start?: string | null; status?: string | null }> } | null;
+        if (!json || !json.ok) return;
+        const rows = Array.isArray(json.bookings) ? json.bookings : [];
+        const booked = rows.filter((r) => String(r.time_start || '') === timeStart && ['BOOKED','CHECKIN'].includes(String(r.status || '').toUpperCase())).length;
+        setAvailability((prev) => {
+          const quota = selectedGymDbSession?.quota ?? 15;
+          return { ...prev, [timeStart]: { booked, quota, available: Math.max(0, quota - booked) } };
+        });
+      } catch (_) {
+        setAvailability((prev) => ({ ...prev }));
+      }
+    }, 250);
+    return () => { clearTimeout(t); ctrl.abort(); };
+  }, [selectedDate, selectedGymDbSession, availability]);
+
   const onSubmit = async (data: FormData) => {
     setIsSubmitting(true);
     try {
@@ -497,6 +523,17 @@ export default function RegisterPage() {
                             return `${booked}/${quota}`;
                           })()
                       : '-'}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {selectedGymDbSession
+                      ? (() => {
+                          const a = availability[selectedGymDbSession.time_start];
+                          const booked = a ? a.booked : 0;
+                          const quota = a ? a.quota : selectedGymDbSession.quota;
+                          const remaining = Math.max(0, quota - booked);
+                          return `Remaining: ${remaining}`;
+                        })()
+                      : ''}
                   </div>
                 </div>
               </div>

@@ -44,7 +44,7 @@ router.get('/gym-availability', async (req, res) => {
     const request = pool.request();
     request.input('dateParam', sql.Date, new Date(dateStr));
     const result = await request.query(
-      "SELECT CONVERT(varchar(5), schedule_time, 108) AS hhmm, COUNT(*) AS booked_count FROM dbo.gym_schedule WHERE CAST(schedule_time AS DATE) = @dateParam AND status = 'BOOKED' GROUP BY CONVERT(varchar(5), schedule_time, 108) ORDER BY hhmm"
+      "SELECT CONVERT(varchar(5), gs.StartTime, 108) AS hhmm, ISNULL(gs.Quota, 15) AS quota, COUNT(gb.BookingID) AS booked_count FROM dbo.gym_schedule gs LEFT JOIN dbo.gym_booking gb ON gb.ScheduleID = gs.ScheduleID AND gb.BookingDate = @dateParam AND gb.Status IN ('BOOKED','CHECKIN') GROUP BY CONVERT(varchar(5), gs.StartTime, 108), ISNULL(gs.Quota, 15) ORDER BY hhmm"
     );
     await pool.close();
 
@@ -61,7 +61,7 @@ router.get('/gym-availability', async (req, res) => {
     const sessions = rows.map((r) => {
       const hhmm = String(r.hhmm);
       const booked = Number(r.booked_count) || 0;
-      const quota = DEFAULT_QUOTA;
+      const quota = r.quota != null ? Number(r.quota) : DEFAULT_QUOTA;
       return {
         session_label: labelFor(hhmm),
         time_start: hhmm,
