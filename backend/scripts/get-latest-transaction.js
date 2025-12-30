@@ -29,6 +29,7 @@ async function discoverSource(pool) {
   const explicitCard = envTrim(process.env.CARD_DB_TX_CARD_COL);
   const explicitStaff = envTrim(process.env.CARD_DB_TX_STAFF_COL);
   const explicitEvent = envTrim(process.env.CARD_DB_TX_EVENT_COL);
+  const explicitUnit = envTrim(process.env.CARD_DB_TX_UNIT_COL);
 
   if (explicitTable) {
     const colsRes = await pool.request().query(
@@ -41,7 +42,8 @@ async function discoverSource(pool) {
     const cardCol = explicitCard ? pickColumn(cols, [explicitCard]) : pickColumn(cols, ['CardNo','CardNumber','Card','CardID','IDCard']);
     const staffCol = explicitStaff ? pickColumn(cols, [explicitStaff]) : pickColumn(cols, ['StaffNo','EmployeeID','EmpID','employee_id']);
     const eventCol = explicitEvent ? pickColumn(cols, [explicitEvent]) : pickColumn(cols, ['Event','EventType','Status','Action','Result']);
-    return { schema: explicitSchema, table: explicitTable, timeCol, deviceCol, cardCol, staffCol, eventCol };
+    const unitCol = explicitUnit ? pickColumn(cols, [explicitUnit]) : pickColumn(cols, ['UnitNo','Unit','ControllerID','DeviceID','ReaderID','DeviceNo','ReaderNo']);
+    return { schema: explicitSchema, table: explicitTable, timeCol, deviceCol, cardCol, staffCol, eventCol, unitCol };
   }
 
   const candidates = ['tblTransaction','Transaction','Transactions','AccessLog','EventLog','Logs','Attendance','History','CardTransaction'];
@@ -63,8 +65,9 @@ async function discoverSource(pool) {
   const eventCol = pickColumn(cols, ['Event','EventType','Status','Action','Result','Transaction','TrEventType']);
   const nameCol = pickColumn(cols, ['TrName','Name','EmployeeName','EmpName','StaffName']);
   const controllerCol = pickColumn(cols, ['TrController','Controller','Device','Reader','Terminal','Door','DeviceName']);
+  const unitCol = pickColumn(cols, ['UnitNo','Unit','ControllerID','DeviceID','ReaderID','DeviceNo','ReaderNo']);
   if (!timeCol) return null;
-  return { schema, table, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol };
+  return { schema, table, timeCol, deviceCol, cardCol, staffCol, eventCol, nameCol, controllerCol, unitCol };
 }
 
 async function findTable(pool, tableName) {
@@ -114,6 +117,7 @@ async function run() {
       src.controllerCol ? `[${src.controllerCol}] AS TrController` : `CAST(NULL AS nvarchar(200)) AS TrController`,
       src.eventCol ? `[${src.eventCol}] AS [Transaction]` : `CAST(NULL AS nvarchar(100)) AS [Transaction]`,
       src.cardCol ? `[${src.cardCol}] AS CardNo` : `CAST(NULL AS nvarchar(100)) AS CardNo`,
+      src.unitCol ? `[${src.unitCol}] AS UnitNo` : `CAST(NULL AS nvarchar(100)) AS UnitNo`,
       `CONVERT(date, [${src.timeCol}]) AS TrDate`,
       `CONVERT(varchar(8), [${src.timeCol}], 108) AS TrTime`,
     ].join(', ')} FROM [${src.schema}].[${src.table}] ORDER BY ${orderBy}`;
@@ -130,6 +134,7 @@ async function run() {
             CardNo: row.CardNo != null ? String(row.CardNo) : null,
             TrDate: row.TrDate != null ? String(row.TrDate) : null,
             TrTime: row.TrTime != null ? String(row.TrTime) : null,
+            UnitNo: row.UnitNo != null ? String(row.UnitNo) : null,
           }
         : null,
       raw: row || null,

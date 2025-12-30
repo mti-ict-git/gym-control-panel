@@ -309,3 +309,62 @@ Database:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-30 15:45:29 +08:00
+
+Enhancement:
+- Removed mock dependencies from Live Gym page; page now displays persisted live door taps.
+- Added backend endpoints:
+  - GET /gym-live-sync to create dbo.gym_live_taps and sync recent CardDB transactions idempotently.
+  - GET /gym-live-persisted to read persisted transactions with optional since and limit.
+- Implemented frontend hook useCardTransactions to call sync then fetch, with a watermark and 2s polling.
+
+Verification:
+- Ran lint: 0 errors, warnings only.
+- Ran TypeScript integrity check: passed (noEmit).
+- Manually tested:
+  - GET /api/gym-live-sync → ok:true
+  - GET /api/gym-live-persisted → ok:true, returns transactions array.
+
+2025-12-30 15:50:37 +08:00
+
+Database:
+- Initialized GymDB schema for live transactions: created table dbo.gym_live_taps and unique index UX_gym_live_taps_unique.
+- Used one-off script backend/scripts/gym-live-init.js to perform idempotent setup.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+- Queried columns via script output: Id, TrName, TrController, Transaction, CardNo, TrDate, TrTime, TxnTime, CreatedAt.
+
+2025-12-30 15:59:05 +08:00
+
+Enhancement:
+- Added UnitNo column to dbo.gym_live_taps and updated backend sync to pull UnitNo from CardDB transactions when available.
+- Updated initialization script to create/ensure UnitNo column exists.
+- Extended persisted endpoint response to include UnitNo.
+
+Verification:
+- Ran initialization script: table columns now include UnitNo.
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 16:08:45 +08:00
+
+Enhancement:
+- Filtered live sync to only UnitNo=0041 (Gym Controller) and added aggregated live status endpoint returning per-employee Time In/Out.
+- Added EmployeeID capture from CardDB (StaffNo/EmployeeID) into gym_live_taps.
+- Implemented frontend hook/useGymLiveStatus and updated Live Gym table to show Name, ID Employee, Department, Schedule, Time In, Time Out, Status.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 16:11:10 +08:00
+
+Database:
+- Re-initialized GymDB live schema using backend/scripts/gym-live-init.js.
+- Verified columns: Id, TrName, TrController, Transaction, CardNo, TrDate, TrTime, TxnTime, CreatedAt, UnitNo, EmployeeID.
+
+Verification:
+- Script output confirms updated schema.

@@ -12,7 +12,7 @@ import { useMostRelevantSchedule } from '@/hooks/useGymSchedules';
 import { StatusBadge } from '@/components/StatusBadge';
 import { Input } from '@/components/ui/input';
 import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext, PaginationLink } from '@/components/ui/pagination';
-import { useCardTransactions } from '@/hooks/useCardTransactions';
+import { useGymLiveStatus } from '@/hooks/useGymLiveStatus';
 
 function UserRow({ user, index, onClick }: { user: GymUser; index: number; onClick: () => void }) {
   const { data: schedule } = useMostRelevantSchedule(user.id);
@@ -60,7 +60,7 @@ export default function GymUsersPage() {
   const users = [];
   const total = 0;
   const totalPages = 1;
-  const { data: liveTx, isLoading: isLoadingTx } = useCardTransactions();
+  const { data: liveStatus, isLoading: isLoadingStatus } = useGymLiveStatus();
 
   return (
     <AppLayout>
@@ -70,7 +70,7 @@ export default function GymUsersPage() {
           <p className="text-muted-foreground">Real-time overview of active gym members and access status.</p>
         </div>
 
-        {isLoading || isLoadingTx ? (
+        {isLoading || isLoadingStatus ? (
           <div className="space-y-4">
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
@@ -84,23 +84,25 @@ export default function GymUsersPage() {
                   <TableRow>
                     <TableHead className="w-12 text-right">No</TableHead>
                     <TableHead>Name</TableHead>
-                    <TableHead>Card No</TableHead>
-                    <TableHead>Controller</TableHead>
-                    <TableHead>Transaction</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Time</TableHead>
+                    <TableHead>ID Employee</TableHead>
+                    <TableHead>Department</TableHead>
+                    <TableHead>Schedule</TableHead>
+                    <TableHead>Time In</TableHead>
+                    <TableHead>Time Out</TableHead>
+                    <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(liveTx ?? []).map((t, idx) => (
-                    <TableRow key={`${t.CardNo}-${t.TxnTime}-${idx}`}>
+                  {(liveStatus ?? []).map((p, idx) => (
+                    <TableRow key={`${p.employee_id}-${p.time_in}-${idx}`}>
                       <TableCell className="w-12 text-right">{idx + 1}</TableCell>
-                      <TableCell className="font-medium">{t.TrName ?? '-'}</TableCell>
-                      <TableCell>{t.CardNo ?? '-'}</TableCell>
-                      <TableCell>{t.TrController ?? '-'}</TableCell>
-                      <TableCell>{t.Transaction ?? '-'}</TableCell>
-                      <TableCell>{t.TrDate ?? '-'}</TableCell>
-                      <TableCell>{t.TrTime ?? '-'}</TableCell>
+                      <TableCell className="font-medium">{p.name ?? '-'}</TableCell>
+                      <TableCell>{p.employee_id ?? '-'}</TableCell>
+                      <TableCell>{p.department ?? '-'}</TableCell>
+                      <TableCell>{p.schedule ?? '-'}</TableCell>
+                      <TableCell>{p.time_in ? new Date(p.time_in).toLocaleTimeString() : '-'}</TableCell>
+                      <TableCell>{p.time_out ? new Date(p.time_out).toLocaleTimeString() : '-'}</TableCell>
+                      <TableCell>{p.status}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
