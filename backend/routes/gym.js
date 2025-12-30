@@ -447,7 +447,7 @@ router.get('/gym-bookings', async (req, res) => {
         gb.EmployeeID AS employee_id,
         cd.CardNo AS card_no,
         ec.name AS employee_name,
-        ISNULL(cd.Department, ee.department) AS department,
+        COALESCE(ee.department, gb.Department, cd.Department) AS department,
         ec.gender AS gender,
         gb.SessionName AS session_name,
         gb.ScheduleID AS schedule_id,

@@ -226,3 +226,9 @@ This journal tracks decisions, notes, and progress for the project.
     - Updated flow for "/register" to reflect actual behavior (Employee ID + Date + Session booking)
     - Clarified that account sign-in/sign-up is at "/login" with tabs
     - Clarified that "/login" is admin-only; employees do not require accounts for booking (HRIS-synced)
+
+- 2025-12-30 12:08:00
+  - Changed department precedence in /gym-bookings:
+    - Prefer employee_employment.department, then gb.Department, then CardDB.Department
+    - Purpose: align display with Master DB over CardDB, avoid missing ec.department
+    - File: [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L444-L451)
