@@ -46,3 +46,30 @@ Enhancement:
 Verification:
 - Lint: 0 errors.
 - TypeScript check: passed.
+
+2025-12-30 14:11:08 +08:00
+
+Enhancement:
+- Disabled session select until a date is chosen and added hint text.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.
+
+2025-12-30 14:13:35 +08:00
+
+Enhancement:
+- Added success popup dialog after registration with session details and booking ID.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.
+
+2025-12-30 14:21:16 +08:00
+
+Enhancement:
+- Calendar popover now auto-closes after a valid date selection.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript check: passed.
