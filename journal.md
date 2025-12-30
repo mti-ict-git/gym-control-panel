@@ -286,3 +286,16 @@ This journal tracks decisions, notes, and progress for the project.
   - Fix Dialog accessibility warning: add DialogTitle to CommandDialog
     - Hidden title with sr-only to satisfy Radix requirement
   - File: [command.tsx](file:///c:/Scripts/Projects/gym-control-panel/src/components/ui/command.tsx#L26-L36)
+
+- 2025-12-30 14:33:30
+  - Add CardDB script to insert last transaction into dbo.tblTransactionLive
+    - Discovers likely source table and maps columns
+    - Ensures tblTransactionLive schema and idempotent insert by unique key
+  - File: [pull-transactions.js](file:///c:/Scripts/Projects/gym-control-panel/backend/scripts/pull-transactions.js)
+
+- 2025-12-30 14:35:38
+  - Fix index syntax error in pull-transactions ensureTable
+    - Removed invalid functional index; rely on IF NOT EXISTS for idempotency
+  - Add env overrides for source config (table/columns)
+    - CARD_DB_TX_TABLE, CARD_DB_TX_SCHEMA, CARD_DB_TX_TIME_COL, CARD_DB_TX_DEVICE_COL, CARD_DB_TX_CARD_COL, CARD_DB_TX_STAFF_COL, CARD_DB_TX_EVENT_COL
+  - File: [pull-transactions.js](file:///c:/Scripts/Projects/gym-control-panel/backend/scripts/pull-transactions.js)
