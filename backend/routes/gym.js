@@ -1646,7 +1646,12 @@ router.get('/gym-live-sync', async (req, res) => {
       const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
       const exitPattern = (envTrim(process.env.GYM_EXIT_EVENT) || 'VALID EXIT ACCESS').toUpperCase();
       const txnText = r.Transaction != null ? String(r.Transaction).toUpperCase() : '';
-      const recognized = txnText.includes(entryPattern) || txnText.includes(exitPattern);
+      const nameText = r.TrName != null ? String(r.TrName).toUpperCase() : '';
+      const recognized =
+        txnText.includes(entryPattern)
+        || txnText.includes(exitPattern)
+        || nameText.includes(entryPattern)
+        || nameText.includes(exitPattern);
       if (onlyValidSync && !recognized) continue;
       const ins = gymPool.request();
       ins.input('TrName', sql.NVarChar(200), r.TrName != null ? String(r.TrName) : null);
@@ -1735,7 +1740,12 @@ router.get('/gym-live-persisted', async (req, res) => {
       const exitPattern = (envTrim(process.env.GYM_EXIT_EVENT) || 'VALID EXIT ACCESS').toUpperCase();
       req2.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
       req2.input('exitPat', sql.VarChar(120), `%${exitPattern}%`);
-      whereParts.push(`(UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat OR UPPER(CAST([Transaction] AS varchar(100))) LIKE @exitPat)`);
+      whereParts.push(`(
+        UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat
+        OR UPPER(CAST([Transaction] AS varchar(100))) LIKE @exitPat
+        OR UPPER(CAST(TrName AS varchar(200))) LIKE @entryPat
+        OR UPPER(CAST(TrName AS varchar(200))) LIKE @exitPat
+      )`);
     }
 
     const where = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
@@ -2404,10 +2414,24 @@ router.get('/gym-live-status', async (req, res) => {
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
   try {
     const pool = await new sql.ConnectionPool(config).connect();
+    const masterDbRaw = envTrim(process.env.MASTER_DB_DATABASE) || 'MTIMasterEmployeeDB';
+    const masterDb = /^[A-Za-z0-9_]+$/.test(masterDbRaw) ? masterDbRaw : 'MTIMasterEmployeeDB';
     const req1 = pool.request();
     req1.input('today', sql.Date, new Date());
     const result = await req1.query(
-      "SELECT ec.name AS employee_name, gb.EmployeeID AS employee_id, ee.department AS department, s.Session AS session_name, CONVERT(varchar(5), s.StartTime, 108) AS time_start, CONVERT(varchar(5), s.EndTime, 108) AS time_end, gb.Status AS booking_status FROM dbo.gym_booking gb LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID LEFT JOIN MTIMasterEmployeeDB.dbo.employee_core ec ON gb.EmployeeID = ec.employee_id LEFT JOIN MTIMasterEmployeeDB.dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE' WHERE gb.BookingDate = @today AND gb.Status IN ('CHECKIN','COMPLETED') ORDER BY s.StartTime ASC, ec.name ASC"
+      `SELECT ec.name AS employee_name,
+        gb.EmployeeID AS employee_id,
+        ee.department AS department,
+        s.Session AS session_name,
+        CONVERT(varchar(5), s.StartTime, 108) AS time_start,
+        CONVERT(varchar(5), s.EndTime, 108) AS time_end,
+        gb.Status AS booking_status
+      FROM dbo.gym_booking gb
+      LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
+      LEFT JOIN ${masterDb}.dbo.employee_core ec ON gb.EmployeeID = ec.employee_id
+      LEFT JOIN ${masterDb}.dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE'
+      WHERE gb.BookingDate = @today AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+      ORDER BY s.StartTime ASC, ec.name ASC`
     );
     const unitRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
     const units = unitRaw ? unitRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
@@ -2417,14 +2441,20 @@ router.get('/gym-live-status', async (req, res) => {
     safeUnits.forEach((u, idx) => req2.input(`u${idx}`, sql.VarChar(50), u));
     const inList = safeUnits.map((_, idx) => `@u${idx}`).join(',');
     const unitWhere = safeUnits.length > 0 ? `AND UnitNo IN (${inList})` : '';
-    const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
-    const exitPattern = (envTrim(process.env.GYM_EXIT_EVENT) || 'VALID EXIT ACCESS').toUpperCase();
+    const normalizeEvent = (s) => {
+      const t = envTrim(s);
+      if (t.length >= 2 && ((t.startsWith("'") && t.endsWith("'")) || (t.startsWith('"') && t.endsWith('"')))) return t.slice(1, -1).trim();
+      return t;
+    };
+    const entryPattern = (normalizeEvent(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
+    const exitPattern = (normalizeEvent(process.env.GYM_EXIT_EVENT) || 'VALID EXIT ACCESS').toUpperCase();
     req2.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
     req2.input('exitPat', sql.VarChar(120), `%${exitPattern}%`);
     const aggQuery =
       `SELECT EmployeeID AS employee_id,
-         MIN(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat THEN TxnTime END) AS time_in,
-         MAX(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @exitPat THEN TxnTime END) AS time_out
+         MIN(CASE WHEN (UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat OR UPPER(CAST(TrName AS varchar(200))) LIKE @entryPat) THEN TxnTime END) AS first_entry,
+         MAX(CASE WHEN (UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat OR UPPER(CAST(TrName AS varchar(200))) LIKE @entryPat) THEN TxnTime END) AS last_entry,
+         MAX(CASE WHEN (UPPER(CAST([Transaction] AS varchar(100))) LIKE @exitPat OR UPPER(CAST(TrName AS varchar(200))) LIKE @exitPat) THEN TxnTime END) AS last_exit
        FROM dbo.gym_live_taps
        WHERE EmployeeID IS NOT NULL AND LTRIM(RTRIM(EmployeeID)) <> ''
          AND CAST(TxnTime AS date) = @today
@@ -2444,12 +2474,21 @@ router.get('/gym-live-status', async (req, res) => {
       const ms = pad3(d.getUTCMilliseconds());
       return `${y}-${m}-${day}T${hh}:${mm}:${ss}.${ms}+08:00`;
     };
+    const asDate = (v) => (v instanceof Date ? v : (v ? new Date(String(v)) : null));
+    const statusFromTaps = (lastEntry, lastExit) => {
+      const le = asDate(lastEntry);
+      const lx = asDate(lastExit);
+      if (lx && (!le || lx.getTime() > le.getTime())) return 'LEFT';
+      if (le) return 'IN_GYM';
+      return null;
+    };
     const tapMap = new Map(
       (Array.isArray(aggRes?.recordset) ? aggRes.recordset : []).map((r) => {
         const empId = r?.employee_id != null ? String(r.employee_id).trim() : '';
-        const ti = r?.time_in instanceof Date ? r.time_in : (r?.time_in ? new Date(String(r.time_in)) : null);
-        const to = r?.time_out instanceof Date ? r.time_out : (r?.time_out ? new Date(String(r.time_out)) : null);
-        return [empId, { time_in: toUtc8Iso(ti), time_out: toUtc8Iso(to) }];
+        const firstEntry = asDate(r?.first_entry);
+        const lastEntry = asDate(r?.last_entry);
+        const lastExit = asDate(r?.last_exit);
+        return [empId, { time_in: toUtc8Iso(firstEntry), time_out: toUtc8Iso(lastExit), status: statusFromTaps(lastEntry, lastExit) }];
       })
     );
     const bookedEmpIds = new Set(
@@ -2518,15 +2557,18 @@ router.get('/gym-live-status', async (req, res) => {
           const te = r?.time_end != null ? String(r.time_end).trim() : null;
           const sched = sess ? (ts && te ? `${sess} ${ts}-${te}` : sess) : null;
           const bookingStatus = r?.booking_status != null ? String(r.booking_status).trim().toUpperCase() : '';
-          const status = bookingStatus === 'CHECKIN' ? 'IN_GYM' : 'LEFT';
-          const tap = empId ? tapMap.get(empId) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
+          const tap = empId ? tapMap.get(empId) || { time_in: null, time_out: null, status: null } : { time_in: null, time_out: null, status: null };
+          const status = bookingStatus === 'COMPLETED'
+            ? 'LEFT'
+            : (tap.status || (bookingStatus === 'CHECKIN' ? 'IN_GYM' : (bookingStatus === 'BOOKED' ? 'BOOKED' : 'LEFT')));
           return { name, employee_id: empId, department: dept, schedule: sched, time_in: tap.time_in, time_out: tap.time_out, status };
         })
       : [];
     const extra = additionalEmpIds.map((empId) => {
-      const tap = tapMap.get(empId) || { time_in: null, time_out: null };
+      const tap = tapMap.get(empId) || { time_in: null, time_out: null, status: null };
       const info = additionalInfo.get(empId) || { name: null, department: null };
-      return { name: info.name, employee_id: empId, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: 'IN_GYM' };
+      const fallbackStatus = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'LEFT');
+      return { name: info.name, employee_id: empId, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: tap.status || fallbackStatus };
     });
     const merged = people.concat(extra);
     return res.json({ ok: true, people: merged });
