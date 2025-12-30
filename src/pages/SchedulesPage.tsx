@@ -73,6 +73,20 @@ export default function SchedulesPage() {
     };
   });
 
+  const SessionBadge = ({ name }: { name: string }) => {
+    const key = name.toLowerCase();
+    const color = key.includes('morning')
+      ? 'bg-green-100 text-green-900'
+      : key.includes('afternoon')
+      ? 'bg-blue-100 text-blue-900'
+      : key.includes('night') && (key.includes('1') || key.includes('- 1'))
+      ? 'bg-purple-100 text-purple-900'
+      : key.includes('night') && (key.includes('2') || key.includes('- 2'))
+      ? 'bg-amber-100 text-amber-900'
+      : 'bg-slate-100 text-slate-900';
+    return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md font-medium ${color}`}>{name}</span>;
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -125,7 +139,7 @@ export default function SchedulesPage() {
                     {sessions.map((session, index) => (
                       <TableRow key={`${session.session_name}-${session.time_start}-${index}`}>
                         <TableCell className="font-medium">{index + 1}</TableCell>
-                        <TableCell className="font-medium">{session.session_name}</TableCell>
+                        <TableCell className="font-medium"><SessionBadge name={session.session_name} /></TableCell>
                         <TableCell>{formatTime(session.time_start)}</TableCell>
                         <TableCell>{session.time_end ? formatTime(session.time_end) : '-'}</TableCell>
                         <TableCell>{session.quota}</TableCell>

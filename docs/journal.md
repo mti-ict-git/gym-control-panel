@@ -186,3 +186,53 @@ Enhancement:
 Verification:
 - Lint: 0 errors.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-30 14:57:09 +08:00
+
+Enhancement:
+- Added colored session badges on Gym Booking page: green (Morning), blue (Afternoon), purple (Night 1), amber (Night 2).
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 14:58:44 +08:00
+
+Enhancement:
+- Improved session highlighting: the session text now has colored backgrounds matching the legend (pill-style badges) on both desktop and mobile layouts.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 15:00:24 +08:00
+
+Enhancement:
+- Applied colored session badges to Schedules page Session column.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 15:25:26 +08:00
+
+Enhancement:
+- Updated Reports page to use GymDB bookings and show columns: No, ID Booking, Employee ID, Department, Gender, Session, Time In, Time Out.
+
+Backend:
+- Added /gym-reports-init to create dbo.gym_reports with schema: ReportID INT IDENTITY PRIMARY KEY, BookingID INT, EmployeeID VARCHAR(20), Department VARCHAR(100), Gender VARCHAR(10), SessionName VARCHAR(50), TimeIn DATETIME NULL, TimeOut DATETIME NULL, ReportDate DATE NOT NULL, CreatedAt DATETIME DEFAULT GETDATE().
+- Added indexes on ReportDate and BookingID.
+- Added /gym-reports endpoint to list report rows.
+
+Verification:
+- Lint: 0 errors.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 15:28:43 +08:00
+
+Database:
+- Executed POST /api/gym-reports-init on local GymDB service to create dbo.gym_reports.
+- Verified with GET /api/gym-reports → ok:true, reports: [].
+
+Notes:
+- Table creation is idempotent; route can be re-run safely.

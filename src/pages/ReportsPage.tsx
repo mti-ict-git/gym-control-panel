@@ -36,6 +36,17 @@ interface AttendanceRecord {
   } | null;
 }
 
+interface BookingRecord {
+  booking_id: number;
+  employee_id: string;
+  department: string | null;
+  gender: string | null;
+  session_name: string;
+  booking_date: string;
+  time_start: string | null;
+  time_end: string | null;
+}
+
 function getDateRange(range: DateRange, customStart?: Date, customEnd?: Date): { start: Date; end: Date } {
   const now = new Date();
   
@@ -130,6 +141,27 @@ export default function ReportsPage() {
     },
   });
 
+  const { data: bookingData = [], isLoading: bookingsLoading } = useQuery({
+    queryKey: ['gym-bookings', dateRange, customStartDate, customEndDate],
+    queryFn: async () => {
+      const fromStr = format(start, 'yyyy-MM-dd');
+      const toStr = format(end, 'yyyy-MM-dd');
+      const tryFetch = async (base: string) => {
+        const resp = await fetch(`${base}/gym-bookings?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
+        const json = await resp.json();
+        if (!json || !json.ok) return [] as BookingRecord[];
+        return (json.bookings || []) as BookingRecord[];
+      };
+      try {
+        const data = await tryFetch('/api');
+        if (Array.isArray(data) && data.length >= 0) return data;
+        return await tryFetch('');
+      } catch (_) {
+        return await tryFetch('');
+      }
+    },
+  });
+
   // Calculate statistics
   const stats = {
     totalBookings: attendanceData.length,
@@ -140,16 +172,16 @@ export default function ReportsPage() {
   };
 
   const handleExportCSV = () => {
-    const headers = ['Date', 'Employee ID', 'Name', 'Department', 'Check In', 'Check Out', 'Duration', 'Status'];
-    const rows = attendanceData.map(record => [
-      format(new Date(record.schedule_time), 'yyyy-MM-dd'),
-      record.gym_users?.employee_id || '-',
-      record.gym_users?.name || '-',
-      record.gym_users?.department || '-',
-      record.check_in_time ? format(new Date(record.check_in_time), 'HH:mm') : '-',
-      record.check_out_time ? format(new Date(record.check_out_time), 'HH:mm') : '-',
-      formatDuration(record.check_in_time, record.check_out_time),
-      record.status,
+    const headers = ['No', 'ID Booking', 'Employee ID', 'Department', 'Gender', 'Session', 'Time In', 'Time Out'];
+    const rows = bookingData.map((record, idx) => [
+      String(idx + 1),
+      String(record.booking_id ?? ''),
+      String(record.employee_id ?? ''),
+      String(record.department ?? ''),
+      String(record.gender ?? ''),
+      String(record.session_name ?? ''),
+      '-',
+      '-',
     ]);
 
     const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
@@ -313,20 +345,20 @@ export default function ReportsPage() {
           <CardHeader>
             <div className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-muted-foreground" />
-              <CardTitle className="text-lg">Attendance Records</CardTitle>
+              <CardTitle className="text-lg">Reports</CardTitle>
             </div>
             <CardDescription>
-              {attendanceData.length} records found
+              {bookingData.length} records found
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {isLoading ? (
+            {bookingsLoading ? (
               <div className="space-y-3">
                 {[1, 2, 3, 4, 5].map((i) => (
                   <Skeleton key={i} className="h-12 w-full" />
                 ))}
               </div>
-            ) : attendanceData.length === 0 ? (
+            ) : bookingData.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>No attendance records found for this period.</p>
@@ -336,47 +368,27 @@ export default function ReportsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Date</TableHead>
+                      <TableHead className="w-16">No</TableHead>
+                      <TableHead>ID Booking</TableHead>
                       <TableHead>Employee ID</TableHead>
-                      <TableHead>Name</TableHead>
                       <TableHead>Department</TableHead>
-                      <TableHead>Check In</TableHead>
-                      <TableHead>Check Out</TableHead>
-                      <TableHead>Duration</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Gender</TableHead>
+                      <TableHead>Session</TableHead>
+                      <TableHead>Time In</TableHead>
+                      <TableHead>Time Out</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {attendanceData.map((record) => (
-                      <TableRow key={record.id}>
-                        <TableCell className="font-mono text-sm">
-                          {format(new Date(record.schedule_time), 'yyyy-MM-dd')}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {record.gym_users?.employee_id || '-'}
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          {record.gym_users?.name || '-'}
-                        </TableCell>
-                        <TableCell>
-                          {record.gym_users?.department || '-'}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {record.check_in_time 
-                            ? format(new Date(record.check_in_time), 'HH:mm') 
-                            : '-'}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {record.check_out_time 
-                            ? format(new Date(record.check_out_time), 'HH:mm') 
-                            : '-'}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {formatDuration(record.check_in_time, record.check_out_time)}
-                        </TableCell>
-                        <TableCell>
-                          {getStatusBadge(record.status)}
-                        </TableCell>
+                    {bookingData.map((record, idx) => (
+                      <TableRow key={`${record.booking_id}-${idx}`}>
+                        <TableCell className="font-mono text-sm">{idx + 1}</TableCell>
+                        <TableCell className="font-mono text-sm">{record.booking_id}</TableCell>
+                        <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
+                        <TableCell>{record.department || '-'}</TableCell>
+                        <TableCell>{record.gender || '-'}</TableCell>
+                        <TableCell className="font-medium">{record.session_name || '-'}</TableCell>
+                        <TableCell className="font-mono text-sm">-</TableCell>
+                        <TableCell className="font-mono text-sm">-</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
