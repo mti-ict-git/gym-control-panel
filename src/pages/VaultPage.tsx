@@ -21,6 +21,12 @@ function toJakartaHhMm(ts: string): string {
   return `${hh}:${mm}`;
 }
 
+function formatBookingId(n: number): string {
+  const s = String(n);
+  const padded = s.padStart(2, '0');
+  return `GYMBOOK${padded}`;
+}
+
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <Clock className="h-5 w-5 text-muted-foreground" />;
   const s = status.toUpperCase();
@@ -127,6 +133,10 @@ export default function VaultPage() {
                           <div className="font-mono">{user.employee_id}</div>
                         </div>
                         <div className="col-span-6">
+                          <div className="text-muted-foreground">Booking ID</div>
+                          <div className="font-mono">{formatBookingId(user.booking_id)}</div>
+                        </div>
+                        <div className="col-span-6">
                           <div className="text-muted-foreground">Session</div>
                           <div>{sessionNameFor(user)}</div>
                         </div>
@@ -191,6 +201,7 @@ export default function VaultPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-12 text-right">No</TableHead>
+                      <TableHead>Booking ID</TableHead>
                       <TableHead className="hidden md:table-cell">ID Card</TableHead>
                       <TableHead>Name</TableHead>
                       <TableHead className="hidden md:table-cell">Gender</TableHead>
@@ -207,6 +218,7 @@ export default function VaultPage() {
                     {vaultUsers.map((user, index) => (
                       <TableRow key={`${user.employee_id}__${user.schedule_time}__${index}`}>
                         <TableCell className="w-12 text-right">{index + 1}</TableCell>
+                        <TableCell className="font-mono">{formatBookingId(user.booking_id)}</TableCell>
                         <TableCell className="hidden md:table-cell">{user.card_no || '-'}</TableCell>
                         <TableCell className="font-medium">{user.name || '-'}</TableCell>
                         <TableCell className="hidden md:table-cell">{user.gender || '-'}</TableCell>
