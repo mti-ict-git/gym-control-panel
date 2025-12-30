@@ -476,14 +476,31 @@ export default function RegisterPage() {
                               startOfDay(addDays(new Date(), 1)),
                               startOfDay(addDays(new Date(), 2)),
                             ],
+                            todayGreen: [startOfDay(new Date())],
                           }}
                           modifiersClassNames={{
                             highlighted:
-                              "bg-amber-100 text-amber-900 font-semibold rounded-md",
+                              "bg-blue-100 text-blue-900 font-semibold rounded-md ring-1 ring-blue-300",
+                            todayGreen:
+                              "bg-green-100 text-green-900 font-semibold rounded-md ring-1 ring-green-300 opacity-100",
+                          }}
+                          classNames={{
+                            day_today:
+                              "bg-green-100 text-green-900 font-semibold rounded-md ring-1 ring-green-300 opacity-100",
                           }}
                           initialFocus
                           className="pointer-events-auto"
                         />
+                        <div className="px-3 py-2 text-xs text-slate-600 border-t border-slate-200 flex items-center gap-4">
+                          <span className="flex items-center gap-2">
+                            <span className="inline-block h-2 w-2 rounded-sm bg-blue-100 ring-1 ring-blue-300" />
+                            <span>Available dates</span>
+                          </span>
+                          <span className="flex items-center gap-2">
+                            <span className="inline-block h-2 w-2 rounded-sm bg-green-100 ring-1 ring-green-300" />
+                            <span>Today</span>
+                          </span>
+                        </div>
                       </PopoverContent>
                     </Popover>
                     <FormMessage />
