@@ -71,11 +71,6 @@ export function useVaultUsers() {
       const to = toYmd(dayAfter);
 
 
-      const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
-      const base = endpoint && endpoint.trim().length > 0 ? endpoint : '/api';
-      const resp = await fetch(`${base}/gym-bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
-      const json = (await resp.json()) as GymDbBookingResponse;
-
       const urlParams = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
       const tryFetch = async (url: string): Promise<GymDbBookingResponse> => {
         const r = await fetch(url);
