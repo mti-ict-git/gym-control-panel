@@ -129,8 +129,10 @@ This journal tracks decisions, notes, and progress for the project.
       - Cause: Local backend server (`npm run dbtester`) was still running.
       - Fix: Stopped local server and successfully ran `docker compose up -d`.
       - Backend ([db-tester.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/server/db-tester.js)):
-      - Added `/gym-booking-update-status` POST endpoint.
-      - Updated `/gym-bookings` GET query with `OUTER APPLY` / `LEFT JOIN` for `DataDBEnt`.
+        - Added `/gym-booking-update-status` POST endpoint.
+        - Updated `/gym-bookings` GET query with `OUTER APPLY` / `LEFT JOIN` for `DataDBEnt`.
+        - Updated `tryLoadActiveCardNo` to include `CardDB` in table search.
+        - Added condition `del_state = 1` when loading active card number.
     - Files:
       - [VaultPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/VaultPage.tsx)
       - [useVaultUsers.ts](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/hooks/useVaultUsers.ts)

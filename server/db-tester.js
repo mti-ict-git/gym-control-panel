@@ -1002,7 +1002,7 @@ app.post('/gym-booking-create', async (req, res) => {
       pool: { max: 1, min: 0, idleTimeoutMillis: 5000 },
     };
 
-    const tableCandidates = ['employee_card', 'employee_cards', 'cards', 'card'];
+    const tableCandidates = ['CardDB', 'employee_card', 'employee_cards', 'cards', 'card'];
 
     let pool;
     try {
@@ -1033,6 +1033,7 @@ app.post('/gym-booking-create', async (req, res) => {
       const empCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID']);
       const cardCol = pickColumn(cols, ['card_no', 'CardNo', 'card_number', 'CardNumber', 'id_card', 'IDCard']);
       const activeCol = pickColumn(cols, ['is_active', 'IsActive', 'active', 'Active', 'status', 'Status']);
+      const delStateCol = pickColumn(cols, ['del_state', 'DelState']);
 
       if (!empCol || !cardCol) {
         await pool.close();
@@ -1046,12 +1047,15 @@ app.post('/gym-booking-create', async (req, res) => {
         ? `AND (\n          [${activeCol}] = 1\n          OR UPPER(CAST([${activeCol}] AS varchar(50))) IN ('ACTIVE','AKTIF','1','TRUE')\n        )`
         : '';
 
+      const delStateWhere = delStateCol ? `AND [${delStateCol}] = 1` : '';
+
       const cardResult = await req.query(`
         SELECT TOP 1
           [${cardCol}] AS card_no
         FROM [${schema}].[${table}]
         WHERE [${empCol}] = @id
         ${activeWhere}
+        ${delStateWhere}
       `);
       await pool.close();
 
