@@ -38,6 +38,19 @@ Learning:
 Verification:
 - Lint: 0 errors, 8 warnings (react-refresh only-export-components).
 - TypeScript integrity check: passed (noEmit).
+ 
+Tuesday, December 30, 2025 9:04:43 PM
+
+Supabase Removal:
+- Deleted supabase directory (functions, migrations, config) and integrations client/types.
+- Removed Supabase import from ReportsPage; switched to GymDB bookings.
+- Uninstalled @supabase/supabase-js.
+- Refactored useNextScheduleForUser and useMostRelevantSchedule to use GymDB /gym-bookings-by-employee.
+- Disabled add-user mutations to avoid Supabase; users sourced from MasterDB.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
 
 2025-12-30 13:58:18 +08:00
 
@@ -67,6 +80,25 @@ Enhancement:
 
 Verification:
 - Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+2025-12-30 21:07:00 +08:00
+
+Database Connections Refactor:
+- Replaced Supabase calls in useDatabaseConnections with backend GymDB endpoints (/api/db-connections*, see gym.js).
+- Preserved hook interface for DatabaseList and detail page.
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).
+2025-12-30 21:15:30 +08:00
+
+Supabase Removal Phase 2:
+- Refactored useGymUsers to source from MasterDB /employee-core and provide paginated list for ScheduleDialog and Dashboard.
+- Refactored dashboard-facing hooks in useGymSchedules (upcoming, today count, occupancy) to GymDB endpoints (/gym-sessions, /gym-bookings).
+- Refactored useGymAnalytics to compute charts from GymDB /gym-bookings.
+
+Verification:
+- Lint: passed (warnings only).
 - TypeScript integrity check: passed (noEmit).
 
 2025-12-30 14:06:20 +08:00
@@ -425,5 +457,14 @@ Auth Env Fixed:
 
 Verification:
 - Health: GET /api/health → ok:true
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+2025-12-30 20:43:29 +08:00
+
+Supabase Env Removal Safe-Guard:
+- Updated supabase client to avoid immediate initialization when VITE_SUPABASE_* envs are missing.
+- Exported a disabled client stub that throws only on use; prevents app blank screen on startup.
+
+Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).

@@ -18,23 +18,8 @@ import {
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 
 type DateRange = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'custom';
-
-interface AttendanceRecord {
-  id: string;
-  gym_user_id: string;
-  schedule_time: string;
-  check_in_time: string | null;
-  check_out_time: string | null;
-  status: string;
-  gym_users: {
-    name: string;
-    employee_id: string;
-    department: string | null;
-  } | null;
-}
 
 interface BookingRecord {
   booking_id: number;
@@ -46,6 +31,7 @@ interface BookingRecord {
   booking_date: string;
   time_start: string | null;
   time_end: string | null;
+  status?: string | null;
 }
 
 function getDateRange(range: DateRange, customStart?: Date, customEnd?: Date): { start: Date; end: Date } {
@@ -115,32 +101,7 @@ export default function ReportsPage() {
     customEndDate ? new Date(customEndDate) : undefined
   );
 
-  const { data: attendanceData = [], isLoading } = useQuery({
-    queryKey: ['attendance-report', dateRange, customStartDate, customEndDate],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('gym_schedules')
-        .select(`
-          id,
-          gym_user_id,
-          schedule_time,
-          check_in_time,
-          check_out_time,
-          status,
-          gym_users (
-            name,
-            employee_id,
-            department
-          )
-        `)
-        .gte('schedule_time', start.toISOString())
-        .lte('schedule_time', end.toISOString())
-        .order('schedule_time', { ascending: false });
-
-      if (error) throw error;
-      return data as AttendanceRecord[];
-    },
-  });
+  const isLoading = false;
 
   const { data: bookingData = [], isLoading: bookingsLoading } = useQuery({
     queryKey: ['gym-bookings', dateRange, customStartDate, customEndDate],
@@ -165,11 +126,11 @@ export default function ReportsPage() {
 
   // Calculate statistics
   const stats = {
-    totalBookings: attendanceData.length,
-    checkedIn: attendanceData.filter(r => r.check_in_time).length,
-    completed: attendanceData.filter(r => r.status === 'COMPLETED' || r.status === 'CHECKED_OUT').length,
-    noShow: attendanceData.filter(r => r.status === 'NO_SHOW').length,
-    uniqueUsers: new Set(attendanceData.map(r => r.gym_user_id)).size,
+    totalBookings: bookingData.length,
+    checkedIn: bookingData.filter(r => (r.status || '').toUpperCase() === 'CHECKIN').length,
+    completed: bookingData.filter(r => (r.status || '').toUpperCase() === 'COMPLETED').length,
+    noShow: bookingData.filter(r => (r.status || '').toUpperCase() === 'NO_SHOW').length,
+    uniqueUsers: new Set(bookingData.map(r => r.employee_id)).size,
   };
 
   const handleExportCSV = () => {
@@ -209,7 +170,7 @@ export default function ReportsPage() {
               View and export gym attendance data
             </p>
           </div>
-          <Button onClick={handleExportCSV} disabled={attendanceData.length === 0}>
+          <Button onClick={handleExportCSV} disabled={bookingData.length === 0}>
             <Download className="h-4 w-4 mr-2" />
             Export CSV
           </Button>

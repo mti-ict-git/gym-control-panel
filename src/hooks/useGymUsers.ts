@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
 export interface GymUser {
@@ -16,23 +15,24 @@ export function useGymUsers(search: string = '', page: number = 1, pageSize: num
   return useQuery({
     queryKey: ['gym-users', { search, page, pageSize }],
     queryFn: async () => {
-      const from = (page - 1) * pageSize;
-      const to = from + pageSize - 1;
-
-      let query = supabase
-        .from('gym_users')
-        .select('*', { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range(from, to);
-
-      if (search && search.trim().length > 0) {
-        const s = `%${search.trim()}%`;
-        query = query.or(`name.ilike.${s},employee_id.ilike.${s},department.ilike.${s}`);
-      }
-
-      const { data, error, count } = await query;
-      if (error) throw error;
-      return { data: data as GymUser[], total: count ?? 0 };
+      const q = search?.trim() || '';
+      const resp = await fetch(`/api/employee-core${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+      const json: { ok: boolean; employees?: Array<{ employee_id: string; name: string; department: string | null }>; error?: string } = await resp.json();
+      if (!resp.ok || !json.ok) throw new Error(json.error || 'Failed to load employees');
+      const employees = Array.isArray(json.employees) ? json.employees : [];
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize;
+      const slice = employees.slice(start, end);
+      const mapped: GymUser[] = slice.map((e) => ({
+        id: e.employee_id,
+        name: e.name,
+        employee_id: e.employee_id,
+        vault_employee_id: null,
+        department: e.department,
+        created_at: '',
+        updated_at: '',
+      }));
+      return { data: mapped, total: employees.length };
     },
     placeholderData: (previousData) => previousData,
   });
@@ -43,14 +43,13 @@ export function useGymUser(userId: string | undefined) {
     queryKey: ['gym-user', userId],
     queryFn: async () => {
       if (!userId) return null;
-      const { data, error } = await supabase
-        .from('gym_users')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-      
-      if (error) throw error;
-      return data as GymUser | null;
+      const resp = await fetch(`/api/employee-core?ids=${encodeURIComponent(userId)}`);
+      const json: { ok: boolean; employees?: Array<{ employee_id: string; name: string; department: string | null }>; error?: string } = await resp.json();
+      if (!resp.ok || !json.ok) throw new Error(json.error || 'Failed to load employee');
+      const e = (json.employees || []).find((x) => x.employee_id === userId) || null;
+      return e
+        ? ({ id: e.employee_id, name: e.name, employee_id: e.employee_id, vault_employee_id: null, department: e.department, created_at: '', updated_at: '' } as GymUser)
+        : null;
     },
     enabled: !!userId,
   });
@@ -61,15 +60,8 @@ export function useAddGymUser() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async (userData: { name: string; employee_id: string }) => {
-      const { data, error } = await supabase
-        .from('gym_users')
-        .insert(userData)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data as GymUser;
+    mutationFn: async (_userData: { name: string; employee_id: string }) => {
+      throw new Error('Add user is not supported; users are sourced from MasterDB');
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['gym-users'] });
@@ -93,20 +85,13 @@ export function useAddGymUserFromVault() {
   const { toast } = useToast();
 
   return useMutation({
-    mutationFn: async (userData: { 
+    mutationFn: async (_userData: { 
       vault_employee_id: string; 
       name: string; 
       department: string;
       employee_id: string;
     }) => {
-      const { data, error } = await supabase
-        .from('gym_users')
-        .insert(userData)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data as GymUser;
+      throw new Error('Add from Vault not supported; users come from MasterDB');
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['gym-users'] });
@@ -131,18 +116,13 @@ export function useDeleteGymUser() {
 
   return useMutation({
     mutationFn: async (userId: string) => {
-      const { error } = await supabase
-        .from('gym_users')
-        .delete()
-        .eq('id', userId);
-      
-      if (error) throw error;
+      throw new Error('Delete user is not supported');
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gym-users'] });
       toast({
         title: "User Deleted",
-        description: "The user has been removed.",
+        description: "Operation not supported.",
       });
     },
     onError: (error: Error) => {
