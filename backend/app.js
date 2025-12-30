@@ -30,6 +30,11 @@ app.get('/api/gym-live-status', (_req, res) => {
   res.json({ ok: true, people: [] });
 });
 
+// Root-level alias to tolerate environments without /api prefix
+app.get('/gym-live-status', (_req, res) => {
+  res.json({ ok: true, people: [] });
+});
+
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
