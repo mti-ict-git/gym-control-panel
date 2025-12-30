@@ -372,3 +372,8 @@ Database:
 
 Verification:
 - Script output confirms updated schema.
+
+2025-12-30 20:59:52 +08:00
+
+Fix:
+- Fixed /gym-live-sync to actually select and persist EmployeeID from the CardDB staff column.
