@@ -41,6 +41,15 @@ function getDbConfig() {
   };
 }
 
+async function hasColumn(pool, table, column) {
+  const req = pool.request();
+  const q = "SELECT 1 AS ok FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = @Table AND COLUMN_NAME = @Column";
+  req.input('Table', sql.VarChar(128), String(table));
+  req.input('Column', sql.VarChar(128), String(column));
+  const r = await req.query(q);
+  return Array.isArray(r?.recordset) && r.recordset.length > 0;
+}
+
 router.post('/auth/login', async (req, res) => {
   const { email, username, password } = req.body || {};
   if ((!email && !username) || !password) {
@@ -56,19 +65,36 @@ router.post('/auth/login', async (req, res) => {
       ? 'SELECT TOP 1 AccountID, Username, Email, Role, IsActive, PasswordHash, PasswordResetRequired FROM dbo.gym_account WHERE Email = @Email'
       : 'SELECT TOP 1 AccountID, Username, Email, Role, IsActive, PasswordHash, PasswordResetRequired FROM dbo.gym_account WHERE Username = @Username';
     const r = await req1.query(query);
-    await pool.close();
     const row = Array.isArray(r?.recordset) && r.recordset.length > 0 ? r.recordset[0] : null;
     if (!row) {
+      await pool.close();
       return res.status(200).json({ ok: false, error: 'Account not found' });
     }
     if (!row.IsActive) {
+      await pool.close();
       return res.status(200).json({ ok: false, error: 'Account is inactive' });
     }
     const hash = row.PasswordHash != null ? String(row.PasswordHash) : '';
     const match = await bcrypt.compare(String(password), hash);
     if (!match) {
+      await pool.close();
       return res.status(200).json({ ok: false, error: 'Invalid credentials' });
     }
+    try {
+      const up = pool.request();
+      up.input('Id', sql.Int, Number(row.AccountID));
+      const hasLastSignIn = await hasColumn(pool, 'gym_account', 'LastSignIn');
+      const hasLastSignInAt = await hasColumn(pool, 'gym_account', 'LastSignInAt');
+      const sets = [];
+      if (hasLastSignIn) sets.push('LastSignIn = SYSDATETIME()');
+      if (hasLastSignInAt) sets.push('LastSignInAt = SYSDATETIME()');
+      sets.push('UpdatedAt = SYSDATETIME()');
+      const q = `UPDATE dbo.gym_account SET ${sets.join(', ')} WHERE AccountID = @Id`;
+      await up.query(q);
+    } catch (_) {
+      // swallow update errors to not block login
+    }
+    await pool.close();
     const payload = {
       account_id: Number(row.AccountID),
       username: row.Username != null ? String(row.Username) : '',
@@ -90,6 +116,36 @@ router.get('/auth/me', async (req, res) => {
   const token = m[1];
   try {
     const payload = jwt.verify(token, getJwtSecret());
+    try {
+      const accountId = Number(payload?.account_id || 0);
+      if (Number.isFinite(accountId) && accountId > 0) {
+        const config = getDbConfig();
+        const pool = await new sql.ConnectionPool(config).connect();
+        try {
+          const req1 = pool.request();
+          req1.input('Id', sql.Int, accountId);
+          const hasLastSignIn = await hasColumn(pool, 'gym_account', 'LastSignIn');
+          const hasLastSignInAt = await hasColumn(pool, 'gym_account', 'LastSignInAt');
+          const selCol = hasLastSignIn ? 'LastSignIn' : (hasLastSignInAt ? 'LastSignInAt' : 'UpdatedAt');
+          const r = await req1.query(`SELECT TOP 1 ${selCol} AS last FROM dbo.gym_account WHERE AccountID = @Id`);
+          const last = Array.isArray(r?.recordset) && r.recordset.length > 0 ? r.recordset[0]?.last : null;
+          const now = Date.now();
+          const lastMs = last instanceof Date ? last.getTime() : (last ? new Date(String(last)).getTime() : 0);
+          const diff = now - (Number.isFinite(lastMs) ? lastMs : 0);
+          if (!Number.isFinite(lastMs) || diff >= 30 * 60 * 1000) {
+            const up = pool.request();
+            up.input('Id', sql.Int, accountId);
+            const sets = [];
+            if (hasLastSignIn) sets.push('LastSignIn = SYSDATETIME()');
+            if (hasLastSignInAt) sets.push('LastSignInAt = SYSDATETIME()');
+            sets.push('UpdatedAt = SYSDATETIME()');
+            await up.query(`UPDATE dbo.gym_account SET ${sets.join(', ')} WHERE AccountID = @Id`);
+          }
+        } finally {
+          await pool.close();
+        }
+      }
+    } catch (_) {}
     return res.json({ ok: true, user: payload });
   } catch (error) {
     return res.status(401).json({ ok: false, error: 'Invalid token' });
@@ -142,4 +198,64 @@ router.post('/auth/change-password', async (req, res) => {
 });
 
 export default router;
-
+router.post('/auth/refresh', async (req, res) => {
+  const auth = req.headers.authorization || '';
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  if (!m) return res.status(401).json({ ok: false, error: 'Missing bearer token' });
+  const token = m[1];
+  try {
+    const old = jwt.verify(token, getJwtSecret());
+    const accountId = Number(old?.account_id || 0);
+    if (!Number.isFinite(accountId) || accountId <= 0) {
+      return res.status(401).json({ ok: false, error: 'Invalid token account' });
+    }
+    const config = getDbConfig();
+    const pool = await new sql.ConnectionPool(config).connect();
+    try {
+      const hasLastSignIn = await hasColumn(pool, 'gym_account', 'LastSignIn');
+      const hasLastSignInAt = await hasColumn(pool, 'gym_account', 'LastSignInAt');
+      const req1 = pool.request();
+      req1.input('Id', sql.Int, accountId);
+      const selectCols = ['AccountID', 'Username', 'Email', 'Role', 'IsActive'];
+      if (hasLastSignIn || hasLastSignInAt) {
+        selectCols.push((hasLastSignIn ? 'LastSignIn' : 'LastSignInAt'));
+      }
+      const r = await req1.query(
+        `SELECT TOP 1 ${selectCols.join(', ')} FROM dbo.gym_account WHERE AccountID = @Id`
+      );
+      const row = Array.isArray(r?.recordset) && r.recordset.length > 0 ? r.recordset[0] : null;
+      if (!row) {
+        return res.status(200).json({ ok: false, error: 'Account not found' });
+      }
+      if (!row.IsActive) {
+        return res.status(200).json({ ok: false, error: 'Account is inactive' });
+      }
+      const last = hasLastSignIn ? row.LastSignIn : (hasLastSignInAt ? row.LastSignInAt : null);
+      const now = Date.now();
+      const lastMs = last instanceof Date ? last.getTime() : (last ? new Date(String(last)).getTime() : 0);
+      const diff = now - (Number.isFinite(lastMs) ? lastMs : 0);
+      if (!Number.isFinite(lastMs) || diff >= 30 * 60 * 1000) {
+        const up = pool.request();
+        up.input('Id', sql.Int, accountId);
+        const sets = [];
+        if (hasLastSignIn) sets.push('LastSignIn = SYSDATETIME()');
+        if (hasLastSignInAt) sets.push('LastSignInAt = SYSDATETIME()');
+        sets.push('UpdatedAt = SYSDATETIME()');
+        await up.query(`UPDATE dbo.gym_account SET ${sets.join(', ')} WHERE AccountID = @Id`);
+      }
+      const payload = {
+        account_id: Number(row.AccountID),
+        username: row.Username != null ? String(row.Username) : '',
+        email: row.Email != null ? String(row.Email) : '',
+        role: mapDbRoleToUi(row.Role),
+      };
+      const newToken = jwt.sign(payload, getJwtSecret(), { expiresIn: '8h', issuer: 'gym-control' });
+      return res.json({ ok: true, token: newToken, user: payload });
+    } finally {
+      await pool.close();
+    }
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});

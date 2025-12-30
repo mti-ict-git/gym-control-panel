@@ -68,6 +68,56 @@ Enhancement:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+
+Tuesday, December 30, 2025 9:49:10 PM
+
+Enhancement:
+- Profile page now shows Email Verified sourced from GymDB (EmailVerified).
+
+Verification:
+- Ran lint: 0 errors, warnings only.
+- Ran TypeScript integrity check: passed (noEmit).
+Tuesday, December 30, 2025 9:52:42 PM
+
+Database:
+- Added LastSignInAt column to dbo.gym_account via /gym-accounts-init.
+- Exposed last_sign_in_at in /gym-accounts response and mapped on Profile page.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript check: passed (noEmit).
+Tuesday, December 30, 2025 9:57:19 PM
+
+Auth:
+- On successful login, backend updates LastSignInAt = SYSDATETIME() for the account.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+Tuesday, December 30, 2025 9:59:26 PM
+
+Auth:
+- /auth/me now throttles LastSignInAt updates to every 30 minutes per account.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+Tuesday, December 30, 2025 10:01:48 PM
+
+Auth:
+- Added POST /auth/refresh to reissue tokens and update LastSignInAt under the same 30-minute throttle.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+Tuesday, December 30, 2025 10:05:33 PM
+
+Frontend:
+- Wired AuthContext to auto-refresh token: interval 30 minutes and on visibility change; rotates auth_token and updates user in context.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
 2025-12-30 21:07:00 +08:00
 
 Database Connections Refactor:
@@ -387,3 +437,68 @@ Database:
 
 Verification:
 - Script output confirms updated schema.
+
+2025-12-30 21:20:55 +08:00
+
+UI:
+- Updated Reports table column label from ID to Booking ID.
+- Updated CSV export header to Booking ID.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:22:30 +08:00
+
+UI:
+- Applied themed badges for Session column on Reports: Morning (green), Afternoon (blue), Night - 1 (purple), Night - 2 (amber), fallback gray for others.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:24:25 +08:00
+
+UI:
+- Mapped gender codes in Reports: M→Male, F→Female, fallback '-'.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:29:18 +08:00
+
+UI:
+- Fixed sidebar flicker: Management Account visibility now derives directly from user.role and stays constant.
+- Also changed sidebar display name to use username or email.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:32:14 +08:00
+
+UI:
+- Dynamic role label in sidebar footer: shows Super Admin, Committee, Administrator, or User based on user.role.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:34:32 +08:00
+
+UI:
+- Highlighted sidebar role text in flat red when user.role is Super Admin.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:36:43 +08:00
+
+UI:
+- Styled Super Admin role label as soft red pill (bg-red-100, text-red-700, rounded) to match theme shown.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).

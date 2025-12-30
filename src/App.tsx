@@ -25,6 +25,7 @@ import ActiveDirectorySettings from "./pages/settings/ActiveDirectorySettings";
 import WhatsAppSettings from "./pages/settings/WhatsAppSettings";
 import DatabaseList from "./pages/settings/DatabaseList";
 import DatabaseForm from "./pages/settings/DatabaseForm";
+import ControllerSettings from "./pages/settings/ControllerSettings";
 
 const queryClient = new QueryClient();
 
@@ -114,6 +115,7 @@ const App = () => (
               <Route path="config/database" element={<DatabaseList />} />
               <Route path="config/database/add" element={<DatabaseForm />} />
               <Route path="config/database/:id" element={<DatabaseForm />} />
+              <Route path="config/controller" element={<ControllerSettings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

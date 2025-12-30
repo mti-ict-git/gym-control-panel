@@ -1800,6 +1800,15 @@ router.post('/gym-accounts-init', async (req, res) => {
     await exec(`IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'PasswordResetRequired') BEGIN
       ALTER TABLE dbo.gym_account ADD PasswordResetRequired BIT NOT NULL CONSTRAINT DF_gym_account_PasswordResetRequired DEFAULT (0);
     END`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'EmailVerified') BEGIN
+      ALTER TABLE dbo.gym_account ADD EmailVerified BIT NOT NULL CONSTRAINT DF_gym_account_EmailVerified DEFAULT (0);
+    END`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'LastSignInAt') BEGIN
+      ALTER TABLE dbo.gym_account ADD LastSignInAt DATETIME2 NULL;
+    END`);
+    await exec(`IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'LastSignIn') BEGIN
+      ALTER TABLE dbo.gym_account ADD LastSignIn DATETIME2 NULL;
+    END`);
     await exec(`IF EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'PasswordAlgorithm') BEGIN
       ALTER TABLE dbo.gym_account DROP COLUMN PasswordAlgorithm;
     END`);
@@ -1853,9 +1862,27 @@ router.get('/gym-accounts', async (req, res) => {
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
   try {
     const pool = await new sql.ConnectionPool(config).connect();
-    const result = await pool.request().query(
-      'SELECT AccountID, Username, Email, Role, IsActive, CreatedAt, UpdatedAt FROM dbo.gym_account ORDER BY CreatedAt DESC'
-    );
+    const hasLastSignInAt = await pool.request().query("SELECT 1 AS ok FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'LastSignInAt'");
+    const hasLastSignIn = await pool.request().query("SELECT 1 AS ok FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'LastSignIn'");
+    const colLastSignInAt = Array.isArray(hasLastSignInAt?.recordset) && hasLastSignInAt.recordset.length > 0;
+    const colLastSignIn = Array.isArray(hasLastSignIn?.recordset) && hasLastSignIn.recordset.length > 0;
+    const hasEmailVerified = await pool.request().query("SELECT 1 AS ok FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'EmailVerified'");
+    const colEmailVerified = Array.isArray(hasEmailVerified?.recordset) && hasEmailVerified.recordset.length > 0;
+    const selectCols = ['AccountID', 'Username', 'Email', 'Role', 'IsActive', 'CreatedAt', 'UpdatedAt'];
+    if (colEmailVerified) selectCols.push('EmailVerified');
+    if (colLastSignIn) selectCols.push('LastSignIn');
+    if (colLastSignInAt) selectCols.push('LastSignInAt');
+    let result;
+    try {
+      result = await pool.request().query(
+        `SELECT ${selectCols.join(', ')} FROM dbo.gym_account ORDER BY CreatedAt DESC`
+      );
+    } catch (e) {
+      const minimalCols = ['AccountID', 'Username', 'Email', 'Role', 'IsActive', 'CreatedAt', 'UpdatedAt'];
+      result = await pool.request().query(
+        `SELECT ${minimalCols.join(', ')} FROM dbo.gym_account ORDER BY CreatedAt DESC`
+      );
+    }
     await pool.close();
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
     const accounts = rows.map((r) => {
@@ -1867,8 +1894,12 @@ router.get('/gym-accounts', async (req, res) => {
         email: r.Email != null ? String(r.Email) : '',
         role,
         is_active: r.IsActive ? true : false,
+        email_verified: r.EmailVerified ? true : false,
         created_at: r.CreatedAt instanceof Date ? r.CreatedAt.toISOString() : String(r.CreatedAt || ''),
         updated_at: r.UpdatedAt instanceof Date ? r.UpdatedAt.toISOString() : String(r.UpdatedAt || ''),
+        last_sign_in: r.LastSignIn instanceof Date ? r.LastSignIn.toISOString() : (r.LastSignIn ? String(r.LastSignIn) : null),
+        last_sign_in_at: (r.LastSignIn instanceof Date ? r.LastSignIn.toISOString() : (r.LastSignIn ? String(r.LastSignIn) : null))
+          || (r.LastSignInAt instanceof Date ? r.LastSignInAt.toISOString() : (r.LastSignInAt ? String(r.LastSignInAt) : null)),
       };
     });
     return res.json({ ok: true, accounts });
@@ -2282,7 +2313,7 @@ router.put('/gym-accounts/:id', async (req, res) => {
   if (!Number.isFinite(id) || id <= 0) {
     return res.status(400).json({ ok: false, error: 'Invalid id' });
   }
-  const { username, email, role, is_active, password: rawPassword } = req.body || {};
+  const { username, email, role, is_active, password: rawPassword, last_sign_in_at } = req.body || {};
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
   try {
     const pool = await new sql.ConnectionPool(config).connect();
@@ -2304,6 +2335,13 @@ router.put('/gym-accounts/:id', async (req, res) => {
       const h = await bcrypt.hash(String(rawPassword), 10);
       req1.input('PasswordHashText', sql.VarChar(255), String(h));
       setParts.push('PasswordHash = @PasswordHashText');
+    }
+    if (last_sign_in_at != null) {
+      const d = new Date(String(last_sign_in_at));
+      if (!isNaN(d.getTime())) {
+        req1.input('LastSignInAt', sql.DateTime2, d);
+        setParts.push('LastSignInAt = @LastSignInAt');
+      }
     }
     if (setParts.length < 1) {
       await pool.close();
