@@ -115,6 +115,10 @@ This journal tracks decisions, notes, and progress for the project.
       - ID Card: Now loads from `DataDBEnt.dbo.CardDB` (via `LEFT JOIN` and `ISNULL` fallback).
       - Department: Now loads from `DataDBEnt.dbo.CardDB` (via `ISNULL` fallback).
       - Fixed Date Range: Updated `useVaultUsers` to include "today" in the fetch range.
+  - Troubleshooting:
+    - Issue: `net::ERR_CONNECTION_REFUSED` on Gym Booking page.
+    - Cause: Backend server (`db-tester.js`) was not running.
+    - Fix: Restarted backend server using `npm run dbtester`.
     - Backend ([db-tester.js](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/server/db-tester.js)):
       - Added `/gym-booking-update-status` POST endpoint.
       - Updated `/gym-bookings` GET query with `OUTER APPLY` / `LEFT JOIN` for `DataDBEnt`.
