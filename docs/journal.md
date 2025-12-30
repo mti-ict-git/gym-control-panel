@@ -382,3 +382,8 @@ Fix:
 
 Fix:
 - Resolved EmployeeID for live taps by mapping CardNo back to employee id via CardDB, with MasterDB fallback.
+
+2025-12-30 21:15:09 +08:00
+
+Fix:
+- Filtered /gym-live-persisted results by GYM_UNIT_FILTER by default (override with ?all=1 or ?unit=...).

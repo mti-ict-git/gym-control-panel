@@ -1556,19 +1556,43 @@ router.get('/gym-live-persisted', async (req, res) => {
   }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
   const sinceStr = String(req.query.since || '').trim();
+  const unitStr = String(req.query.unit || '').trim();
+  const allStr = String(req.query.all || '').trim();
+  const allowAll = allStr.length > 0 && ['1', 'true', 'yes', 'y'].includes(allStr.toLowerCase());
   const limit = Number(String(req.query.limit || '100'));
   const maxRows = Number.isFinite(limit) && limit > 0 && limit <= 1000 ? limit : 100;
   try {
     const pool = await new sql.ConnectionPool(config).connect();
     const req2 = pool.request();
-    let where = '';
+    const whereParts = [];
     if (sinceStr) {
       const sinceDate = new Date(sinceStr);
       if (!isNaN(sinceDate.getTime())) {
         req2.input('since', sql.DateTime, sinceDate);
-        where = 'WHERE TxnTime > @since';
+        whereParts.push('TxnTime > @since');
       }
     }
+
+    let units = [];
+    if (unitStr) {
+      units = unitStr.split(',').map((s) => s.trim()).filter((v) => v.length > 0);
+    } else if (!allowAll) {
+      const envUnits = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
+      units = envUnits ? envUnits.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
+    }
+
+    const safeUnits = units
+      .filter((u) => /^[A-Za-z0-9_-]+$/.test(u))
+      .slice(0, 50);
+    if (safeUnits.length > 0) {
+      safeUnits.forEach((u, idx) => {
+        req2.input(`u${idx}`, sql.VarChar(50), u);
+      });
+      const inList = safeUnits.map((_, idx) => `@u${idx}`).join(',');
+      whereParts.push(`UnitNo IN (${inList})`);
+    }
+
+    const where = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
     const q = `SELECT TOP ${maxRows} TrName, TrController, [Transaction], CardNo, UnitNo, EmployeeID, TrDate, TrTime, TxnTime FROM dbo.gym_live_taps ${where} ORDER BY TxnTime DESC`;
     const r = await req2.query(q);
     await pool.close();
