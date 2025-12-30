@@ -377,3 +377,8 @@ Verification:
 
 Fix:
 - Fixed /gym-live-sync to actually select and persist EmployeeID from the CardDB staff column.
+
+2025-12-30 21:09:51 +08:00
+
+Fix:
+- Resolved EmployeeID for live taps by mapping CardNo back to employee id via CardDB, with MasterDB fallback.
