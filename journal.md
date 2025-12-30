@@ -232,3 +232,21 @@ This journal tracks decisions, notes, and progress for the project.
     - Prefer employee_employment.department, then gb.Department, then CardDB.Department
     - Purpose: align display with Master DB over CardDB, avoid missing ec.department
     - File: [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L444-L451)
+
+- 2025-12-30 12:12:40
+  - CardDB env compatibility for booking-create:
+    - Support alternate env names CARDDB_* in addition to CARD_DB_*
+    - Ensures CardNo collection works with existing .env
+    - File: [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L680-L754)
+  - CardNo listing fallback:
+    - Use COALESCE(cd.CardNo, gb.CardNo) for card_no in /gym-bookings
+    - File: [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L446)
+
+- 2025-12-30 12:18:30
+  - Improve card mapping in booking-create:
+    - Add StaffNo/staff_no for employee id matching in CardDB
+    - Add IDCard to employee_core card column candidates
+    - File: [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L810-L820)
+  - Backfill endpoint:
+    - Added /gym-booking-backfill-cardno to update missing CardNo from CardDB
+    - File: [backend/routes/gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L520-L571)
