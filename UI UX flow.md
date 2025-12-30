@@ -13,11 +13,12 @@
    - Visiting / redirects to /register
    - User enters Employee ID, selects Date (tomorrow or next day) and Session, then submits
    - Success toast confirms registration and navigates to Gym Booking list
-   - Account sign-in/sign-up is handled at /login (tabs: Sign In, Sign Up)
+   - Admin sign-in/sign-up is handled at /login (tabs: Sign In, Sign Up); employees do not need accounts for booking (HRIS-synced)
 
-2. Login → Dashboard
-   - Authenticates via Supabase at /login
-   - On success, navigates to /dashboard
+2. Admin Login → Dashboard
+   - Admin-only authentication via Supabase at /login
+   - Employees register bookings without logging in (using Employee ID)
+   - On admin success, navigates to /dashboard (protected routes)
 
 3. Dashboard → App Navigation
    - High-level stats and charts; occupancy indicator
