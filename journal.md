@@ -169,6 +169,13 @@ This journal tracks decisions, notes, and progress for the project.
     - Kept success notification via toast; user remains on Register page.
     - File: [RegisterPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/RegisterPage.tsx#L148-L193)
 
+- 2025-12-30 11:04:52
+  - Dynamic availability on Register page:
+    - Fetches daily availability from `/gym-availability?date=yyyy-MM-dd`.
+    - Displays Available = Quota - Booked for the selected session time.
+    - Falls back to static quota when availability not loaded.
+    - File: [RegisterPage.tsx](file:///c:/Users/itsupport/Documents/Apps/gym-control-panel/src/pages/RegisterPage.tsx#L62-L106)
+
   - Documentation:
     - Added "UI UX flow" file to describe user journey, components, responsive guidelines, accessibility, sample code, and backend endpoints
     - File: [UI UX flow.md](file:///c:/Scripts/Projects/gym-control-panel/UI%20UX%20flow.md)
