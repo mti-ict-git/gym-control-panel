@@ -215,13 +215,26 @@ export default function ManagementPage() {
   const getRoleBadgeVariant = (role: AppRole) => {
     switch (role) {
       case 'superadmin':
-        return 'destructive';
+        return 'outline';
       case 'committee':
         return 'default';
       case 'admin':
         return 'secondary';
       default:
         return 'outline';
+    }
+  };
+
+  const getRoleBadgeClass = (role: AppRole) => {
+    switch (role) {
+      case 'superadmin':
+        return 'rounded-full bg-red-50 text-red-600 border-red-200 px-3 py-1';
+      case 'committee':
+        return 'rounded-full bg-blue-50 text-blue-600 border-blue-200 px-3 py-1';
+      case 'admin':
+        return 'rounded-full bg-slate-100 text-slate-700 border-slate-200 px-3 py-1';
+      default:
+        return 'rounded-full px-3 py-1';
     }
   };
 
@@ -413,7 +426,7 @@ export default function ManagementPage() {
                       <TableCell>{acc.last_sign_in ? new Date(acc.last_sign_in).toLocaleString() : (acc.last_sign_in_at ? new Date(acc.last_sign_in_at).toLocaleString() : '-')}</TableCell>
                       <TableCell>
                         <div className="flex gap-1">
-                          <Badge variant={getRoleBadgeVariant(acc.role)}>{getRoleLabel(acc.role)}</Badge>
+                          <Badge variant={getRoleBadgeVariant(acc.role)} className={getRoleBadgeClass(acc.role)}>{getRoleLabel(acc.role)}</Badge>
                         </div>
                       </TableCell>
                       <TableCell>

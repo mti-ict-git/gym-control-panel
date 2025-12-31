@@ -502,3 +502,71 @@ UI:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:41:21 +08:00
+
+UI:
+- Added Settings > Configuration sub menu "Controller" and created ControllerSettings page.
+- Wired route /settings/config/controller and nav entry.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-30 21:43:45 +08:00
+
+UI:
+- Repaired Profile page fields: Last Sign In now from JWT iat; Account Created pulled from gym_account via /gym-accounts.
+- User ID now shows account_id; removed Supabase-specific fields.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 10:15:00 +08:00
+
+Reports:
+- Set default period to All and moved All to top of Period dropdown.
+- Added Next 2 Days period; kept Today strictly single day.
+- Showing label displays All Time when All is selected.
+- CSV export filename becomes gym-attendance-all.csv when All is selected; otherwise uses start-to-end.
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 10:28:00 +08:00
+
+Reports:
+- CSV export filenames now vary by Period selection: all, next-2-days, today, yesterday, this-week, this-month, this-year, or from-to for custom.
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 09:27:05 +08:00
+
+Login:
+- Removed Sign Up tab and any link from Login page; only Sign In remains.
+
+Verification:
+- Ran lint: 0 errors, warnings only.
+- Ran TypeScript integrity check: passed (noEmit).
+
+2025-12-31 09:29:53 +08:00
+
+Routing:
+- Changed route /register to /booking and updated default redirect from / to /booking.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 09:31:08 +08:00
+
+Docs:
+- Updated UI UX flow to replace /register with /booking and align copy.
+- Updated register-flow doc title and trigger to Booking.
+
+Verification:
+- Docs updated; application unaffected.
