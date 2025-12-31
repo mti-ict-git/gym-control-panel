@@ -2499,6 +2499,8 @@ router.get('/gym-controller-settings', async (req, res) => {
         GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
         GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
         WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
+        BookingMinDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMinDaysAhead DEFAULT 1,
+        BookingMaxDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMaxDaysAhead DEFAULT 2,
         CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_settings_CreatedAt DEFAULT GETDATE(),
         UpdatedAt DATETIME NULL
       );
@@ -2515,10 +2517,16 @@ router.get('/gym-controller-settings', async (req, res) => {
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'WorkerIntervalMs') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000;
     END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'BookingMinDaysAhead') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD BookingMinDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMinDaysAhead DEFAULT 1;
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'BookingMaxDaysAhead') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD BookingMaxDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMaxDaysAhead DEFAULT 2;
+    END`);
     await pool.request().query(`IF NOT EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
-      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize) VALUES (1, 0)`);
+      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, BookingMinDaysAhead, BookingMaxDaysAhead) VALUES (1, 0, 1, 2)`);
 
-    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
+    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
     await pool.close();
 
     const row = r?.recordset?.[0] || null;
@@ -2530,6 +2538,8 @@ router.get('/gym-controller-settings', async (req, res) => {
       grace_before_min: Number(row?.GraceBeforeMin ?? 0) || 0,
       grace_after_min: Number(row?.GraceAfterMin ?? 0) || 0,
       worker_interval_ms: Number(row?.WorkerIntervalMs ?? 60000) || 60000,
+      booking_min_days_ahead: Number(row?.BookingMinDaysAhead ?? 1) || 1,
+      booking_max_days_ahead: Number(row?.BookingMaxDaysAhead ?? 2) || 2,
       updated_at: updatedAt,
     });
   } catch (error) {
@@ -2563,6 +2573,8 @@ router.post('/gym-controller-settings', async (req, res) => {
   const graceBeforeRaw = req?.body?.grace_before_min;
   const graceAfterRaw = req?.body?.grace_after_min;
   const workerIntervalRaw = req?.body?.worker_interval_ms;
+  const bookingMinDaysRaw = req?.body?.booking_min_days_ahead;
+  const bookingMaxDaysRaw = req?.body?.booking_max_days_ahead;
 
   const parseIntSafe = (v) => {
     if (v === undefined || v === null || v === '') return null;
@@ -2574,11 +2586,17 @@ router.post('/gym-controller-settings', async (req, res) => {
   const graceBefore = parseIntSafe(graceBeforeRaw);
   const graceAfter = parseIntSafe(graceAfterRaw);
   const workerIntervalMs = parseIntSafe(workerIntervalRaw);
+  const bookingMinDays = parseIntSafe(bookingMinDaysRaw);
+  const bookingMaxDays = parseIntSafe(bookingMaxDaysRaw);
 
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
   const graceBeforeClamped = graceBefore == null ? null : clamp(graceBefore, 0, 24 * 60);
   const graceAfterClamped = graceAfter == null ? null : clamp(graceAfter, 0, 24 * 60);
   const workerIntervalClamped = workerIntervalMs == null ? null : clamp(workerIntervalMs, 5000, 60 * 60 * 1000);
+  const bookingMinDaysClamped = bookingMinDays == null ? null : clamp(bookingMinDays, 0, 30);
+  const bookingMaxDaysClamped = bookingMaxDays == null ? null : clamp(bookingMaxDays, 0, 30);
+  const bookingMinFinal = bookingMinDaysClamped == null ? null : bookingMinDaysClamped;
+  const bookingMaxFinal = bookingMaxDaysClamped == null ? null : Math.max(bookingMinDaysClamped ?? 0, bookingMaxDaysClamped ?? 0);
 
   const config = {
     server,
@@ -2600,6 +2618,8 @@ router.post('/gym-controller-settings', async (req, res) => {
         GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
         GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
         WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
+        BookingMinDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMinDaysAhead DEFAULT 1,
+        BookingMaxDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMaxDaysAhead DEFAULT 2,
         CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_settings_CreatedAt DEFAULT GETDATE(),
         UpdatedAt DATETIME NULL
       );
@@ -2616,6 +2636,12 @@ router.post('/gym-controller-settings', async (req, res) => {
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'WorkerIntervalMs') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000;
     END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'BookingMinDaysAhead') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD BookingMinDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMinDaysAhead DEFAULT 1;
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'BookingMaxDaysAhead') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD BookingMaxDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMaxDaysAhead DEFAULT 2;
+    END`);
 
     const req1 = pool.request();
     req1.input('EnableAutoOrganize', sql.Bit, enableParsed == null ? null : enableParsed ? 1 : 0);
@@ -2623,6 +2649,8 @@ router.post('/gym-controller-settings', async (req, res) => {
     req1.input('GraceBeforeMin', sql.Int, graceBeforeClamped);
     req1.input('GraceAfterMin', sql.Int, graceAfterClamped);
     req1.input('WorkerIntervalMs', sql.Int, workerIntervalClamped);
+    req1.input('BookingMinDaysAhead', sql.Int, bookingMinFinal);
+    req1.input('BookingMaxDaysAhead', sql.Int, bookingMaxFinal);
     await req1.query(`IF EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
       UPDATE dbo.gym_controller_settings SET
         EnableAutoOrganize = COALESCE(@EnableAutoOrganize, EnableAutoOrganize),
@@ -2630,13 +2658,15 @@ router.post('/gym-controller-settings', async (req, res) => {
         GraceBeforeMin = COALESCE(@GraceBeforeMin, GraceBeforeMin),
         GraceAfterMin = COALESCE(@GraceAfterMin, GraceAfterMin),
         WorkerIntervalMs = COALESCE(@WorkerIntervalMs, WorkerIntervalMs),
+        BookingMinDaysAhead = COALESCE(@BookingMinDaysAhead, BookingMinDaysAhead),
+        BookingMaxDaysAhead = COALESCE(@BookingMaxDaysAhead, BookingMaxDaysAhead),
         UpdatedAt = SYSDATETIME()
       WHERE Id = 1
     ELSE
-      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, UpdatedAt)
-      VALUES (1, COALESCE(@EnableAutoOrganize, 0), COALESCE(@EnableManagerAllSessionAccess, 0), COALESCE(@GraceBeforeMin, 0), COALESCE(@GraceAfterMin, 0), COALESCE(@WorkerIntervalMs, 60000), SYSDATETIME())`);
+      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt)
+      VALUES (1, COALESCE(@EnableAutoOrganize, 0), COALESCE(@EnableManagerAllSessionAccess, 0), COALESCE(@GraceBeforeMin, 0), COALESCE(@GraceAfterMin, 0), COALESCE(@WorkerIntervalMs, 60000), COALESCE(@BookingMinDaysAhead, 1), COALESCE(@BookingMaxDaysAhead, 2), SYSDATETIME())`);
 
-    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
+    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
     await pool.close();
 
     const row = r?.recordset?.[0] || null;
@@ -2648,6 +2678,8 @@ router.post('/gym-controller-settings', async (req, res) => {
       grace_before_min: Number(row?.GraceBeforeMin ?? 0) || 0,
       grace_after_min: Number(row?.GraceAfterMin ?? 0) || 0,
       worker_interval_ms: Number(row?.WorkerIntervalMs ?? 60000) || 60000,
+      booking_min_days_ahead: Number(row?.BookingMinDaysAhead ?? 1) || 1,
+      booking_max_days_ahead: Number(row?.BookingMaxDaysAhead ?? 2) || 2,
       updated_at: updatedAt,
     });
   } catch (error) {

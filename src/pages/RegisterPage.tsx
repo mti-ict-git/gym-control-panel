@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
+import { useQuery } from '@tanstack/react-query';
 import { useGymDbSessions, GymDbSession } from '@/hooks/useGymDbSessions';
 
 const formSchema = z.object({
@@ -73,6 +74,38 @@ export default function RegisterPage() {
   const selectedSessionId = form.watch('sessionId');
   const employeeIdInput = form.watch('employeeId');
   const { data: gymDbSessions, isLoading: gymDbSessionsLoading } = useGymDbSessions();
+
+  const controllerSettingsQuery = useQuery({
+    queryKey: ['gym-controller-settings'],
+    queryFn: async () => {
+      const tryFetch = async (url: string) => {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('Failed to fetch controller settings');
+        return (await resp.json()) as {
+          ok: boolean;
+          booking_min_days_ahead?: number;
+          booking_max_days_ahead?: number;
+          error?: string;
+        };
+      };
+      try {
+        const json = await tryFetch('/api/gym-controller-settings');
+        if (!json.ok) throw new Error(json.error || 'Failed to fetch controller settings');
+        return {
+          booking_min_days_ahead: Number(json.booking_min_days_ahead ?? 1) || 1,
+          booking_max_days_ahead: Number(json.booking_max_days_ahead ?? 2) || 2,
+        };
+      } catch (_) {
+        const json = await tryFetch('/gym-controller-settings');
+        if (!json.ok) throw new Error(json.error || 'Failed to fetch controller settings');
+        return {
+          booking_min_days_ahead: Number(json.booking_min_days_ahead ?? 1) || 1,
+          booking_max_days_ahead: Number(json.booking_max_days_ahead ?? 2) || 2,
+        };
+      }
+    },
+    staleTime: 60_000,
+  });
 
   const sessionKey = (s: GymDbSession): string => `${s.session_name}__${s.time_start}`;
   const selectedGymDbSession = (gymDbSessions || []).find((s) => sessionKey(s) === selectedSessionId) ?? null;
@@ -487,16 +520,23 @@ export default function RegisterPage() {
                             if (d) setDatePopoverOpen(false);
                           }}
                           disabled={(date) => {
-                            const tomorrow = startOfDay(addDays(new Date(), 1));
-                            const dayAfterTomorrow = startOfDay(addDays(new Date(), 2));
+                            const minDays = Number(controllerSettingsQuery.data?.booking_min_days_ahead ?? 1) || 1;
+                            const maxDays = Number(controllerSettingsQuery.data?.booking_max_days_ahead ?? 2) || 2;
+                            const start = startOfDay(addDays(new Date(), minDays));
+                            const end = startOfDay(addDays(new Date(), maxDays));
                             const dateToCheck = startOfDay(date);
-                            return dateToCheck < tomorrow || dateToCheck > dayAfterTomorrow;
+                            return dateToCheck < start || dateToCheck > end;
                           }}
                           modifiers={{
-                            highlighted: [
-                              startOfDay(addDays(new Date(), 1)),
-                              startOfDay(addDays(new Date(), 2)),
-                            ],
+                            highlighted: (() => {
+                              const minDays = Number(controllerSettingsQuery.data?.booking_min_days_ahead ?? 1) || 1;
+                              const maxDays = Number(controllerSettingsQuery.data?.booking_max_days_ahead ?? 2) || 2;
+                              const days: Date[] = [];
+                              for (let d = minDays; d <= maxDays; d++) {
+                                days.push(startOfDay(addDays(new Date(), d)));
+                              }
+                              return days;
+                            })(),
                             todayGreen: [startOfDay(new Date())],
                           }}
                           modifiersClassNames={{
