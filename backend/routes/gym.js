@@ -5,6 +5,8 @@ import { envTrim, envBool } from '../lib/env.js';
 
 const router = express.Router();
 
+let gymLiveStatusCache = { atMs: 0, payload: null };
+
 router.get('/env-dump', (req, res) => {
   const out = {
     CARD_DB_TX_TABLE: envTrim(process.env.CARD_DB_TX_TABLE),
@@ -2570,221 +2572,161 @@ router.get('/gym-live-status', async (req, res) => {
   if (!server || !database || !user || !password) {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', people: [] });
   }
-  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
-  try {
-    const pool = await new sql.ConnectionPool(config).connect();
-    const req1 = pool.request();
-    req1.input('today', sql.Date, new Date());
-    const result = await req1.query(
-      `SELECT ec.name AS employee_name,
-        gb.EmployeeID AS employee_id,
-        ee.department AS department,
-        s.Session AS session_name,
-        CONVERT(varchar(5), s.StartTime, 108) AS time_start,
-        CONVERT(varchar(5), s.EndTime, 108) AS time_end,
-        gb.Status AS booking_status
-      FROM dbo.gym_booking gb
-      LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
-      LEFT JOIN ${masterDb}.dbo.employee_core ec ON gb.EmployeeID = ec.employee_id
-      LEFT JOIN ${masterDb}.dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE'
-      WHERE gb.BookingDate = @today AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
-      ORDER BY s.StartTime ASC, ec.name ASC`
-    );
-    const unitRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
-    const units = unitRaw ? unitRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
-    const req2 = pool.request();
-    req2.input('today', sql.Date, new Date());
-    const safeUnits = units.filter((u) => /^[A-Za-z0-9_-]+$/.test(u)).slice(0, 50);
-    safeUnits.forEach((u, idx) => req2.input(`u${idx}`, sql.VarChar(50), u));
-    const inList = safeUnits.map((_, idx) => `@u${idx}`).join(',');
-    const unitWhere = safeUnits.length > 0 ? `AND UnitNo IN (${inList})` : '';
-    const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
-    const exitPattern = (envTrim(process.env.GYM_EXIT_EVENT) || 'VALID EXIT ACCESS').toUpperCase();
-    req2.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
-    req2.input('exitPat', sql.VarChar(120), `%${exitPattern}%`);
-    const aggQuery =
-      `SELECT EmployeeID AS employee_id,
-         MIN(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat THEN TxnTime END) AS time_in,
-         MAX(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @exitPat THEN TxnTime END) AS time_out
-       FROM dbo.gym_live_taps
-       WHERE EmployeeID IS NOT NULL AND LTRIM(RTRIM(EmployeeID)) <> ''
-         AND CAST(TxnTime AS date) = @today
-         ${unitWhere}
-       GROUP BY EmployeeID`;
-    const aggRes = await req2.query(aggQuery);
-    const pad2 = (n) => String(n).padStart(2, '0');
-    const pad3 = (n) => String(n).padStart(3, '0');
-    const toUtc8Iso = (d) => {
-      if (!(d instanceof Date) || isNaN(d.getTime())) return null;
-      const y = d.getUTCFullYear();
-      const m = pad2(d.getUTCMonth() + 1);
-      const day = pad2(d.getUTCDate());
-      const hh = pad2(d.getUTCHours());
-      const mm = pad2(d.getUTCMinutes());
-      const ss = pad2(d.getUTCSeconds());
-      const ms = pad3(d.getUTCMilliseconds());
-      return `${y}-${m}-${day}T${hh}:${mm}:${ss}.${ms}+08:00`;
-    };
-    const tapMap = new Map(
-      (Array.isArray(aggRes?.recordset) ? aggRes.recordset : []).map((r) => {
-        const empId = r?.employee_id != null ? String(r.employee_id).trim() : '';
-        const ti = r?.time_in instanceof Date ? r.time_in : (r?.time_in ? new Date(String(r.time_in)) : null);
-        const to = r?.time_out instanceof Date ? r.time_out : (r?.time_out ? new Date(String(r.time_out)) : null);
-        return [empId, { time_in: toUtc8Iso(ti), time_out: toUtc8Iso(to) }];
-      })
-    );
-    const bookedEmpIds = new Set(
-      (Array.isArray(result?.recordset) ? result.recordset : []).map((r) =>
-        r?.employee_id != null ? String(r.employee_id).trim() : ''
-      ).filter((v) => v.length > 0)
-    );
-    const additionalEmpIds = Array.from(tapMap.keys()).filter((k) => k && !bookedEmpIds.has(k)).slice(0, 200);
-    const {
-      MASTER_DB_SERVER,
-      MASTER_DB_PORT,
-      MASTER_DB_DATABASE,
-      MASTER_DB_USER,
-      MASTER_DB_PASSWORD,
-      MASTER_DB_ENCRYPT,
-      MASTER_DB_TRUST_SERVER_CERTIFICATE,
-    } = process.env;
-    const mServer = envTrim(MASTER_DB_SERVER);
-    const mDatabase = envTrim(MASTER_DB_DATABASE);
-    const mUser = envTrim(MASTER_DB_USER);
-    const mPassword = envTrim(MASTER_DB_PASSWORD);
-    const pickColumn = (columns, candidates) => {
-      const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
-      for (const cand of candidates) {
-        const hit = map.get(String(cand).toLowerCase());
-        if (hit) return hit;
-      }
-      return null;
-    };
-    const pickSchemaForTable = async (pool2, tableName) => {
-      const safe = String(tableName || '').trim();
-      if (!/^[A-Za-z0-9_]+$/.test(safe)) return null;
-      const reqS = pool2.request();
-      reqS.input('tableName', sql.VarChar(128), safe);
-      const r = await reqS.query(
-        "SELECT TOP 1 TABLE_SCHEMA AS schema_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA"
-      );
-      const schemaName = r?.recordset?.[0]?.schema_name ? String(r.recordset[0].schema_name) : null;
-      return schemaName && schemaName.trim().length > 0 ? schemaName : null;
-    };
-    const infoEmpIds = Array.from(new Set(Array.from(bookedEmpIds).concat(additionalEmpIds))).slice(0, 400);
-    let empInfo = new Map();
-    if (infoEmpIds.length > 0 && mServer && mDatabase && mUser && mPassword) {
-      const mConfig = {
-        server: mServer,
-        port: Number(MASTER_DB_PORT || 1433),
-        database: mDatabase,
-        user: mUser,
-        password: mPassword,
-        options: { encrypt: envBool(MASTER_DB_ENCRYPT, false), trustServerCertificate: envBool(MASTER_DB_TRUST_SERVER_CERTIFICATE, true) },
-        pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
-      };
-      try {
-        const mPool = await new sql.ConnectionPool(mConfig).connect();
-        const coreSchema = (await pickSchemaForTable(mPool, 'employee_core')) || 'dbo';
-        const colsRes = await mPool.request().query(
-          `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${coreSchema.replace(/'/g, "''")}' AND TABLE_NAME='employee_core'`
-        );
-        const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
-        const employeeIdCol = pickColumn(cols, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
-        const nameCol = pickColumn(cols, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
-        const deptCol = pickColumn(cols, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
-        if (employeeIdCol && nameCol) {
-          const reqM = mPool.request();
-          infoEmpIds.forEach((id, idx) => reqM.input(`e${idx}`, sql.VarChar(100), id));
-          const inList = infoEmpIds.map((_, idx) => `@e${idx}`).join(',');
-          const selectCols = [
-            `[${employeeIdCol}] AS employee_id`,
-            `[${nameCol}] AS employee_name`,
-            deptCol ? `[${deptCol}] AS department` : `CAST(NULL AS varchar(255)) AS department`,
-          ].join(', ');
-          const qM = `SELECT ${selectCols} FROM [${coreSchema}].[employee_core] WHERE [${employeeIdCol}] IN (${inList})`;
-          const rM = await reqM.query(qM);
-          empInfo = new Map(
-            (Array.isArray(rM?.recordset) ? rM.recordset : []).map((x) => {
-              const id = x?.employee_id != null ? String(x.employee_id).trim() : '';
-              const name = x?.employee_name != null ? String(x.employee_name).trim() : null;
-              const dept = x?.department != null ? String(x.department).trim() : null;
-              return [id, { name, department: dept }];
-            })
-          );
+  const cacheNow = Date.now();
+  if (gymLiveStatusCache.payload && cacheNow - gymLiveStatusCache.atMs < 1500) {
+    return res.json(gymLiveStatusCache.payload);
+  }
 
-          const employmentSchema = await pickSchemaForTable(mPool, 'employee_employment');
-          if (employmentSchema) {
-            const empColsRes = await mPool.request().query(
-              `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${employmentSchema.replace(/'/g, "''")}' AND TABLE_NAME='employee_employment'`
-            );
-            const empCols = (empColsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
-            const empIdCol2 = pickColumn(empCols, ['employee_id', 'EmployeeID', 'employeeid', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
-            const deptCol2 = pickColumn(empCols, ['department', 'Department', 'dept', 'Dept', 'department_name', 'DepartmentName', 'dept_name', 'DeptName']);
-            const endDateCol = pickColumn(empCols, ['end_date', 'EndDate', 'enddate', 'termination_date', 'TerminationDate']);
-            const startDateCol = pickColumn(empCols, ['start_date', 'StartDate', 'startdate', 'effective_date', 'EffectiveDate']);
-            if (empIdCol2 && deptCol2) {
-              const reqE = mPool.request();
-              infoEmpIds.forEach((id, idx) => reqE.input(`e${idx}`, sql.VarChar(100), id));
-              const inList2 = infoEmpIds.map((_, idx) => `@e${idx}`).join(',');
-              const orderParts = [];
-              if (endDateCol) orderParts.push(`CASE WHEN [${endDateCol}] IS NULL THEN 0 ELSE 1 END`);
-              if (startDateCol) orderParts.push(`[${startDateCol}] DESC`);
-              orderParts.push(`[${empIdCol2}] ASC`);
-              const orderBy = orderParts.join(', ');
-              const qE = `
-                WITH ranked AS (
-                  SELECT
-                    [${empIdCol2}] AS employee_id,
-                    [${deptCol2}] AS department,
-                    ROW_NUMBER() OVER (PARTITION BY [${empIdCol2}] ORDER BY ${orderBy}) AS rn
-                  FROM [${employmentSchema}].[employee_employment]
-                  WHERE [${empIdCol2}] IN (${inList2})
-                )
-                SELECT employee_id, department FROM ranked WHERE rn = 1
-              `;
-              const rE = await reqE.query(qE);
-              const rows = Array.isArray(rE?.recordset) ? rE.recordset : [];
-              for (const row of rows) {
-                const id = row?.employee_id != null ? String(row.employee_id).trim() : '';
-                const dept = row?.department != null ? String(row.department).trim() : '';
-                if (!id || !dept) continue;
-                const current = empInfo.get(id) || { name: null, department: null };
-                if (current.department == null || !String(current.department).trim()) {
-                  empInfo.set(id, { name: current.name, department: dept });
-                }
-              }
-            }
-          }
-        }
-        await mPool.close();
-      } catch (_) {}
-    }
-    await pool.close();
-    const people = Array.isArray(result?.recordset)
-      ? result.recordset.map((r) => {
-          const empId = r?.employee_id != null ? String(r.employee_id).trim() : null;
-          const info = empId ? (empInfo.get(empId) || { name: null, department: null }) : { name: null, department: null };
-          const name = info.name;
-          const dept = info.department;
-          const sess = r?.session_name != null ? String(r.session_name).trim() : '';
-          const ts = r?.time_start != null ? String(r.time_start).trim() : null;
-          const te = r?.time_end != null ? String(r.time_end).trim() : null;
-          const sched = sess ? (ts && te ? `${sess} ${ts}-${te}` : sess) : null;
-          const bookingStatus = r?.booking_status != null ? String(r.booking_status).trim().toUpperCase() : '';
-          const status = bookingStatus === 'CHECKIN' ? 'IN_GYM' : 'LEFT';
-          const tap = empId ? tapMap.get(empId) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
-          return { name, employee_id: empId, department: dept, schedule: sched, time_in: tap.time_in, time_out: tap.time_out, status };
+  const config = {
+    server,
+    port: Number(DB_PORT || 1433),
+    database,
+    user,
+    password,
+    requestTimeout: 8000,
+    options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
+    pool: { max: 4, min: 0, idleTimeoutMillis: 5000 },
+  };
+  try {
+    let pool = null;
+    try {
+      pool = await new sql.ConnectionPool(config).connect();
+      const today = new Date();
+
+      const masterDbRaw = envTrim(process.env.MASTER_DB_DATABASE);
+      const masterDbSafe = masterDbRaw && /^[A-Za-z0-9_]+$/.test(masterDbRaw) ? masterDbRaw : '';
+      const selectName = masterDbSafe ? 'ec.name AS employee_name,' : 'CAST(NULL AS varchar(255)) AS employee_name,';
+      const selectDept = masterDbSafe ? 'ee.department AS department,' : 'CAST(NULL AS varchar(255)) AS department,';
+      const joinMaster = masterDbSafe
+        ? `LEFT JOIN [${masterDbSafe}].dbo.employee_core ec ON gb.EmployeeID = ec.employee_id
+           LEFT JOIN [${masterDbSafe}].dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE'`
+        : '';
+
+      const req1 = pool.request();
+      req1.input('today', sql.Date, today);
+      const bookingsRes = await req1.query(
+        `SELECT ${selectName}
+          gb.EmployeeID AS employee_id,
+          ${selectDept}
+          s.Session AS session_name,
+          CONVERT(varchar(5), s.StartTime, 108) AS time_start,
+          CONVERT(varchar(5), s.EndTime, 108) AS time_end,
+          gb.Status AS booking_status
+        FROM dbo.gym_booking gb
+        LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
+        ${joinMaster}
+        WHERE gb.BookingDate = @today AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+        ORDER BY s.StartTime ASC`
+      );
+
+      const unitRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
+      const units = unitRaw ? unitRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
+      const req2 = pool.request();
+      req2.input('today', sql.Date, today);
+      const safeUnits = units.filter((u) => /^[A-Za-z0-9_-]+$/.test(u)).slice(0, 50);
+      safeUnits.forEach((u, idx) => req2.input(`u${idx}`, sql.VarChar(50), u));
+      const inList = safeUnits.map((_, idx) => `@u${idx}`).join(',');
+      const unitWhere = safeUnits.length > 0 ? `AND UnitNo IN (${inList})` : '';
+      const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
+      const exitPattern = (envTrim(process.env.GYM_EXIT_EVENT) || 'VALID EXIT ACCESS').toUpperCase();
+      req2.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
+      req2.input('exitPat', sql.VarChar(120), `%${exitPattern}%`);
+      const aggRes = await req2.query(
+        `SELECT EmployeeID AS employee_id,
+           MIN(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat THEN TxnTime END) AS time_in,
+           MAX(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @exitPat THEN TxnTime END) AS time_out
+         FROM dbo.gym_live_taps
+         WHERE EmployeeID IS NOT NULL AND LTRIM(RTRIM(EmployeeID)) <> ''
+           AND CAST(TxnTime AS date) = @today
+           ${unitWhere}
+         GROUP BY EmployeeID`
+      );
+
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const pad3 = (n) => String(n).padStart(3, '0');
+      const toUtc8Iso = (d) => {
+        if (!(d instanceof Date) || isNaN(d.getTime())) return null;
+        const y = d.getUTCFullYear();
+        const m = pad2(d.getUTCMonth() + 1);
+        const day = pad2(d.getUTCDate());
+        const hh = pad2(d.getUTCHours());
+        const mm = pad2(d.getUTCMinutes());
+        const ss = pad2(d.getUTCSeconds());
+        const ms = pad3(d.getUTCMilliseconds());
+        return `${y}-${m}-${day}T${hh}:${mm}:${ss}.${ms}+08:00`;
+      };
+
+      const tapMap = new Map(
+        (Array.isArray(aggRes?.recordset) ? aggRes.recordset : []).map((r) => {
+          const empId = r?.employee_id != null ? String(r.employee_id).trim() : '';
+          const ti = r?.time_in instanceof Date ? r.time_in : (r?.time_in ? new Date(String(r.time_in)) : null);
+          const to = r?.time_out instanceof Date ? r.time_out : (r?.time_out ? new Date(String(r.time_out)) : null);
+          return [empId, { time_in: toUtc8Iso(ti), time_out: toUtc8Iso(to) }];
         })
-      : [];
-    const extra = additionalEmpIds.map((empId) => {
-      const tap = tapMap.get(empId) || { time_in: null, time_out: null, status: null };
-      const info = additionalInfo.get(empId) || { name: null, department: null };
-      const fallbackStatus = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'LEFT');
-      return { name: info.name, employee_id: empId, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: tap.status || fallbackStatus };
-    });
-    const merged = people.concat(extra);
-    return res.json({ ok: true, people: merged });
+      );
+
+      const bookingRows = Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset : [];
+      const bookedEmpIds = new Set(
+        bookingRows
+          .map((r) => (r?.employee_id != null ? String(r.employee_id).trim() : ''))
+          .filter((v) => v.length > 0)
+      );
+      const additionalEmpIds = Array.from(tapMap.keys()).filter((k) => k && !bookedEmpIds.has(k)).slice(0, 200);
+
+      const extraInfo = new Map();
+      if (masterDbSafe && additionalEmpIds.length > 0) {
+        try {
+          const req3 = pool.request();
+          additionalEmpIds.forEach((id, idx) => req3.input(`e${idx}`, sql.VarChar(100), id));
+          const inList3 = additionalEmpIds.map((_, idx) => `@e${idx}`).join(',');
+          const extraRes = await req3.query(
+            `SELECT
+              ec.employee_id AS employee_id,
+              ec.name AS employee_name,
+              ee.department AS department
+            FROM [${masterDbSafe}].dbo.employee_core ec
+            LEFT JOIN [${masterDbSafe}].dbo.employee_employment ee ON ec.employee_id = ee.employee_id AND ee.status = 'ACTIVE'
+            WHERE ec.employee_id IN (${inList3})`
+          );
+          const rows = Array.isArray(extraRes?.recordset) ? extraRes.recordset : [];
+          for (const row of rows) {
+            const id = row?.employee_id != null ? String(row.employee_id).trim() : '';
+            if (!id) continue;
+            const name = row?.employee_name != null ? String(row.employee_name).trim() : null;
+            const dept = row?.department != null ? String(row.department).trim() : null;
+            extraInfo.set(id, { name, department: dept });
+          }
+        } catch (_) {}
+      }
+
+      const people = bookingRows.map((r) => {
+        const empId = r?.employee_id != null ? String(r.employee_id).trim() : null;
+        const name = r?.employee_name != null ? String(r.employee_name).trim() : null;
+        const dept = r?.department != null ? String(r.department).trim() : null;
+        const sess = r?.session_name != null ? String(r.session_name).trim() : '';
+        const ts = r?.time_start != null ? String(r.time_start).trim() : null;
+        const te = r?.time_end != null ? String(r.time_end).trim() : null;
+        const sched = sess ? (ts && te ? `${sess} ${ts}-${te}` : sess) : null;
+        const bookingStatus = r?.booking_status != null ? String(r.booking_status).trim().toUpperCase() : '';
+        const status = bookingStatus === 'CHECKIN' ? 'IN_GYM' : bookingStatus === 'BOOKED' ? 'BOOKED' : 'LEFT';
+        const tap = empId ? tapMap.get(empId) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
+        return { name, employee_id: empId, department: dept, schedule: sched, time_in: tap.time_in, time_out: tap.time_out, status };
+      });
+
+      const extra = additionalEmpIds.map((empId) => {
+        const tap = tapMap.get(empId) || { time_in: null, time_out: null };
+        const info = extraInfo.get(empId) || { name: null, department: null };
+        const fallbackStatus = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'LEFT');
+        return { name: info.name, employee_id: empId, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: fallbackStatus };
+      });
+
+      const merged = people.concat(extra);
+      const payload = { ok: true, people: merged };
+      gymLiveStatusCache = { atMs: Date.now(), payload };
+      return res.json(payload);
+    } finally {
+      if (pool) await pool.close().catch(() => {});
+    }
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, people: [] });
