@@ -3207,10 +3207,15 @@ router.get('/gym-live-status', async (req, res) => {
       const masterDbRaw = envTrim(process.env.MASTER_DB_DATABASE);
       const masterDbSafe = masterDbRaw && /^[A-Za-z0-9_]+$/.test(masterDbRaw) ? masterDbRaw : '';
       const selectName = masterDbSafe ? 'ec.name AS employee_name,' : 'CAST(NULL AS varchar(255)) AS employee_name,';
-      const selectDept = masterDbSafe ? 'ee.department AS department,' : 'CAST(NULL AS varchar(255)) AS department,';
+      const selectDept = masterDbSafe ? 'eem.department AS department,' : 'CAST(NULL AS varchar(255)) AS department,';
       const joinMaster = masterDbSafe
         ? `LEFT JOIN [${masterDbSafe}].dbo.employee_core ec ON gb.EmployeeID = ec.employee_id
-           LEFT JOIN [${masterDbSafe}].dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE'`
+           OUTER APPLY (
+             SELECT TOP 1 ee.department AS department
+             FROM [${masterDbSafe}].dbo.employee_employment ee
+             WHERE ee.employee_id = gb.EmployeeID
+             ORDER BY CASE WHEN UPPER(CAST(ee.status AS varchar(50))) IN ('ACTIVE','AKTIF','A','1','TRUE') THEN 0 ELSE 1 END
+           ) eem`
         : '';
 
       const req1 = pool.request();
@@ -3294,9 +3299,14 @@ router.get('/gym-live-status', async (req, res) => {
             `SELECT
               ec.employee_id AS employee_id,
               ec.name AS employee_name,
-              ee.department AS department
+              eem.department AS department
             FROM [${masterDbSafe}].dbo.employee_core ec
-            LEFT JOIN [${masterDbSafe}].dbo.employee_employment ee ON ec.employee_id = ee.employee_id AND ee.status = 'ACTIVE'
+            OUTER APPLY (
+              SELECT TOP 1 ee.department AS department
+              FROM [${masterDbSafe}].dbo.employee_employment ee
+              WHERE ee.employee_id = ec.employee_id
+              ORDER BY CASE WHEN UPPER(CAST(ee.status AS varchar(50))) IN ('ACTIVE','AKTIF','A','1','TRUE') THEN 0 ELSE 1 END
+            ) eem
             WHERE ec.employee_id IN (${inList3})`
           );
           const rows = Array.isArray(extraRes?.recordset) ? extraRes.recordset : [];
