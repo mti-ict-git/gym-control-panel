@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { GymSession, formatTime } from '@/hooks/useGymSessions';
+import { useQuery } from '@tanstack/react-query';
 import {
   Popover,
   PopoverContent,
@@ -41,6 +42,84 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 }); // Monday
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const weekNumber = getWeek(currentDate, { weekStartsOn: 1 });
+
+  const weekStartKey = format(weekStart, 'yyyy-MM-dd');
+
+  const { data: weekAvailability } = useQuery({
+    queryKey: ['gym-availability-week', weekStartKey],
+    queryFn: async (): Promise<
+      Record<
+        string,
+        {
+          totalAvailable: number;
+          totalQuota: number;
+          byTimeStart: Record<string, { available: number; booked: number; quota: number }>;
+        }
+      >
+    > => {
+      const fetchOneDay = async (dateKey: string) => {
+        const params = `date=${encodeURIComponent(dateKey)}`;
+        const doFetch = async (url: string) => {
+          const resp = await fetch(`${url}?${params}`);
+          const json = (await resp.json()) as
+            | {
+                success: boolean;
+                sessions?: Array<{ time_start: string; available: number; booked_count: number; quota: number }>;
+                error?: string;
+              }
+            | null;
+          if (resp.status >= 500) throw new Error(json?.error || 'Server error');
+          return json;
+        };
+
+        let json:
+          | {
+              success: boolean;
+              sessions?: Array<{ time_start: string; available: number; booked_count: number; quota: number }>;
+            }
+          | null = null;
+
+        try {
+          json = await doFetch('/api/gym-availability');
+        } catch (_) {
+          json = await doFetch('/gym-availability');
+        }
+
+        const rows = json && json.success && Array.isArray(json.sessions) ? json.sessions : [];
+        const byTimeStart: Record<string, { available: number; booked: number; quota: number }> = {};
+        let totalAvailable = 0;
+        let totalQuota = 0;
+        rows.forEach((r) => {
+          const timeStart = String(r.time_start || '').trim();
+          if (!timeStart) return;
+          const available = Number(r.available || 0);
+          const booked = Number(r.booked_count || 0);
+          const quota = Number(r.quota || 0);
+          byTimeStart[timeStart] = { available, booked, quota };
+          totalAvailable += available;
+          totalQuota += quota;
+        });
+
+        return { totalAvailable, totalQuota, byTimeStart };
+      };
+
+      const keys = weekDays.map((d) => format(d, 'yyyy-MM-dd'));
+      const results = await Promise.all(keys.map((k) => fetchOneDay(k)));
+      const map: Record<
+        string,
+        {
+          totalAvailable: number;
+          totalQuota: number;
+          byTimeStart: Record<string, { available: number; booked: number; quota: number }>;
+        }
+      > = {};
+      keys.forEach((k, idx) => {
+        map[k] = results[idx];
+      });
+      return map;
+    },
+    staleTime: 30_000,
+  });
 
   const handlePrevWeek = () => setCurrentDate(subWeeks(currentDate, 1));
   const handleNextWeek = () => setCurrentDate(addWeeks(currentDate, 1));
@@ -160,6 +239,22 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
                   )}>
                     {format(day, 'd')}
                   </div>
+                  {(() => {
+                    const key = format(day, 'yyyy-MM-dd');
+                    const info = weekAvailability?.[key];
+                    if (!info) return null;
+                    const tone =
+                      info.totalAvailable <= 0
+                        ? 'bg-red-50 text-red-700 border-red-200'
+                        : 'bg-blue-50 text-blue-700 border-blue-200';
+                    return (
+                      <div className="mt-1 flex justify-center">
+                        <span className={cn('inline-flex items-center rounded-md border px-2 py-0.5 text-[10px] font-medium', tone)}>
+                          {info.totalAvailable} available
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               ))}
             </div>
@@ -193,6 +288,8 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
                   {sessions.map((session) => {
                     const { top, height } = getSessionPosition(session);
                     const colorClass = sessionColorMap.get(session.id) || SESSION_COLORS[0];
+                    const dayKey = format(day, 'yyyy-MM-dd');
+                    const availabilityForSession = weekAvailability?.[dayKey]?.byTimeStart?.[session.time_start] || null;
                     
                     // Only show if within visible time range
                     const [startHour] = session.time_start.split(':').map(Number);
@@ -229,7 +326,11 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
                             </div>
                             <div className="flex items-center gap-2 text-sm">
                               <Users className="h-4 w-4 text-muted-foreground" />
-                              <span>Quota: {session.quota}</span>
+                              <span>
+                                {availabilityForSession
+                                  ? `Available: ${availabilityForSession.available} / ${availabilityForSession.quota}`
+                                  : `Quota: ${session.quota}`}
+                              </span>
                             </div>
                           </div>
                         </PopoverContent>

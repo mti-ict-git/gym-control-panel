@@ -37,7 +37,7 @@ type GymDbBookingRow = {
   time_end: string | null;
 };
 
-type GymDbBookingResponse = { ok: boolean; error?: string; bookings?: GymDbBookingRow[] } | null;
+type GymDbBookingResponse = { ok: boolean; error?: string; bookings?: GymDbBookingRow[]; total?: number } | null;
 
 function buildJakartaScheduleTimeIso(dateStr: string, hhmm: string): string | null {
   const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(dateStr);
@@ -118,6 +118,121 @@ export function useVaultUsers() {
           } satisfies VaultUser;
         })
         .filter(Boolean) as VaultUser[];
+    },
+    staleTime: 30_000,
+  });
+}
+
+export interface VaultUsersPagedResult {
+  rows: VaultUser[];
+  total: number;
+}
+
+export function useVaultUsersPaged(params: {
+  q: string;
+  page: number;
+  pageSize: number;
+  status?: 'BOOKED' | 'CHECKIN' | 'COMPLETED';
+  approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
+  sortBy?:
+    | 'booking_id'
+    | 'booking_date'
+    | 'time_start'
+    | 'time_end'
+    | 'name'
+    | 'employee_id'
+    | 'department'
+    | 'session'
+    | 'status'
+    | 'approval_status'
+    | 'created_at';
+  sortDir?: 'asc' | 'desc';
+}) {
+  const q = params.q;
+  const page = params.page;
+  const pageSize = params.pageSize;
+  const status = params.status;
+  const approvalStatus = params.approvalStatus;
+  const sortBy = params.sortBy;
+  const sortDir = params.sortDir || 'desc';
+
+  return useQuery<VaultUsersPagedResult>({
+    queryKey: ['vault-users-paged', q, page, pageSize, status || '', approvalStatus || '', sortBy || '', sortDir],
+    queryFn: async (): Promise<VaultUsersPagedResult> => {
+      const todayJakarta = startOfTodayJakartaUtcDate();
+      const dayAfter = new Date(todayJakarta.getTime() + 2 * 24 * 60 * 60_000);
+
+      const toYmd = (d: Date) => {
+        const y = d.getUTCFullYear();
+        const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const dd = String(d.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${dd}`;
+      };
+
+      const from = toYmd(todayJakarta);
+      const to = toYmd(dayAfter);
+
+      const urlParams = new URLSearchParams();
+      urlParams.set('from', from);
+      urlParams.set('to', to);
+      urlParams.set('page', String(page));
+      urlParams.set('limit', String(pageSize));
+      if (q) urlParams.set('q', q);
+      if (status) urlParams.set('status', status);
+      if (approvalStatus) urlParams.set('approval_status', approvalStatus);
+      if (sortBy) urlParams.set('sort_by', sortBy);
+      if (sortDir) urlParams.set('sort_dir', sortDir);
+
+      const tryFetch = async (url: string): Promise<GymDbBookingResponse> => {
+        const r = await fetch(url);
+        const j = (await r.json()) as GymDbBookingResponse;
+        if (r.status >= 500) throw new Error(j?.error || 'Server error');
+        return j;
+      };
+
+      let json: GymDbBookingResponse = null;
+      try {
+        json = await tryFetch(`/api/gym-bookings?${urlParams.toString()}`);
+      } catch (_) {
+        json = await tryFetch(`/gym-bookings?${urlParams.toString()}`);
+      }
+
+      if (!json || !json.ok) throw new Error(json?.error || 'Failed to load GymDB bookings');
+
+      const rows = Array.isArray(json.bookings) ? json.bookings : [];
+      const mapped = rows
+        .map((r) => {
+          const schedule_time = r.time_start ? buildJakartaScheduleTimeIso(String(r.booking_date), String(r.time_start)) : null;
+          if (!schedule_time) return null;
+
+          const rawStatus = String(r.status || '').toUpperCase();
+          const mappedStatus: VaultUser['status'] =
+            rawStatus === 'BOOKED' ? 'BOOKED' : rawStatus === 'CHECKIN' ? 'IN_GYM' : 'OUT';
+
+          const rawGender = r.gender != null ? String(r.gender).trim() : null;
+          let mappedGender = rawGender;
+          if (rawGender === 'M') mappedGender = 'Male';
+          else if (rawGender === 'F') mappedGender = 'Female';
+
+          return {
+            booking_id: r.booking_id,
+            schedule_time,
+            time_start: r.time_start != null ? String(r.time_start).trim() : null,
+            time_end: r.time_end != null ? String(r.time_end).trim() : null,
+            employee_id: String(r.employee_id || '').trim(),
+            name: String(r.employee_name || '').trim(),
+            department: r.department != null ? String(r.department).trim() : null,
+            gender: mappedGender,
+            card_no: r.card_no != null ? String(r.card_no).trim() : null,
+            approval_status: r.approval_status != null ? String(r.approval_status).trim() : null,
+            status: mappedStatus,
+            booking_date: r.booking_date,
+          } satisfies VaultUser;
+        })
+        .filter(Boolean) as VaultUser[];
+
+      const total = Number(json.total || 0);
+      return { rows: mapped, total };
     },
     staleTime: 30_000,
   });
