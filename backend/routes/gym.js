@@ -8,6 +8,19 @@ const router = express.Router();
 let gymLiveStatusCache = { atMs: 0, payload: null };
 const gymLiveRangeCache = new Map();
 
+let gymDbPool = null;
+async function getGymDbPool(config) {
+  if (gymDbPool && gymDbPool.connected) return gymDbPool;
+  if (gymDbPool) {
+    try { await gymDbPool.close(); } catch (_) {}
+  }
+  gymDbPool = await new sql.ConnectionPool(config).connect();
+  return gymDbPool;
+}
+
+const gymBookingsCache = new Map();
+const gymSessionsCache = new Map();
+
 router.get('/env-dump', (req, res) => {
   const out = {
     CARD_DB_TX_TABLE: envTrim(process.env.CARD_DB_TX_TABLE),
@@ -44,11 +57,18 @@ router.post('/gym-reports-add-name', async (req, res) => {
       encrypt: envBool(DB_ENCRYPT, false),
       trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
     },
-    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+    pool: { max: 6, min: 0, idleTimeoutMillis: 5000 },
   };
 
   try {
-    const pool = await sql.connect(config);
+    const keyParts = [from, to, qRaw, statusRaw, approvalRaw, sortKeyRaw, sortDirRaw, usePaging ? page : 'np', usePaging ? limit : 'nl'];
+    const cacheKey = keyParts.map((x) => String(x)).join('|');
+    const now = Date.now();
+    const cached = gymBookingsCache.get(cacheKey);
+    if (cached && now - cached.atMs < 3000) {
+      return res.json(cached.payload);
+    }
+    const pool = await getGymDbPool(config);
     const existsRes = await pool.request().query("SELECT OBJECT_ID('dbo.gym_reports', 'U') AS id;");
     const exists = Boolean(existsRes?.recordset?.[0]?.id);
     if (!exists) {
@@ -91,7 +111,7 @@ router.post('/gym-reports-init', async (req, res) => {
       encrypt: envBool(DB_ENCRYPT, false),
       trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
     },
-    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+    pool: { max: 6, min: 0, idleTimeoutMillis: 5000 },
   };
 
   try {
@@ -193,19 +213,24 @@ router.get('/gym-availability', async (req, res) => {
       encrypt: envBool(DB_ENCRYPT, false),
       trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
     },
-    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+    pool: { max: 6, min: 0, idleTimeoutMillis: 5000 },
   };
 
   const DEFAULT_QUOTA = 15;
 
   try {
-    const pool = await sql.connect(config);
+    const cacheKey = `avail:${dateStr}`;
+    const now = Date.now();
+    const cached = gymLiveRangeCache.get(cacheKey);
+    if (cached && now - cached.atMs < 3000) {
+      return res.json(cached.payload);
+    }
+    const pool = await getGymDbPool(config);
     const request = pool.request();
     request.input('dateParam', sql.Date, new Date(dateStr));
     const result = await request.query(
       "SELECT CONVERT(varchar(5), gs.StartTime, 108) AS hhmm, ISNULL(gs.Quota, 15) AS quota, COUNT(gb.BookingID) AS booked_count FROM dbo.gym_schedule gs LEFT JOIN dbo.gym_booking gb ON gb.ScheduleID = gs.ScheduleID AND gb.BookingDate = @dateParam AND gb.Status IN ('BOOKED','CHECKIN') GROUP BY CONVERT(varchar(5), gs.StartTime, 108), ISNULL(gs.Quota, 15) ORDER BY hhmm"
     );
-    await pool.close();
 
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
 
@@ -231,7 +256,9 @@ router.get('/gym-availability', async (req, res) => {
       };
     });
 
-    return res.json({ success: true, sessions });
+    const payload = { success: true, sessions };
+    gymLiveRangeCache.set(cacheKey, { atMs: now, payload });
+    return res.json(payload);
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ success: false, error: message, sessions: [] });
@@ -282,8 +309,16 @@ router.get('/gym-sessions', async (req, res) => {
   const limit = Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(limitRaw, 200) : 100;
   const offset = (page - 1) * limit;
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    const keyParts = [qRaw, page, limit, sortKeyRaw, sortDirRaw];
+    const cacheKey = keyParts.map((x) => String(x)).join('|');
+    const now = Date.now();
+    const cached = gymSessionsCache.get(cacheKey);
+    if (cached && now - cached.atMs < 15000) {
+      return res.json(cached.payload);
+    }
+    pool = await getGymDbPool(config);
     const whereClause = qRaw
       ? "WHERE Session LIKE @q OR CONVERT(varchar(5), StartTime, 108) LIKE @q OR CONVERT(varchar(5), EndTime, 108) LIKE @q"
       : '';
@@ -296,6 +331,15 @@ router.get('/gym-sessions', async (req, res) => {
     const sortCol = sortMap[sortKeyRaw] || '[StartTime]';
     const dir = sortDirRaw === 'desc' ? 'DESC' : 'ASC';
 
+    let orderSql = '';
+    if (sortCol === '[StartTime]') {
+      orderSql = `[StartTime] ${dir}, [Session] ASC`;
+    } else if (sortCol === '[Session]') {
+      orderSql = `[Session] ${dir}, [StartTime] ASC`;
+    } else {
+      orderSql = `${sortCol} ${dir}, [StartTime] ASC, [Session] ASC`;
+    }
+
     const reqCount = pool.request();
     const reqData = pool.request();
     if (qRaw) {
@@ -306,11 +350,10 @@ router.get('/gym-sessions', async (req, res) => {
     reqData.input('limit', sql.Int, limit);
 
     const countSql = `SELECT COUNT(1) AS total FROM dbo.gym_schedule ${whereClause}`;
-    const dataSql = `SELECT Session AS session_name, CONVERT(varchar(5), StartTime, 108) AS time_start, CONVERT(varchar(5), EndTime, 108) AS time_end, Quota AS quota FROM dbo.gym_schedule ${whereClause} ORDER BY ${sortCol} ${dir}, [StartTime] ASC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
+    const dataSql = `SELECT Session AS session_name, CONVERT(varchar(5), StartTime, 108) AS time_start, CONVERT(varchar(5), EndTime, 108) AS time_end, Quota AS quota FROM dbo.gym_schedule ${whereClause} ORDER BY ${orderSql} OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
 
     const countRes = await reqCount.query(countSql);
     const result = await reqData.query(dataSql);
-    await pool.close();
 
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
     const sessions = rows.map((r) => ({
@@ -321,10 +364,13 @@ router.get('/gym-sessions', async (req, res) => {
     }));
     const total = Number(countRes?.recordset?.[0]?.total || 0);
 
-    return res.json({ ok: true, sessions, total });
+    const payload = { ok: true, sessions, total };
+    gymSessionsCache.set(cacheKey, { atMs: now, payload });
+    return res.json(payload);
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, sessions: [] });
+  } finally {
   }
 });
 
@@ -769,7 +815,6 @@ router.get('/gym-bookings', async (req, res) => {
 
     const countRes = usePaging ? await reqCount.query(countSql) : null;
     const result = await reqData.query(dataSql);
-    await pool.close();
 
     const total = usePaging ? Number(countRes?.recordset?.[0]?.total || 0) : null;
 
@@ -792,7 +837,9 @@ router.get('/gym-bookings', async (req, res) => {
         }))
       : [];
 
-    return res.json(usePaging ? { ok: true, total, bookings } : { ok: true, bookings });
+    const payload = usePaging ? { ok: true, total, bookings } : { ok: true, bookings };
+    gymBookingsCache.set(cacheKey, { atMs: now, payload });
+    return res.json(payload);
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, bookings: [] });

@@ -75,7 +75,6 @@ function StatusBadge({ status }: { status: string | null }) {
 
 export default function VaultPage() {
   const queryClient = useQueryClient();
-  const { data: gymDbSessions, isLoading: isLoadingGymDbSessions } = useGymDbSessions();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [sortBy, setSortBy] = useState<
@@ -159,14 +158,7 @@ export default function VaultPage() {
     },
   });
 
-  const isLoading = isLoadingVault || isLoadingGymDbSessions;
-
-  const timeToSessionName = new Map((gymDbSessions || []).map((s) => [s.time_start, s.session_name]));
-
-  const sessionNameFor = (user: VaultUser): string => {
-    const hhmm = toJakartaHhMm(user.schedule_time);
-    return timeToSessionName.get(hhmm) || '-';
-  };
+  const isLoading = isLoadingVault;
 
   const toggleSort = (key: typeof sortBy) => {
     setPage(1);
@@ -241,8 +233,8 @@ export default function VaultPage() {
                           <div className="font-mono">{formatBookingId(user.booking_id)}</div>
                         </div>
                         <div className="col-span-6">
-                          <div className="text-muted-foreground">Session</div>
-                          <div><SessionBadge name={sessionNameFor(user)} /></div>
+                        <div className="text-muted-foreground">Session</div>
+                        <div><SessionBadge name={user.session_name || '-'} /></div>
                         </div>
                         <div className="col-span-6">
                           <div className="text-muted-foreground">Time Schedule</div>
@@ -387,7 +379,7 @@ export default function VaultPage() {
                         </TableCell>
                         <TableCell>{user.employee_id}</TableCell>
                         <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
-                        <TableCell className="hidden md:table-cell"><SessionBadge name={sessionNameFor(user)} /></TableCell>
+                        <TableCell className="hidden md:table-cell"><SessionBadge name={user.session_name || '-'} /></TableCell>
                         <TableCell className="hidden md:table-cell">
                           {user.time_start && user.time_end ? `${user.time_start} - ${user.time_end}` : user.time_start || '-'}
                         </TableCell>

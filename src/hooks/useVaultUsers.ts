@@ -5,6 +5,7 @@ export interface VaultUser {
   schedule_time: string;
   time_start: string | null;
   time_end: string | null;
+  session_name: string;
   employee_id: string;
   name: string;
   department: string | null;
@@ -33,6 +34,7 @@ type GymDbBookingRow = {
   approval_status: string | null;
   booking_date: string;
   status: string;
+  session_name: string | null;
   time_start: string | null;
   time_end: string | null;
 };
@@ -107,6 +109,7 @@ export function useVaultUsers() {
             schedule_time,
             time_start: r.time_start != null ? String(r.time_start).trim() : null,
             time_end: r.time_end != null ? String(r.time_end).trim() : null,
+            session_name: r.session_name != null ? String(r.session_name).trim() : '-',
             employee_id: String(r.employee_id || '').trim(),
             name: String(r.employee_name || '').trim(),
             department: r.department != null ? String(r.department).trim() : null,
@@ -120,6 +123,8 @@ export function useVaultUsers() {
         .filter(Boolean) as VaultUser[];
     },
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    keepPreviousData: true,
   });
 }
 
@@ -219,6 +224,7 @@ export function useVaultUsersPaged(params: {
             schedule_time,
             time_start: r.time_start != null ? String(r.time_start).trim() : null,
             time_end: r.time_end != null ? String(r.time_end).trim() : null,
+            session_name: r.session_name != null ? String(r.session_name).trim() : '-',
             employee_id: String(r.employee_id || '').trim(),
             name: String(r.employee_name || '').trim(),
             department: r.department != null ? String(r.department).trim() : null,
@@ -235,5 +241,7 @@ export function useVaultUsersPaged(params: {
       return { rows: mapped, total };
     },
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    keepPreviousData: true,
   });
 }
