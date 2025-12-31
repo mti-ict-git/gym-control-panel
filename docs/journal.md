@@ -597,3 +597,22 @@ UI:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-31 10:00:08 +08:00
+
+Branding:
+- Changed app title and OG metadata to “Super Gym”.
+- Updated sidebar and mobile header brand text to “Super Gym”; tagline now “Control Panel”.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 10:01:51 +08:00
+
+Branding:
+- Replaced social preview images (og:image, twitter:image) with a gym-related image.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).

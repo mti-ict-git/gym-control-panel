@@ -92,8 +92,8 @@ export function AppSidebar() {
               <Dumbbell className="h-5 w-5 text-primary-foreground" />
             </div>
             <div>
-              <h2 className="font-semibold text-sidebar-foreground">Gym Admin</h2>
-              <p className="text-xs text-muted-foreground">Management System</p>
+              <h2 className="font-semibold text-sidebar-foreground">Super Gym</h2>
+              <p className="text-xs text-muted-foreground">Control Panel</p>
             </div>
           </div>
           <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
