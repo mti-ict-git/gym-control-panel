@@ -258,6 +258,40 @@ export default function ReportsPage() {
     },
   });
 
+  const { data: bookingSchedulesMap = new Map<number, { time_start: string | null; time_end: string | null }>() } = useQuery({
+    queryKey: ['gym-bookings-schedule-map', dateRange, customStartDate, customEndDate],
+    queryFn: async () => {
+      const fromStr = format(start, 'yyyy-MM-dd');
+      const toStr = format(end, 'yyyy-MM-dd');
+      const tryFetch = async (base: string) => {
+        const resp = await fetch(`${base}/gym-bookings?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
+        const json = await resp.json();
+        if (!json || !json.ok) return [] as Array<{ booking_id: number; time_start: string | null; time_end: string | null }>;
+        const rows = Array.isArray(json.bookings) ? json.bookings : [];
+        return rows.map((r: unknown) => {
+          const obj = r as { booking_id?: number; time_start?: string | null; time_end?: string | null };
+          return {
+            booking_id: Number(obj.booking_id || 0),
+            time_start: obj.time_start != null ? String(obj.time_start) : null,
+            time_end: obj.time_end != null ? String(obj.time_end) : null,
+          };
+        });
+      };
+      try {
+        const rows = await tryFetch('/api');
+        const map = new Map<number, { time_start: string | null; time_end: string | null }>();
+        rows.forEach((r) => { if (Number.isFinite(r.booking_id) && r.booking_id > 0) map.set(r.booking_id, { time_start: r.time_start, time_end: r.time_end }); });
+        return map;
+      } catch (_) {
+        const rows = await tryFetch('');
+        const map = new Map<number, { time_start: string | null; time_end: string | null }>();
+        rows.forEach((r) => { if (Number.isFinite(r.booking_id) && r.booking_id > 0) map.set(r.booking_id, { time_start: r.time_start, time_end: r.time_end }); });
+        return map;
+      }
+    },
+    staleTime: 60000,
+  });
+
   const bookingData = bookingDataRes.rows;
   const totalCount = bookingDataRes.total;
 
@@ -371,9 +405,12 @@ export default function ReportsPage() {
       String(record.gender ?? ''),
       formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_in),
       formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_out),
-      record.time_start && record.time_end
-        ? `${record.time_start} - ${record.time_end}`
-        : String(record.time_start ?? ''),
+      (() => {
+        const s = bookingSchedulesMap.get(record.booking_id);
+        const start = record.time_start ?? s?.time_start ?? null;
+        const end = record.time_end ?? s?.time_end ?? null;
+        return start && end ? `${start} - ${end}` : String(start ?? '');
+      })(),
       String(record.session_name ?? ''),
     ]);
 
@@ -703,9 +740,12 @@ export default function ReportsPage() {
                           {formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_out)}
                         </TableCell>
                         <TableCell className="font-mono text-sm">
-                          {record.time_start && record.time_end
-                            ? `${record.time_start} - ${record.time_end}`
-                            : record.time_start || '-'}
+                          {(() => {
+                            const s = bookingSchedulesMap.get(record.booking_id);
+                            const start = record.time_start ?? s?.time_start ?? null;
+                            const end = record.time_end ?? s?.time_end ?? null;
+                            return start && end ? `${start} - ${end}` : start || '-';
+                          })()}
                         </TableCell>
                         <TableCell className="font-medium">{getSessionChip(record.session_name)}</TableCell>
                       </TableRow>
