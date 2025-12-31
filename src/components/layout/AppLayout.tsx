@@ -40,7 +40,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-4 border-b border-border bg-card px-4 md:hidden">
             <div className="flex items-center gap-3">
               <SidebarTrigger />
-              <h1 className="font-semibold">Gym Admin</h1>
+              <h1 className="font-semibold">Super Gym</h1>
             </div>
             <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
               {isDark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
