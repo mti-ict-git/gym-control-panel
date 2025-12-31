@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subDays } from 'date-fns';
+import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subDays, addDays } from 'date-fns';
 import { FileText, Download, Calendar, Users, Clock, TrendingUp, Filter } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -34,12 +34,17 @@ interface BookingRecord {
   status?: string | null;
 }
 
+function formatBookingId(n: number | null | undefined): string {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return '-';
+  return `GYMBOOK${String(n)}`;
+}
+
 function getDateRange(range: DateRange, customStart?: Date, customEnd?: Date): { start: Date; end: Date } {
   const now = new Date();
   
   switch (range) {
     case 'today':
-      return { start: startOfDay(now), end: endOfDay(now) };
+      return { start: startOfDay(now), end: endOfDay(addDays(now, 1)) };
     case 'yesterday': {
       const yesterday = subDays(now, 1);
       return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
@@ -184,7 +189,7 @@ export default function ReportsPage() {
     const headers = ['No', 'Booking ID', 'Card No', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
     const rows = bookingData.map((record, idx) => [
       String(idx + 1),
-      String(record.booking_id ?? ''),
+      formatBookingId(record.booking_id),
       String(record.card_no ?? ''),
       String(record.employee_id ?? ''),
       String(record.department ?? ''),
@@ -397,7 +402,7 @@ export default function ReportsPage() {
                     {bookingData.map((record, idx) => (
                       <TableRow key={`${record.booking_id}-${idx}`}>
                         <TableCell className="font-mono text-sm">{idx + 1}</TableCell>
-                        <TableCell className="font-mono text-sm">{record.booking_id}</TableCell>
+                        <TableCell className="font-mono text-sm">{formatBookingId(record.booking_id)}</TableCell>
                         <TableCell className="font-mono text-sm">{record.card_no || '-'}</TableCell>
                         <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
                         <TableCell>{record.department || '-'}</TableCell>
