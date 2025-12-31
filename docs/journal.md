@@ -570,3 +570,30 @@ Docs:
 
 Verification:
 - Docs updated; application unaffected.
+
+2025-12-31 09:46:27 +08:00
+
+UI:
+- Redesigned 404 Page with animated gradient background, glowing 404 digits, orbiting ring around “0”, and wave footer. Buttons: Go to Booking and Back to Home.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 09:53:46 +08:00
+
+UI:
+- Removed Back to Home button from 404 page; kept Go to Booking only.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 09:56:16 +08:00
+
+UI:
+- Added exit animation on 404 → Booking navigation: fades and scales the 404 screen before redirecting.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
