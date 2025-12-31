@@ -612,6 +612,20 @@ router.get('/gym-bookings', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'from and to are required (yyyy-MM-dd)', bookings: [] });
   }
 
+  const qRaw = String(req.query.q || '').trim();
+  const statusRaw = String(req.query.status || '').trim().toUpperCase();
+  const approvalRaw = String(req.query.approval_status || '').trim().toUpperCase();
+  const sortKeyRaw = String(req.query.sort_by || '').trim().toLowerCase();
+  const sortDirRaw = String(req.query.sort_dir || '').trim().toLowerCase();
+  const hasPageParam = req.query.page != null && String(req.query.page).trim() !== '';
+  const hasLimitParam = req.query.limit != null && String(req.query.limit).trim() !== '';
+  const pageRaw = Number(String(req.query.page || '').trim());
+  const limitRaw = Number(String(req.query.limit || '').trim());
+  const page = hasPageParam && Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.floor(pageRaw) : 1;
+  const limit = hasLimitParam && Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(Math.floor(limitRaw), 200) : 50;
+  const offset = (page - 1) * limit;
+  const usePaging = hasPageParam || hasLimitParam;
+
   const config = {
     server: DB_SERVER,
     port: Number(DB_PORT || 1433),
@@ -627,27 +641,7 @@ router.get('/gym-bookings', async (req, res) => {
 
   try {
     const pool = await sql.connect(config);
-    const request = pool.request();
-    request.input('fromDate', sql.Date, new Date(from));
-    request.input('toDate', sql.Date, new Date(to));
-
-    const result = await request.query(
-      `SELECT
-        gb.BookingID AS booking_id,
-        gb.EmployeeID AS employee_id,
-        COALESCE(cd.CardNo, gb.CardNo) AS card_no,
-        ec.name AS employee_name,
-        COALESCE(ee.department, gb.Department, cd.Department) AS department,
-        ec.gender AS gender,
-        gb.SessionName AS session_name,
-        gb.ScheduleID AS schedule_id,
-        CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date,
-        gb.Status AS status,
-        gb.ApprovalStatus AS approval_status,
-        gb.CreatedAt AS created_at,
-        CONVERT(varchar(5), s.StartTime, 108) AS time_start,
-        CONVERT(varchar(5), s.EndTime, 108) AS time_end
-      FROM dbo.gym_booking gb
+    const baseFromSql = `FROM dbo.gym_booking gb
       LEFT JOIN dbo.gym_schedule s
         ON s.ScheduleID = gb.ScheduleID
       LEFT JOIN MTIMasterEmployeeDB.dbo.employee_core ec
@@ -662,13 +656,122 @@ router.get('/gym-bookings', async (req, res) => {
           AND c.Status = 1
           AND (c.Block IS NULL OR c.Block = 0)
           AND c.del_state = 0
-      ) cd
-      WHERE gb.BookingDate >= @fromDate
-        AND gb.BookingDate <= @toDate
-        AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
-      ORDER BY gb.BookingDate ASC, time_start ASC, gb.CreatedAt ASC`
-    );
+      ) cd`;
+
+    const whereParts = [
+      'gb.BookingDate >= @fromDate',
+      'gb.BookingDate <= @toDate',
+      "gb.Status IN ('BOOKED','CHECKIN','COMPLETED')",
+    ];
+
+    const allowedStatus = new Set(['BOOKED', 'CHECKIN', 'COMPLETED']);
+    if (statusRaw && allowedStatus.has(statusRaw)) {
+      whereParts.push('gb.Status = @status');
+    }
+
+    const allowedApproval = new Set(['APPROVED', 'REJECTED', 'PENDING']);
+    if (approvalRaw && allowedApproval.has(approvalRaw)) {
+      if (approvalRaw === 'PENDING') {
+        whereParts.push("(gb.ApprovalStatus IS NULL OR UPPER(CAST(gb.ApprovalStatus AS varchar(20))) = 'PENDING')");
+      } else {
+        whereParts.push('UPPER(CAST(gb.ApprovalStatus AS varchar(20))) = @approval_status');
+      }
+    }
+
+    if (qRaw) {
+      whereParts.push(
+        `(
+          CAST(gb.BookingID AS varchar(20)) LIKE @q
+          OR gb.EmployeeID LIKE @q
+          OR COALESCE(cd.CardNo, gb.CardNo, '') LIKE @q
+          OR COALESCE(ec.name, '') LIKE @q
+          OR COALESCE(ee.department, gb.Department, cd.Department, '') LIKE @q
+          OR COALESCE(gb.SessionName, '') LIKE @q
+          OR CONVERT(varchar(10), gb.BookingDate, 23) LIKE @q
+          OR COALESCE(gb.Status, '') LIKE @q
+          OR COALESCE(gb.ApprovalStatus, '') LIKE @q
+        )`
+      );
+    }
+
+    const whereSql = `WHERE ${whereParts.join(' AND ')}`;
+
+    const sortMap = {
+      booking_id: 'gb.BookingID',
+      booking_date: 'gb.BookingDate',
+      created_at: 'gb.CreatedAt',
+      time_start: 's.StartTime',
+      time_end: 's.EndTime',
+      name: 'ec.name',
+      employee_id: 'gb.EmployeeID',
+      department: 'COALESCE(ee.department, gb.Department, cd.Department)',
+      session: 'gb.SessionName',
+      status: 'gb.Status',
+      approval_status: 'gb.ApprovalStatus',
+    };
+    const sortCol = sortMap[sortKeyRaw] || null;
+    const dir = sortDirRaw === 'asc' ? 'ASC' : 'DESC';
+    const orderSql = sortCol
+      ? (sortCol === 'gb.BookingDate'
+          ? `${sortCol} ${dir}, s.StartTime ASC, gb.CreatedAt ASC`
+          : sortCol === 's.StartTime'
+            ? `${sortCol} ${dir}, gb.BookingDate ASC, gb.CreatedAt ASC`
+            : `${sortCol} ${dir}, gb.BookingDate ASC, s.StartTime ASC, gb.CreatedAt ASC`)
+      : 'gb.BookingDate ASC, s.StartTime ASC, gb.CreatedAt ASC';
+
+    const reqCount = pool.request();
+    const reqData = pool.request();
+
+    reqCount.input('fromDate', sql.Date, new Date(from));
+    reqCount.input('toDate', sql.Date, new Date(to));
+    reqData.input('fromDate', sql.Date, new Date(from));
+    reqData.input('toDate', sql.Date, new Date(to));
+
+    if (statusRaw && allowedStatus.has(statusRaw)) {
+      reqCount.input('status', sql.VarChar(20), statusRaw);
+      reqData.input('status', sql.VarChar(20), statusRaw);
+    }
+
+    if (approvalRaw && allowedApproval.has(approvalRaw) && approvalRaw !== 'PENDING') {
+      reqCount.input('approval_status', sql.VarChar(20), approvalRaw);
+      reqData.input('approval_status', sql.VarChar(20), approvalRaw);
+    }
+
+    if (qRaw) {
+      reqCount.input('q', sql.VarChar(200), `%${qRaw}%`);
+      reqData.input('q', sql.VarChar(200), `%${qRaw}%`);
+    }
+
+    if (usePaging) {
+      reqData.input('offset', sql.Int, offset);
+      reqData.input('limit', sql.Int, limit);
+    }
+
+    const countSql = `SELECT COUNT(1) AS total ${baseFromSql} ${whereSql}`;
+    const dataSql = `SELECT
+        gb.BookingID AS booking_id,
+        gb.EmployeeID AS employee_id,
+        COALESCE(cd.CardNo, gb.CardNo) AS card_no,
+        ec.name AS employee_name,
+        COALESCE(ee.department, gb.Department, cd.Department) AS department,
+        ec.gender AS gender,
+        gb.SessionName AS session_name,
+        gb.ScheduleID AS schedule_id,
+        CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date,
+        gb.Status AS status,
+        gb.ApprovalStatus AS approval_status,
+        gb.CreatedAt AS created_at,
+        CONVERT(varchar(5), s.StartTime, 108) AS time_start,
+        CONVERT(varchar(5), s.EndTime, 108) AS time_end
+      ${baseFromSql}
+      ${whereSql}
+      ORDER BY ${orderSql}${usePaging ? ' OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY' : ''}`;
+
+    const countRes = usePaging ? await reqCount.query(countSql) : null;
+    const result = await reqData.query(dataSql);
     await pool.close();
+
+    const total = usePaging ? Number(countRes?.recordset?.[0]?.total || 0) : null;
 
     const bookings = Array.isArray(result?.recordset)
       ? result.recordset.map((r) => ({
@@ -689,7 +792,7 @@ router.get('/gym-bookings', async (req, res) => {
         }))
       : [];
 
-    return res.json({ ok: true, bookings });
+    return res.json(usePaging ? { ok: true, total, bookings } : { ok: true, bookings });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, bookings: [] });

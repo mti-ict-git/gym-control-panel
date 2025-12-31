@@ -1,4 +1,4 @@
-import { Database, AlertCircle, CheckCircle, XCircle, Clock, Check, X, IdCard, Users as UsersIcon, CalendarDays, Lock, Unlock, Search } from 'lucide-react';
+import { Database, AlertCircle, CheckCircle, XCircle, Clock, Check, X, IdCard, Users as UsersIcon, CalendarDays, Lock, Unlock, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -6,12 +6,12 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useVaultUsers, VaultUser } from '@/hooks/useVaultUsers';
+import { useVaultUsersPaged, VaultUser } from '@/hooks/useVaultUsers';
 import { useGymDbSessions } from '@/hooks/useGymDbSessions';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Input } from '@/components/ui/input';
 import { useState } from 'react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const UTC8_OFFSET_MINUTES = 8 * 60;
 
@@ -45,6 +45,26 @@ function SessionBadge({ name }: { name: string }) {
   );
 }
 
+function GenderBadge({ gender }: { gender: string | null }) {
+  if (!gender) return <span className="text-muted-foreground">-</span>;
+  const g = gender.trim().toLowerCase();
+
+  const style =
+    g === 'male' || g === 'm'
+      ? 'bg-blue-100 text-blue-900 border-blue-200'
+      : g === 'female' || g === 'f'
+      ? 'bg-pink-100 text-pink-900 border-pink-200'
+      : 'bg-slate-100 text-slate-900 border-slate-200';
+
+  const label = g === 'm' ? 'Male' : g === 'f' ? 'Female' : gender;
+
+  return (
+    <span className={`inline-flex items-center rounded-md border px-2.5 py-0.5 text-xs font-medium ${style}`}>
+      {label}
+    </span>
+  );
+}
+
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <Clock className="h-5 w-5 text-muted-foreground" />;
   const s = status.toUpperCase();
@@ -55,9 +75,28 @@ function StatusBadge({ status }: { status: string | null }) {
 
 export default function VaultPage() {
   const queryClient = useQueryClient();
-  const { data: vaultUsers, isLoading: isLoadingVault, error: vaultError } = useVaultUsers();
   const { data: gymDbSessions, isLoading: isLoadingGymDbSessions } = useGymDbSessions();
-  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [sortBy, setSortBy] = useState<
+    'booking_id' | 'booking_date' | 'time_start' | 'time_end' | 'name' | 'employee_id' | 'department' | 'approval_status' | 'status'
+  >('booking_date');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const {
+    data: bookingPaged = { rows: [], total: 0 },
+    isLoading: isLoadingVault,
+    error: vaultError,
+  } = useVaultUsersPaged({
+    page,
+    pageSize,
+    sortBy,
+    sortDir,
+  });
+
+  const vaultUsers = bookingPaged.rows;
+  const totalCount = bookingPaged.total;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   const toggleAccessMutation = useMutation({
     mutationFn: async ({ employee_id, grant_access }: { employee_id: string; grant_access: boolean }) => {
@@ -112,7 +151,7 @@ export default function VaultPage() {
     },
     onSuccess: () => {
       toast.success('Booking status updated');
-      queryClient.invalidateQueries({ queryKey: ['vault-users'] });
+      queryClient.invalidateQueries({ queryKey: ['vault-users-paged'] });
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'Update failed');
@@ -128,18 +167,20 @@ export default function VaultPage() {
     return timeToSessionName.get(hhmm) || '-';
   };
 
-  const filteredUsers = (vaultUsers || []).filter((user) => {
-    const q = search.trim().toLowerCase();
-    if (!q) return true;
-    const fields = [
-      user.name,
-      user.employee_id,
-      user.department,
-      user.card_no ? String(user.card_no) : '',
-      formatBookingId(user.booking_id),
-    ];
-    return fields.some((f) => String(f || '').toLowerCase().includes(q));
-  });
+  const toggleSort = (key: typeof sortBy) => {
+    setPage(1);
+    if (sortBy === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(key);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIndicator = ({ active, dir }: { active: boolean; dir: 'asc' | 'desc' }) => {
+    if (!active) return <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />;
+    return dir === 'asc' ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />;
+  };
 
   return (
     <AppLayout>
@@ -172,21 +213,9 @@ export default function VaultPage() {
           </div>
         ) : vaultUsers && vaultUsers.length > 0 ? (
           <>
-            <div className="flex items-center gap-3">
-              <div className="relative w-full md:w-80">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search by name, ID, department, card or booking"
-                  className="pl-9"
-                />
-              </div>
-            </div>
-            <div className="h-2" />
             <div className="md:hidden">
               <div className="space-y-3">
-                {filteredUsers.map((user, index) => (
+                {vaultUsers.map((user, index) => (
                   <Card key={`${user.employee_id}__${user.schedule_time}__${index}`}>
                     <CardHeader className="p-3 pb-1">
                       <div className="flex items-start justify-between gap-2">
@@ -231,7 +260,9 @@ export default function VaultPage() {
                             <div className="grid grid-cols-12 gap-2 text-xs">
                               <div className="col-span-6">
                                 <div className="text-muted-foreground">Gender</div>
-                                <div>{user.gender || '-'}</div>
+                                <div>
+                                  <GenderBadge gender={user.gender} />
+                                </div>
                               </div>
                               <div className="col-span-12">
                                 <div className="text-muted-foreground">Department</div>
@@ -295,27 +326,64 @@ export default function VaultPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-12 text-right">No</TableHead>
-                      <TableHead>Booking ID</TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('booking_id')}>
+                          Booking ID
+                          <SortIndicator active={sortBy === 'booking_id'} dir={sortDir} />
+                        </button>
+                      </TableHead>
                       <TableHead className="hidden md:table-cell">ID Card</TableHead>
-                      <TableHead>Name</TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('name')}>
+                          Name
+                          <SortIndicator active={sortBy === 'name'} dir={sortDir} />
+                        </button>
+                      </TableHead>
                       <TableHead className="hidden md:table-cell">Gender</TableHead>
-                      <TableHead>Employee ID</TableHead>
-                      <TableHead className="hidden md:table-cell">Department</TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('employee_id')}>
+                          Employee ID
+                          <SortIndicator active={sortBy === 'employee_id'} dir={sortDir} />
+                        </button>
+                      </TableHead>
+                      <TableHead className="hidden md:table-cell">
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('department')}>
+                          Department
+                          <SortIndicator active={sortBy === 'department'} dir={sortDir} />
+                        </button>
+                      </TableHead>
                       <TableHead className="hidden md:table-cell">Session</TableHead>
-                      <TableHead className="hidden md:table-cell">Time Schedule</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead className="text-center">Status</TableHead>
+                      <TableHead className="hidden md:table-cell">
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('time_start')}>
+                          Time Schedule
+                          <SortIndicator active={sortBy === 'time_start'} dir={sortDir} />
+                        </button>
+                      </TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('booking_date')}>
+                          Date
+                          <SortIndicator active={sortBy === 'booking_date'} dir={sortDir} />
+                        </button>
+                      </TableHead>
+                      <TableHead className="text-center">
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('approval_status')}>
+                          Status
+                          <SortIndicator active={sortBy === 'approval_status'} dir={sortDir} />
+                        </button>
+                      </TableHead>
                       <TableHead className="text-center">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredUsers.map((user, index) => (
+                    {vaultUsers.map((user, index) => (
                       <TableRow key={`${user.employee_id}__${user.schedule_time}__${index}`}>
-                        <TableCell className="w-12 text-right">{index + 1}</TableCell>
+                        <TableCell className="w-12 text-right">{(page - 1) * pageSize + index + 1}</TableCell>
                         <TableCell className="font-mono">{formatBookingId(user.booking_id)}</TableCell>
                         <TableCell className="hidden md:table-cell">{user.card_no || '-'}</TableCell>
                         <TableCell className="font-medium">{user.name || '-'}</TableCell>
-                        <TableCell className="hidden md:table-cell">{user.gender || '-'}</TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <GenderBadge gender={user.gender} />
+                        </TableCell>
                         <TableCell>{user.employee_id}</TableCell>
                         <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
                         <TableCell className="hidden md:table-cell"><SessionBadge name={sessionNameFor(user)} /></TableCell>
@@ -376,6 +444,27 @@ export default function VaultPage() {
                     ))}
                   </TableBody>
                 </Table>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Rows per page</span>
+                  <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+                    <SelectTrigger className="w-[90px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10</SelectItem>
+                      <SelectItem value="20">20</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
+                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>Prev</Button>
+                  <Button variant="outline" size="sm" onClick={() => setPage((p) => (p < totalPages ? p + 1 : p))} disabled={page >= totalPages}>Next</Button>
+                </div>
               </div>
             </div>
           </>
