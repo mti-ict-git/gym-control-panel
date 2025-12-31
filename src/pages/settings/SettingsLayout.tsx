@@ -47,7 +47,6 @@ export default function SettingsLayout() {
   const configNavItems = [
     { icon: Users, label: 'Active Directory', path: '/settings/config/active-directory' },
     { icon: MessageCircle, label: 'WhatsApp', path: '/settings/config/whatsapp' },
-    { icon: Server, label: 'Database', path: '/settings/config/database' },
     { icon: Server, label: 'Controller', path: '/settings/config/controller' },
   ];
 
