@@ -25,6 +25,7 @@ interface BookingRecord {
   booking_id: number;
   employee_id: string;
   card_no: string | null;
+  employee_name?: string | null;
   name?: string | null;
   department: string | null;
   gender: string | null;
@@ -247,7 +248,7 @@ export default function ReportsPage() {
       String(idx + 1),
       formatBookingId(record.booking_id),
       String(record.card_no ?? ''),
-      String(record.name ?? ''),
+      String((record.name ?? record.employee_name) ?? ''),
       String(record.employee_id ?? ''),
       String(record.department ?? ''),
       String(record.gender ?? ''),
@@ -543,7 +544,7 @@ export default function ReportsPage() {
                         <TableCell className="font-mono text-sm">{idx + 1}</TableCell>
                         <TableCell className="font-mono text-sm">{formatBookingId(record.booking_id)}</TableCell>
                         <TableCell className="font-mono text-sm">{record.card_no || '-'}</TableCell>
-                        <TableCell className="text-sm">{record.name || '-'}</TableCell>
+                        <TableCell className="text-sm">{(record.name ?? record.employee_name) || '-'}</TableCell>
                         <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
                         <TableCell>{record.department || '-'}</TableCell>
                         <TableCell className="font-medium">{getGenderChip(record.gender)}</TableCell>

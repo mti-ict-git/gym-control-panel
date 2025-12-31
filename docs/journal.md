@@ -687,3 +687,12 @@ Backend:
 
 Verification:
 - Script returned ok: true.
+
+2025-12-31 14:18:03 +08:00
+
+Reports:
+- Name column now reads from API response; supports both name and employee_name properties for backward compatibility. Updated CSV export accordingly.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
