@@ -2202,12 +2202,16 @@ router.get('/gym-controller-settings', async (req, res) => {
       CREATE TABLE dbo.gym_controller_settings (
         Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
         EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
+        EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0,
         GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
         GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
         WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
         CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_settings_CreatedAt DEFAULT GETDATE(),
         UpdatedAt DATETIME NULL
       );
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'EnableManagerAllSessionAccess') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0;
     END`);
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'GraceBeforeMin') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0;
@@ -2221,7 +2225,7 @@ router.get('/gym-controller-settings', async (req, res) => {
     await pool.request().query(`IF NOT EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
       INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize) VALUES (1, 0)`);
 
-    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
+    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
     await pool.close();
 
     const row = r?.recordset?.[0] || null;
@@ -2229,6 +2233,7 @@ router.get('/gym-controller-settings', async (req, res) => {
     return res.json({
       ok: true,
       enable_auto_organize: row?.EnableAutoOrganize ? true : false,
+      enable_manager_all_session_access: row?.EnableManagerAllSessionAccess ? true : false,
       grace_before_min: Number(row?.GraceBeforeMin ?? 0) || 0,
       grace_after_min: Number(row?.GraceAfterMin ?? 0) || 0,
       worker_interval_ms: Number(row?.WorkerIntervalMs ?? 60000) || 60000,
@@ -2255,6 +2260,12 @@ router.post('/gym-controller-settings', async (req, res) => {
     enableRaw === undefined
       ? undefined
       : enableRaw === true || enableRaw === 1 || String(enableRaw || '').trim().toLowerCase() === 'true';
+
+  const enableManagerRaw = req?.body?.enable_manager_all_session_access;
+  const enableManagerParsed =
+    enableManagerRaw === undefined
+      ? undefined
+      : enableManagerRaw === true || enableManagerRaw === 1 || String(enableManagerRaw || '').trim().toLowerCase() === 'true';
 
   const graceBeforeRaw = req?.body?.grace_before_min;
   const graceAfterRaw = req?.body?.grace_after_min;
@@ -2292,12 +2303,16 @@ router.post('/gym-controller-settings', async (req, res) => {
       CREATE TABLE dbo.gym_controller_settings (
         Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
         EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
+        EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0,
         GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
         GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
         WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
         CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_settings_CreatedAt DEFAULT GETDATE(),
         UpdatedAt DATETIME NULL
       );
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'EnableManagerAllSessionAccess') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0;
     END`);
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'GraceBeforeMin') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0;
@@ -2311,22 +2326,24 @@ router.post('/gym-controller-settings', async (req, res) => {
 
     const req1 = pool.request();
     req1.input('EnableAutoOrganize', sql.Bit, enableParsed == null ? null : enableParsed ? 1 : 0);
+    req1.input('EnableManagerAllSessionAccess', sql.Bit, enableManagerParsed == null ? null : enableManagerParsed ? 1 : 0);
     req1.input('GraceBeforeMin', sql.Int, graceBeforeClamped);
     req1.input('GraceAfterMin', sql.Int, graceAfterClamped);
     req1.input('WorkerIntervalMs', sql.Int, workerIntervalClamped);
     await req1.query(`IF EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
       UPDATE dbo.gym_controller_settings SET
         EnableAutoOrganize = COALESCE(@EnableAutoOrganize, EnableAutoOrganize),
+        EnableManagerAllSessionAccess = COALESCE(@EnableManagerAllSessionAccess, EnableManagerAllSessionAccess),
         GraceBeforeMin = COALESCE(@GraceBeforeMin, GraceBeforeMin),
         GraceAfterMin = COALESCE(@GraceAfterMin, GraceAfterMin),
         WorkerIntervalMs = COALESCE(@WorkerIntervalMs, WorkerIntervalMs),
         UpdatedAt = SYSDATETIME()
       WHERE Id = 1
     ELSE
-      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, UpdatedAt)
-      VALUES (1, COALESCE(@EnableAutoOrganize, 0), COALESCE(@GraceBeforeMin, 0), COALESCE(@GraceAfterMin, 0), COALESCE(@WorkerIntervalMs, 60000), SYSDATETIME())`);
+      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, UpdatedAt)
+      VALUES (1, COALESCE(@EnableAutoOrganize, 0), COALESCE(@EnableManagerAllSessionAccess, 0), COALESCE(@GraceBeforeMin, 0), COALESCE(@GraceAfterMin, 0), COALESCE(@WorkerIntervalMs, 60000), SYSDATETIME())`);
 
-    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
+    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
     await pool.close();
 
     const row = r?.recordset?.[0] || null;
@@ -2334,11 +2351,166 @@ router.post('/gym-controller-settings', async (req, res) => {
     return res.json({
       ok: true,
       enable_auto_organize: row?.EnableAutoOrganize ? true : false,
+      enable_manager_all_session_access: row?.EnableManagerAllSessionAccess ? true : false,
       grace_before_min: Number(row?.GraceBeforeMin ?? 0) || 0,
       grace_after_min: Number(row?.GraceAfterMin ?? 0) || 0,
       worker_interval_ms: Number(row?.WorkerIntervalMs ?? 60000) || 60000,
       updated_at: updatedAt,
     });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.get('/gym-access-committee', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+  const unitNo = String(req.query.unit_no || '').trim() || envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    await pool.request().query(`IF OBJECT_ID('dbo.gym_access_committee','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_access_committee (
+        EmployeeID VARCHAR(20) NOT NULL,
+        UnitNo VARCHAR(20) NOT NULL,
+        IsActive BIT NOT NULL CONSTRAINT DF_gym_access_committee_IsActive DEFAULT 1,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_access_committee_CreatedAt DEFAULT GETDATE(),
+        UpdatedAt DATETIME NULL,
+        CONSTRAINT PK_gym_access_committee PRIMARY KEY (EmployeeID, UnitNo)
+      );
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_access_committee', 'IsActive') IS NULL BEGIN
+      ALTER TABLE dbo.gym_access_committee ADD IsActive BIT NOT NULL CONSTRAINT DF_gym_access_committee_IsActive DEFAULT 1;
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_access_committee', 'CreatedAt') IS NULL BEGIN
+      ALTER TABLE dbo.gym_access_committee ADD CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_access_committee_CreatedAt DEFAULT GETDATE();
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_access_committee', 'UpdatedAt') IS NULL BEGIN
+      ALTER TABLE dbo.gym_access_committee ADD UpdatedAt DATETIME NULL;
+    END`);
+
+    const r = await pool.request().input('unit', sql.VarChar(20), unitNo).query(
+      `SELECT EmployeeID, UnitNo, CreatedAt, UpdatedAt
+       FROM dbo.gym_access_committee
+       WHERE UnitNo = @unit AND IsActive = 1
+       ORDER BY EmployeeID ASC`
+    );
+    await pool.close();
+    const rows = Array.isArray(r?.recordset) ? r.recordset : [];
+    const members = rows.map((x) => ({
+      employee_id: String(x.EmployeeID ?? '').trim(),
+      unit_no: String(x.UnitNo ?? '').trim(),
+      created_at: x.CreatedAt ? new Date(x.CreatedAt).toISOString() : null,
+      updated_at: x.UpdatedAt ? new Date(x.UpdatedAt).toISOString() : null,
+    })).filter((m) => m.employee_id);
+    return res.json({ ok: true, unit_no: unitNo, members });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, members: [] });
+  }
+});
+
+router.post('/gym-access-committee-add', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const employeeId = req?.body?.employee_id != null ? String(req.body.employee_id).trim() : '';
+  if (!employeeId) {
+    return res.status(400).json({ ok: false, error: 'employee_id is required' });
+  }
+
+  const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+  const unitNo = (req?.body?.unit_no != null ? String(req.body.unit_no).trim() : '') || envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    await pool.request().query(`IF OBJECT_ID('dbo.gym_access_committee','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_access_committee (
+        EmployeeID VARCHAR(20) NOT NULL,
+        UnitNo VARCHAR(20) NOT NULL,
+        IsActive BIT NOT NULL CONSTRAINT DF_gym_access_committee_IsActive DEFAULT 1,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_access_committee_CreatedAt DEFAULT GETDATE(),
+        UpdatedAt DATETIME NULL,
+        CONSTRAINT PK_gym_access_committee PRIMARY KEY (EmployeeID, UnitNo)
+      );
+    END`);
+
+    const req1 = pool.request();
+    req1.input('emp', sql.VarChar(20), employeeId);
+    req1.input('unit', sql.VarChar(20), unitNo);
+    await req1.query(`IF EXISTS (SELECT 1 FROM dbo.gym_access_committee WHERE EmployeeID=@emp AND UnitNo=@unit)
+      UPDATE dbo.gym_access_committee SET IsActive=1, UpdatedAt=SYSDATETIME() WHERE EmployeeID=@emp AND UnitNo=@unit
+    ELSE
+      INSERT INTO dbo.gym_access_committee (EmployeeID, UnitNo, IsActive, UpdatedAt) VALUES (@emp, @unit, 1, SYSDATETIME())`);
+    await pool.close();
+
+    return res.json({ ok: true, employee_id: employeeId, unit_no: unitNo });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.post('/gym-access-committee-remove', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const employeeId = req?.body?.employee_id != null ? String(req.body.employee_id).trim() : '';
+  if (!employeeId) {
+    return res.status(400).json({ ok: false, error: 'employee_id is required' });
+  }
+
+  const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+  const unitNo = (req?.body?.unit_no != null ? String(req.body.unit_no).trim() : '') || envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    await pool.request().query(`IF OBJECT_ID('dbo.gym_access_committee','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_access_committee (
+        EmployeeID VARCHAR(20) NOT NULL,
+        UnitNo VARCHAR(20) NOT NULL,
+        IsActive BIT NOT NULL CONSTRAINT DF_gym_access_committee_IsActive DEFAULT 1,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_access_committee_CreatedAt DEFAULT GETDATE(),
+        UpdatedAt DATETIME NULL,
+        CONSTRAINT PK_gym_access_committee PRIMARY KEY (EmployeeID, UnitNo)
+      );
+    END`);
+
+    const req1 = pool.request();
+    req1.input('emp', sql.VarChar(20), employeeId);
+    req1.input('unit', sql.VarChar(20), unitNo);
+    await req1.query(`IF EXISTS (SELECT 1 FROM dbo.gym_access_committee WHERE EmployeeID=@emp AND UnitNo=@unit)
+      UPDATE dbo.gym_access_committee SET IsActive=0, UpdatedAt=SYSDATETIME() WHERE EmployeeID=@emp AND UnitNo=@unit`);
+    await pool.close();
+
+    return res.json({ ok: true, employee_id: employeeId, unit_no: unitNo });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });

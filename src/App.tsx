@@ -26,6 +26,7 @@ import WhatsAppSettings from "./pages/settings/WhatsAppSettings";
 import DatabaseList from "./pages/settings/DatabaseList";
 import DatabaseForm from "./pages/settings/DatabaseForm";
 import ControllerSettings from "./pages/settings/ControllerSettings";
+import AccessPermissionSettings from "./pages/settings/AccessPermissionSettings";
 
 const queryClient = new QueryClient();
 
@@ -116,6 +117,7 @@ const App = () => (
               <Route path="config/database/add" element={<DatabaseForm />} />
               <Route path="config/database/:id" element={<DatabaseForm />} />
               <Route path="config/controller" element={<ControllerSettings />} />
+              <Route path="config/access-permission" element={<AccessPermissionSettings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
