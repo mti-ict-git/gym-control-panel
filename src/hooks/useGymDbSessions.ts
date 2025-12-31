@@ -13,6 +13,8 @@ export function useGymDbSessions() {
   return useQuery({
     queryKey: ['gymdb-sessions'],
     queryFn: async (): Promise<GymDbSession[]> => {
+      const endpoint = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_DB_TEST_ENDPOINT as string | undefined;
+      const base = endpoint && endpoint.trim().length > 0 ? endpoint : '/api';
       const tryFetch = async (url: string): Promise<ResponsePayload> => {
         const r = await fetch(url);
         const j = (await r.json()) as ResponsePayload;
@@ -22,7 +24,7 @@ export function useGymDbSessions() {
 
       let json: ResponsePayload = null;
       try {
-        json = await tryFetch(`/api/gym-sessions`);
+        json = await tryFetch(`${base}/gym-sessions`);
       } catch (_) {
         json = await tryFetch(`/gym-sessions`);
       }
@@ -31,6 +33,9 @@ export function useGymDbSessions() {
       return Array.isArray(json.sessions) ? json.sessions : [];
     },
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
+    keepPreviousData: true,
   });
 }
 
@@ -44,6 +49,8 @@ export function useGymDbSessionsPaged(q: string, page: number, pageSize: number,
   return useQuery<GymDbSessionsPagedResult>({
     queryKey: ['gymdb-sessions-paged', q, page, pageSize, sortBy || '', sortDir],
     queryFn: async (): Promise<GymDbSessionsPagedResult> => {
+      const endpoint = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_DB_TEST_ENDPOINT as string | undefined;
+      const base = endpoint && endpoint.trim().length > 0 ? endpoint : '/api';
       const tryFetch = async (url: string): Promise<GymSessionsResponse> => {
         const r = await fetch(url);
         const j = (await r.json()) as GymSessionsResponse;
@@ -60,7 +67,7 @@ export function useGymDbSessionsPaged(q: string, page: number, pageSize: number,
 
       let json: GymSessionsResponse | null = null;
       try {
-        json = await tryFetch(`/api/gym-sessions?${params.toString()}`);
+        json = await tryFetch(`${base}/gym-sessions?${params.toString()}`);
       } catch (_) {
         json = await tryFetch(`/gym-sessions?${params.toString()}`);
       }
@@ -71,5 +78,7 @@ export function useGymDbSessionsPaged(q: string, page: number, pageSize: number,
       return { rows: sessions, total };
     },
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
+    keepPreviousData: true,
   });
 }
