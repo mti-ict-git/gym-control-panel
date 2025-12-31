@@ -7,6 +7,93 @@ export default function ProfileSettings() {
   const { user } = useAuth();
   const displayName = user?.username || user?.email || 'Admin';
 
+  const parseDateValue = (value: unknown): Date | null => {
+    if (value == null) return null;
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+    if (typeof value === 'number') {
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+    if (typeof value !== 'string') return null;
+    const s = value.trim();
+    if (!s) return null;
+
+    if (/^\d{10}$/.test(s)) return parseDateValue(Number(s) * 1000);
+    if (/^\d{13}$/.test(s)) return parseDateValue(Number(s));
+
+    const mDateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (mDateOnly) {
+      const year = Number(mDateOnly[1]);
+      const month = Number(mDateOnly[2]);
+      const day = Number(mDateOnly[3]);
+      const d = new Date(year, month - 1, day);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    const hasExplicitTz = /([zZ]|[+-]\d{2}:?\d{2})$/.test(s);
+    if (hasExplicitTz) {
+      const d = new Date(s);
+      if (Number.isNaN(d.getTime())) return null;
+
+      if (/[zZ]$/.test(s)) {
+        const withoutZ = s.replace(/[zZ]$/, '');
+        const mIsoNoTz = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(withoutZ);
+        if (mIsoNoTz) {
+          const year = Number(mIsoNoTz[1]);
+          const month = Number(mIsoNoTz[2]);
+          const day = Number(mIsoNoTz[3]);
+          const hour = Number(mIsoNoTz[4]);
+          const minute = Number(mIsoNoTz[5]);
+          const second = mIsoNoTz[6] != null ? Number(mIsoNoTz[6]) : 0;
+          const ms = mIsoNoTz[7] != null ? Number(mIsoNoTz[7].padEnd(3, '0')) : 0;
+          const localNaive = new Date(year, month - 1, day, hour, minute, second, ms);
+          if (!Number.isNaN(localNaive.getTime())) {
+            const now = Date.now();
+            const grace = 2 * 60_000;
+            if (d.getTime() > now + grace && localNaive.getTime() <= now + grace) return localNaive;
+          }
+        }
+      }
+
+      return d;
+    }
+
+    const mIsoNoTz = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(s);
+    if (mIsoNoTz) {
+      const year = Number(mIsoNoTz[1]);
+      const month = Number(mIsoNoTz[2]);
+      const day = Number(mIsoNoTz[3]);
+      const hour = Number(mIsoNoTz[4]);
+      const minute = Number(mIsoNoTz[5]);
+      const second = mIsoNoTz[6] != null ? Number(mIsoNoTz[6]) : 0;
+      const ms = mIsoNoTz[7] != null ? Number(mIsoNoTz[7].padEnd(3, '0')) : 0;
+      const d = new Date(year, month - 1, day, hour, minute, second, ms);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    const mSpaceNoTz = /^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/.exec(s);
+    if (mSpaceNoTz) {
+      const year = Number(mSpaceNoTz[1]);
+      const month = Number(mSpaceNoTz[2]);
+      const day = Number(mSpaceNoTz[3]);
+      const hour = Number(mSpaceNoTz[4]);
+      const minute = Number(mSpaceNoTz[5]);
+      const second = mSpaceNoTz[6] != null ? Number(mSpaceNoTz[6]) : 0;
+      const ms = mSpaceNoTz[7] != null ? Number(mSpaceNoTz[7].padEnd(3, '0')) : 0;
+      const d = new Date(year, month - 1, day, hour, minute, second, ms);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const formatDateTimeLocal = (value: unknown): string => {
+    const d = parseDateValue(value);
+    if (!d) return 'N/A';
+    return d.toLocaleString();
+  };
+
   function decodeJwt(token: string | null) {
     if (!token) return null;
     const parts = token.split('.');
@@ -24,8 +111,7 @@ export default function ProfileSettings() {
   const lastSignIn = (() => {
     const iat = typeof payload?.iat === 'number' ? payload.iat : null;
     if (!iat) return 'N/A';
-    const d = new Date(iat * 1000);
-    return d.toLocaleString();
+    return formatDateTimeLocal(iat * 1000);
   })();
 
   const { data: accountInfo } = useQuery({
@@ -75,15 +161,15 @@ export default function ProfileSettings() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Last Sign In</p>
-              <p className="text-sm">{accountInfo?.last_sign_in ? new Date(accountInfo.last_sign_in).toLocaleString() : (accountInfo?.last_sign_in_at ? new Date(accountInfo.last_sign_in_at).toLocaleString() : lastSignIn)}</p>
+              <p className="text-sm">{accountInfo?.last_sign_in ? formatDateTimeLocal(accountInfo.last_sign_in) : (accountInfo?.last_sign_in_at ? formatDateTimeLocal(accountInfo.last_sign_in_at) : lastSignIn)}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Last Sign In (legacy)</p>
-              <p className="text-sm">{accountInfo?.last_sign_in_at ? new Date(accountInfo.last_sign_in_at).toLocaleString() : 'N/A'}</p>
+              <p className="text-sm">{accountInfo?.last_sign_in_at ? formatDateTimeLocal(accountInfo.last_sign_in_at) : 'N/A'}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Account Created</p>
-              <p className="text-sm">{accountInfo?.created_at ? new Date(accountInfo.created_at).toLocaleString() : 'N/A'}</p>
+              <p className="text-sm">{accountInfo?.created_at ? formatDateTimeLocal(accountInfo.created_at) : 'N/A'}</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Email Verified</p>
