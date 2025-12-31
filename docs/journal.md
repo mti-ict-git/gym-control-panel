@@ -607,3 +607,83 @@ Branding:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-31 13:25:50 +08:00
+
+Reports:
+- Styled Gender column with themed badge chips: Male (blue), Female (pink); fallback muted.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+ 
+2025-12-31 13:32:09 +08:00
+
+Reports:
+- Added filters: Employee ID, Department, Gender, Session. Updated statistics and CSV export to use filtered data.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 13:52:14 +08:00
+
+Reports:
+- Moved "Showing: All Time / Range" helper text to appear directly under Period selector for better placement.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 13:54:14 +08:00
+
+Reports:
+- Made filter fields symmetric: switched to a responsive grid (2 cols on mobile, 5 cols on desktop), and set all inputs/selects to full width.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 13:57:59 +08:00
+
+Vault:
+- Added searching to booking list (mobile and desktop). Filters by name, employee ID, department, card number, and formatted booking ID. Input includes icon and works live.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 13:59:46 +08:00
+
+Reports:
+- Added Name column to table and CSV export; extended BookingRecord interface with optional name.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 14:01:59 +08:00
+
+Backend:
+- Added endpoint POST /gym-reports-add-name to alter dbo.gym_reports and add Name column if missing.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 14:04:55 +08:00
+
+Backend:
+- Added initializer endpoint POST /gym-reports-init to create dbo.gym_reports with indexes if missing; also ensures Name column exists.
+
+Verification:
+- Lint: 0 errors, warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 14:07:22 +08:00
+
+Backend:
+- Executed script to add Name column directly: node backend/scripts/add-name-to-gym-reports.js. Result: { ok: true }.
+
+Verification:
+- Script returned ok: true.

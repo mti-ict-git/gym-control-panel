@@ -25,6 +25,7 @@ interface BookingRecord {
   booking_id: number;
   employee_id: string;
   card_no: string | null;
+  name?: string | null;
   department: string | null;
   gender: string | null;
   session_name: string;
@@ -146,10 +147,33 @@ function getGenderLabel(gender: string | null) {
   return '-';
 }
 
+function getGenderChip(gender: string | null) {
+  const label = getGenderLabel(gender);
+  if (label === 'Male') {
+    return (
+      <span className="inline-flex items-center rounded-md bg-blue-100 text-blue-700 border border-blue-200 px-2 py-1 text-xs font-medium">
+        Male
+      </span>
+    );
+  }
+  if (label === 'Female') {
+    return (
+      <span className="inline-flex items-center rounded-md bg-pink-100 text-pink-700 border border-pink-200 px-2 py-1 text-xs font-medium">
+        Female
+      </span>
+    );
+  }
+  return <span className="text-muted-foreground">-</span>;
+}
+
 export default function ReportsPage() {
   const [dateRange, setDateRange] = useState<DateRange>('all');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+  const [filterEmpId, setFilterEmpId] = useState('');
+  const [filterDept, setFilterDept] = useState('all');
+  const [filterGender, setFilterGender] = useState<'all' | 'Male' | 'Female'>('all');
+  const [filterSession, setFilterSession] = useState('all');
 
   const { start, end } = getDateRange(
     dateRange,
@@ -180,21 +204,50 @@ export default function ReportsPage() {
     },
   });
 
+  const departments = Array.from(
+    new Set((bookingData || []).map((r) => r.department).filter((d): d is string => Boolean(d && d.trim())))
+  ).sort((a, b) => a.localeCompare(b));
+
+  const normalizeSession = (s: string | null): string => {
+    const v = String(s || '').trim().toLowerCase();
+    if (!v) return '';
+    if (v === 'morning') return 'Morning';
+    if (v === 'afternoon') return 'Afternoon';
+    if (v === 'night - 1' || v === 'night-1' || v === 'night1') return 'Night - 1';
+    if (v === 'night - 2' || v === 'night-2' || v === 'night2') return 'Night - 2';
+    return s || '';
+  };
+
+  const sessions = Array.from(
+    new Set((bookingData || []).map((r) => normalizeSession(r.session_name)).filter((n): n is string => Boolean(n && n.trim())))
+  ).sort((a, b) => a.localeCompare(b));
+
+  const filteredData = (bookingData || []).filter((r) => {
+    const empIdOk = filterEmpId.trim() === '' || String(r.employee_id || '').toLowerCase().includes(filterEmpId.trim().toLowerCase());
+    const deptOk = filterDept === 'all' || String(r.department || '') === filterDept;
+    const genderLabel = getGenderLabel(r.gender);
+    const genderOk = filterGender === 'all' || genderLabel === filterGender;
+    const sessionLabel = normalizeSession(r.session_name);
+    const sessionOk = filterSession === 'all' || sessionLabel === filterSession;
+    return empIdOk && deptOk && genderOk && sessionOk;
+  });
+
   // Calculate statistics
   const stats = {
-    totalBookings: bookingData.length,
-    checkedIn: bookingData.filter(r => (r.status || '').toUpperCase() === 'CHECKIN').length,
-    completed: bookingData.filter(r => (r.status || '').toUpperCase() === 'COMPLETED').length,
-    noShow: bookingData.filter(r => (r.status || '').toUpperCase() === 'NO_SHOW').length,
-    uniqueUsers: new Set(bookingData.map(r => r.employee_id)).size,
+    totalBookings: filteredData.length,
+    checkedIn: filteredData.filter(r => (r.status || '').toUpperCase() === 'CHECKIN').length,
+    completed: filteredData.filter(r => (r.status || '').toUpperCase() === 'COMPLETED').length,
+    noShow: filteredData.filter(r => (r.status || '').toUpperCase() === 'NO_SHOW').length,
+    uniqueUsers: new Set(filteredData.map(r => r.employee_id)).size,
   };
 
   const handleExportCSV = () => {
-    const headers = ['No', 'Booking ID', 'Card No', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
-    const rows = bookingData.map((record, idx) => [
+    const headers = ['No', 'Booking ID', 'Card No', 'Name', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
+    const rows = filteredData.map((record, idx) => [
       String(idx + 1),
       formatBookingId(record.booking_id),
       String(record.card_no ?? ''),
+      String(record.name ?? ''),
       String(record.employee_id ?? ''),
       String(record.department ?? ''),
       String(record.gender ?? ''),
@@ -247,7 +300,7 @@ export default function ReportsPage() {
               View and export gym attendance data
             </p>
           </div>
-          <Button onClick={handleExportCSV} disabled={bookingData.length === 0}>
+          <Button onClick={handleExportCSV} disabled={filteredData.length === 0}>
             <Download className="h-4 w-4 mr-2" />
             Export CSV
           </Button>
@@ -262,11 +315,11 @@ export default function ReportsPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-wrap gap-4 items-end">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-start">
               <div className="space-y-2">
                 <Label>Period</Label>
                 <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
-                  <SelectTrigger className="w-[180px]">
+                  <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -280,6 +333,13 @@ export default function ReportsPage() {
                     <SelectItem value="custom">Custom Range</SelectItem>
                   </SelectContent>
                 </Select>
+                <div className="text-xs text-muted-foreground">
+                  {dateRange === 'all' ? (
+                    <>Showing: All Time</>
+                  ) : (
+                    <>Showing: {format(start, 'MMM d, yyyy')} - {format(end, 'MMM d, yyyy')}</>
+                  )}
+                </div>
               </div>
 
               {dateRange === 'custom' && (
@@ -290,7 +350,7 @@ export default function ReportsPage() {
                       type="date"
                       value={customStartDate}
                       onChange={(e) => setCustomStartDate(e.target.value)}
-                      className="w-[180px]"
+                      className="w-full"
                     />
                   </div>
                   <div className="space-y-2">
@@ -299,18 +359,65 @@ export default function ReportsPage() {
                       type="date"
                       value={customEndDate}
                       onChange={(e) => setCustomEndDate(e.target.value)}
-                      className="w-[180px]"
+                      className="w-full"
                     />
                   </div>
                 </>
               )}
 
-              <div className="text-sm text-muted-foreground">
-                {dateRange === 'all' ? (
-                  <>Showing: All Time</>
-                ) : (
-                  <>Showing: {format(start, 'MMM d, yyyy')} - {format(end, 'MMM d, yyyy')}</>
-                )}
+              <div className="space-y-2">
+                <Label>Employee ID</Label>
+                <Input
+                  type="text"
+                  value={filterEmpId}
+                  onChange={(e) => setFilterEmpId(e.target.value)}
+                  placeholder="Search by ID"
+                  className="w-full"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Department</Label>
+                <Select value={filterDept} onValueChange={(v) => setFilterDept(v)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    {departments.map((d) => (
+                      <SelectItem key={d} value={d}>{d}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Gender</Label>
+                <Select value={filterGender} onValueChange={(v) => setFilterGender(v as 'all' | 'Male' | 'Female')}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    <SelectItem value="Male">Male</SelectItem>
+                    <SelectItem value="Female">Female</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Session</Label>
+                <Select value={filterSession} onValueChange={(v) => setFilterSession(v)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
+                    {sessions.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </CardContent>
@@ -397,7 +504,7 @@ export default function ReportsPage() {
               <CardTitle className="text-lg">Reports</CardTitle>
             </div>
             <CardDescription>
-              {bookingData.length} records found
+              {filteredData.length} records found
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -420,6 +527,7 @@ export default function ReportsPage() {
                       <TableHead className="w-16">No</TableHead>
                       <TableHead>Booking ID</TableHead>
                       <TableHead>Card No</TableHead>
+                      <TableHead>Name</TableHead>
                       <TableHead>Employee ID</TableHead>
                       <TableHead>Department</TableHead>
                       <TableHead>Gender</TableHead>
@@ -430,14 +538,15 @@ export default function ReportsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {bookingData.map((record, idx) => (
+                    {filteredData.map((record, idx) => (
                       <TableRow key={`${record.booking_id}-${idx}`}>
                         <TableCell className="font-mono text-sm">{idx + 1}</TableCell>
                         <TableCell className="font-mono text-sm">{formatBookingId(record.booking_id)}</TableCell>
                         <TableCell className="font-mono text-sm">{record.card_no || '-'}</TableCell>
+                        <TableCell className="text-sm">{record.name || '-'}</TableCell>
                         <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
                         <TableCell>{record.department || '-'}</TableCell>
-                        <TableCell>{getGenderLabel(record.gender)}</TableCell>
+                        <TableCell className="font-medium">{getGenderChip(record.gender)}</TableCell>
                         <TableCell className="font-mono text-sm">-</TableCell>
                         <TableCell className="font-mono text-sm">-</TableCell>
                         <TableCell className="font-mono text-sm">

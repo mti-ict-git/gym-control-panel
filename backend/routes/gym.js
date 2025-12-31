@@ -18,6 +18,117 @@ router.get('/env-dump', (req, res) => {
   res.json({ ok: true, env: out });
 });
 
+router.post('/gym-reports-add-name', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: envBool(DB_ENCRYPT, false),
+      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const existsRes = await pool.request().query("SELECT OBJECT_ID('dbo.gym_reports', 'U') AS id;");
+    const exists = Boolean(existsRes?.recordset?.[0]?.id);
+    if (!exists) {
+      await pool.close();
+      return res.status(200).json({ ok: false, error: 'Missing table dbo.gym_reports' });
+    }
+    await pool.request().query(
+      "IF COL_LENGTH('dbo.gym_reports', 'Name') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD Name VARCHAR(100) NULL END"
+    );
+    await pool.close();
+    return res.json({ ok: true });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.post('/gym-reports-init', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: envBool(DB_ENCRYPT, false),
+      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    const existsRes = await pool.request().query("SELECT OBJECT_ID('dbo.gym_reports', 'U') AS id;");
+    const exists = Boolean(existsRes?.recordset?.[0]?.id);
+    if (!exists) {
+      await pool.request().query(`
+        CREATE TABLE dbo.gym_reports (
+          ReportID INT IDENTITY(1,1) PRIMARY KEY,
+          BookingID INT NULL,
+          EmployeeID VARCHAR(20) NOT NULL,
+          CardNo VARCHAR(50) NULL,
+          Name VARCHAR(100) NULL,
+          Department VARCHAR(100) NULL,
+          Gender VARCHAR(10) NULL,
+          SessionName VARCHAR(50) NULL,
+          BookingDate DATE NULL,
+          TimeStart VARCHAR(5) NULL,
+          TimeEnd VARCHAR(5) NULL,
+          CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_reports_CreatedAt DEFAULT GETDATE()
+        );
+        CREATE INDEX IX_gym_reports_BookingDate ON dbo.gym_reports(BookingDate);
+        CREATE INDEX IX_gym_reports_EmployeeID ON dbo.gym_reports(EmployeeID);
+      `);
+    } else {
+      await pool.request().query(
+        "IF COL_LENGTH('dbo.gym_reports', 'Name') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD Name VARCHAR(100) NULL END"
+      );
+    }
+    await pool.close();
+    return res.json({ ok: true });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
 router.get('/gym-availability', async (req, res) => {
   const {
     DB_SERVER,

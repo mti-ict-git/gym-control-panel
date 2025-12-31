@@ -1,4 +1,4 @@
-import { Database, AlertCircle, CheckCircle, XCircle, Clock, Check, X, IdCard, Users as UsersIcon, CalendarDays, Lock, Unlock } from 'lucide-react';
+import { Database, AlertCircle, CheckCircle, XCircle, Clock, Check, X, IdCard, Users as UsersIcon, CalendarDays, Lock, Unlock, Search } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -10,6 +10,8 @@ import { useVaultUsers, VaultUser } from '@/hooks/useVaultUsers';
 import { useGymDbSessions } from '@/hooks/useGymDbSessions';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { Input } from '@/components/ui/input';
+import { useState } from 'react';
 
 const UTC8_OFFSET_MINUTES = 8 * 60;
 
@@ -55,6 +57,7 @@ export default function VaultPage() {
   const queryClient = useQueryClient();
   const { data: vaultUsers, isLoading: isLoadingVault, error: vaultError } = useVaultUsers();
   const { data: gymDbSessions, isLoading: isLoadingGymDbSessions } = useGymDbSessions();
+  const [search, setSearch] = useState('');
 
   const toggleAccessMutation = useMutation({
     mutationFn: async ({ employee_id, grant_access }: { employee_id: string; grant_access: boolean }) => {
@@ -125,6 +128,19 @@ export default function VaultPage() {
     return timeToSessionName.get(hhmm) || '-';
   };
 
+  const filteredUsers = (vaultUsers || []).filter((user) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    const fields = [
+      user.name,
+      user.employee_id,
+      user.department,
+      user.card_no ? String(user.card_no) : '',
+      formatBookingId(user.booking_id),
+    ];
+    return fields.some((f) => String(f || '').toLowerCase().includes(q));
+  });
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -156,9 +172,21 @@ export default function VaultPage() {
           </div>
         ) : vaultUsers && vaultUsers.length > 0 ? (
           <>
+            <div className="flex items-center gap-3">
+              <div className="relative w-full md:w-80">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search by name, ID, department, card or booking"
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            <div className="h-2" />
             <div className="md:hidden">
               <div className="space-y-3">
-                {vaultUsers.map((user, index) => (
+                {filteredUsers.map((user, index) => (
                   <Card key={`${user.employee_id}__${user.schedule_time}__${index}`}>
                     <CardHeader className="p-3 pb-1">
                       <div className="flex items-start justify-between gap-2">
@@ -281,7 +309,7 @@ export default function VaultPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {vaultUsers.map((user, index) => (
+                    {filteredUsers.map((user, index) => (
                       <TableRow key={`${user.employee_id}__${user.schedule_time}__${index}`}>
                         <TableCell className="w-12 text-right">{index + 1}</TableCell>
                         <TableCell className="font-mono">{formatBookingId(user.booking_id)}</TableCell>
