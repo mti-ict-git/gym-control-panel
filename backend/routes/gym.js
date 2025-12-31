@@ -3141,6 +3141,12 @@ router.get('/gym-live-status', async (req, res) => {
     return res.json(gymLiveStatusCache.payload);
   }
 
+  const parseHHMM = (hhmm) => {
+    const m = /^(\d{2}):(\d{2})$/.exec(String(hhmm || '').trim());
+    if (!m) return null;
+    return { hh: Number(m[1]), mm: Number(m[2]) };
+  };
+
   const config = {
     server,
     port: Number(DB_PORT || 1433),
@@ -3156,6 +3162,79 @@ router.get('/gym-live-status', async (req, res) => {
     try {
       pool = await new sql.ConnectionPool(config).connect();
       const today = new Date();
+
+      const tzAllow = envTrim(process.env.GYM_ACCESS_TZ_ALLOW) || '01';
+      const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+      const unitNo = envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+
+      let graceBeforeMin = 0;
+      let graceAfterMin = 0;
+      try {
+        await pool.request().query(`IF OBJECT_ID('dbo.gym_controller_settings','U') IS NULL BEGIN
+          CREATE TABLE dbo.gym_controller_settings (
+            Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
+            EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
+            EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0,
+            GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
+            GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
+            WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
+            CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_settings_CreatedAt DEFAULT GETDATE(),
+            UpdatedAt DATETIME NULL
+          );
+        END`);
+        await pool.request().query(`IF NOT EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
+          INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize) VALUES (1, 0)`);
+        const r = await pool.request().query(`SELECT TOP 1 GraceBeforeMin, GraceAfterMin FROM dbo.gym_controller_settings WHERE Id = 1`);
+        const row = r?.recordset?.[0] || null;
+        graceBeforeMin = Math.max(0, Math.min(24 * 60, Number(row?.GraceBeforeMin ?? 0) || 0));
+        graceAfterMin = Math.max(0, Math.min(24 * 60, Number(row?.GraceAfterMin ?? 0) || 0));
+      } catch (_) {}
+
+      const committeeSet = new Set();
+      try {
+        await pool.request().query(`IF OBJECT_ID('dbo.gym_access_committee','U') IS NULL BEGIN
+          CREATE TABLE dbo.gym_access_committee (
+            EmployeeID VARCHAR(20) NOT NULL,
+            UnitNo VARCHAR(20) NOT NULL,
+            IsActive BIT NOT NULL CONSTRAINT DF_gym_access_committee_IsActive DEFAULT 1,
+            CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_access_committee_CreatedAt DEFAULT GETDATE(),
+            UpdatedAt DATETIME NULL,
+            CONSTRAINT PK_gym_access_committee PRIMARY KEY (EmployeeID, UnitNo)
+          );
+        END`);
+        const committeeRes = await pool
+          .request()
+          .input('unit', sql.VarChar(20), unitNo)
+          .query(`SELECT EmployeeID FROM dbo.gym_access_committee WHERE UnitNo = @unit AND IsActive = 1`);
+        const rows = Array.isArray(committeeRes?.recordset) ? committeeRes.recordset : [];
+        for (const r of rows) {
+          const id = r?.EmployeeID != null ? String(r.EmployeeID).trim() : '';
+          if (id) committeeSet.add(id);
+        }
+      } catch (_) {}
+
+      const overrideMap = new Map();
+      try {
+        await pool.request().query(`IF OBJECT_ID('dbo.gym_controller_access_override','U') IS NULL BEGIN
+          CREATE TABLE dbo.gym_controller_access_override (
+            EmployeeID VARCHAR(20) NOT NULL,
+            UnitNo VARCHAR(20) NOT NULL,
+            CustomAccessTZ VARCHAR(2) NOT NULL,
+            UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
+            CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
+          );
+        END`);
+        const overridesRes = await pool
+          .request()
+          .input('unit', sql.VarChar(20), unitNo)
+          .query(`SELECT EmployeeID, CustomAccessTZ FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
+        const rows = Array.isArray(overridesRes?.recordset) ? overridesRes.recordset : [];
+        for (const r of rows) {
+          const id = r?.EmployeeID != null ? String(r.EmployeeID).trim() : '';
+          if (!id) continue;
+          overrideMap.set(id, r?.CustomAccessTZ != null ? String(r.CustomAccessTZ).trim() : '');
+        }
+      } catch (_) {}
 
       const masterDbRaw = envTrim(process.env.MASTER_DB_DATABASE);
       const masterDbSafe = masterDbRaw && /^[A-Za-z0-9_]+$/.test(masterDbRaw) ? masterDbRaw : '';
@@ -3273,6 +3352,36 @@ router.get('/gym-live-status', async (req, res) => {
         } catch (_) {}
       }
 
+      const accessRequiredByEmpId = new Map();
+      for (const r of bookingRows) {
+        const empId = r?.employee_id != null ? String(r.employee_id).trim() : '';
+        if (!empId) continue;
+        if (committeeSet.has(empId)) {
+          accessRequiredByEmpId.set(empId, true);
+          continue;
+        }
+        const ts = r?.time_start != null ? String(r.time_start).trim() : '';
+        const te = r?.time_end != null ? String(r.time_end).trim() : '';
+        const start = parseHHMM(ts);
+        const end = parseHHMM(te);
+        if (!start) {
+          accessRequiredByEmpId.set(empId, false);
+          continue;
+        }
+        const startAtRaw = new Date(today.getFullYear(), today.getMonth(), today.getDate(), start.hh, start.mm, 0, 0);
+        const endAtRaw = end
+          ? new Date(today.getFullYear(), today.getMonth(), today.getDate(), end.hh, end.mm, 0, 0)
+          : new Date(startAtRaw.getTime() + 60 * 60 * 1000);
+        const startAt = new Date(startAtRaw.getTime() - graceBeforeMin * 60 * 1000);
+        const endAt = new Date(endAtRaw.getTime() + graceAfterMin * 60 * 1000);
+        const inRange = today.getTime() >= startAt.getTime() && today.getTime() <= endAt.getTime();
+        accessRequiredByEmpId.set(empId, Boolean(inRange));
+      }
+
+      const toAccessIndicator = (accessGranted) => {
+        return accessGranted ? { color: 'green', label: 'Granted' } : { color: 'red', label: 'No Access' };
+      };
+
       const people = bookingRows.map((r) => {
         const empId = r?.employee_id != null ? String(r.employee_id).trim() : null;
         const name = r?.employee_name != null ? String(r.employee_name).trim() : null;
@@ -3284,14 +3393,20 @@ router.get('/gym-live-status', async (req, res) => {
         const bookingStatus = r?.booking_status != null ? String(r.booking_status).trim().toUpperCase() : '';
         const status = bookingStatus === 'CHECKIN' ? 'IN_GYM' : bookingStatus === 'BOOKED' ? 'BOOKED' : 'LEFT';
         const tap = empId ? tapMap.get(empId) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
-        return { name, employee_id: empId, department: dept, schedule: sched, time_in: tap.time_in, time_out: tap.time_out, status };
+        const access_required = empId ? Boolean(accessRequiredByEmpId.get(empId)) : false;
+        const access_granted = empId ? String(overrideMap.get(empId) || '').trim() === tzAllow : false;
+        const access_indicator = toAccessIndicator(access_granted);
+        return { name, employee_id: empId, department: dept, schedule: sched, time_in: tap.time_in, time_out: tap.time_out, status, access_required, access_granted, access_indicator };
       });
 
       const extra = additionalEmpIds.map((empId) => {
         const tap = tapMap.get(empId) || { time_in: null, time_out: null };
         const info = extraInfo.get(empId) || { name: null, department: null };
         const fallbackStatus = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'LEFT');
-        return { name: info.name, employee_id: empId, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: fallbackStatus };
+        const access_required = committeeSet.has(empId);
+        const access_granted = String(overrideMap.get(empId) || '').trim() === tzAllow;
+        const access_indicator = toAccessIndicator(access_granted);
+        return { name: info.name, employee_id: empId, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: fallbackStatus, access_required, access_granted, access_indicator };
       });
 
       const merged = people.concat(extra);

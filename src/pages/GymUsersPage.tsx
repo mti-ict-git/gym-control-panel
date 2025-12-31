@@ -97,6 +97,7 @@ export default function GymUsersPage() {
                     <TableHead>Time In</TableHead>
                     <TableHead>Time Out</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Access</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -110,6 +111,14 @@ export default function GymUsersPage() {
                       <TableCell>{formatTimeUtc8(p.time_in)}</TableCell>
                       <TableCell>{formatTimeUtc8(p.time_out)}</TableCell>
                       <TableCell>{p.status}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`h-2.5 w-2.5 rounded-full ${p.access_indicator.color === 'green' ? 'bg-green-500' : 'bg-red-500'}`}
+                          />
+                          <span>{p.access_indicator.label}</span>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
