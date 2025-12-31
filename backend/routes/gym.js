@@ -273,13 +273,43 @@ router.get('/gym-sessions', async (req, res) => {
   };
 
   const DEFAULT_QUOTA = 15;
+  const qRaw = String(req.query.q || '').trim();
+  const pageRaw = Number(String(req.query.page || '').trim());
+  const limitRaw = Number(String(req.query.limit || '').trim());
+  const sortKeyRaw = String(req.query.sort_by || '').trim().toLowerCase();
+  const sortDirRaw = String(req.query.sort_dir || '').trim().toLowerCase();
+  const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? pageRaw : 1;
+  const limit = Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(limitRaw, 200) : 100;
+  const offset = (page - 1) * limit;
 
   try {
     const pool = await sql.connect(config);
-    const request = pool.request();
-    const result = await request.query(
-      "SELECT Session AS session_name, CONVERT(varchar(5), StartTime, 108) AS time_start, CONVERT(varchar(5), EndTime, 108) AS time_end, Quota AS quota FROM dbo.gym_schedule ORDER BY StartTime"
-    );
+    const whereClause = qRaw
+      ? "WHERE Session LIKE @q OR CONVERT(varchar(5), StartTime, 108) LIKE @q OR CONVERT(varchar(5), EndTime, 108) LIKE @q"
+      : '';
+    const sortMap = {
+      session_name: '[Session]',
+      time_start: '[StartTime]',
+      time_end: '[EndTime]',
+      quota: '[Quota]',
+    };
+    const sortCol = sortMap[sortKeyRaw] || '[StartTime]';
+    const dir = sortDirRaw === 'desc' ? 'DESC' : 'ASC';
+
+    const reqCount = pool.request();
+    const reqData = pool.request();
+    if (qRaw) {
+      reqCount.input('q', sql.VarChar(50), `%${qRaw}%`);
+      reqData.input('q', sql.VarChar(50), `%${qRaw}%`);
+    }
+    reqData.input('offset', sql.Int, offset);
+    reqData.input('limit', sql.Int, limit);
+
+    const countSql = `SELECT COUNT(1) AS total FROM dbo.gym_schedule ${whereClause}`;
+    const dataSql = `SELECT Session AS session_name, CONVERT(varchar(5), StartTime, 108) AS time_start, CONVERT(varchar(5), EndTime, 108) AS time_end, Quota AS quota FROM dbo.gym_schedule ${whereClause} ORDER BY ${sortCol} ${dir}, [StartTime] ASC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
+
+    const countRes = await reqCount.query(countSql);
+    const result = await reqData.query(dataSql);
     await pool.close();
 
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
@@ -289,8 +319,9 @@ router.get('/gym-sessions', async (req, res) => {
       time_end: r.time_end ? String(r.time_end) : null,
       quota: Number(r.quota) || DEFAULT_QUOTA,
     }));
+    const total = Number(countRes?.recordset?.[0]?.total || 0);
 
-    return res.json({ ok: true, sessions });
+    return res.json({ ok: true, sessions, total });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, sessions: [] });

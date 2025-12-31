@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Calendar as CalendarIcon, List, Pencil, Plus, Trash2 } from 'lucide-react';
-import { useGymDbSessions, GymDbSession } from '@/hooks/useGymDbSessions';
+import { Calendar as CalendarIcon, List, Pencil, Plus, Trash2, Search, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { useGymDbSessions, useGymDbSessionsPaged, GymDbSession } from '@/hooks/useGymDbSessions';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { GymSession, formatTime } from '@/hooks/useGymSessions';
@@ -30,8 +31,16 @@ export default function SchedulesPage() {
   const [deletingSession, setDeletingSession] = useState<GymDbSession | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(6);
+  const [sortBy, setSortBy] = useState<null | 'session_name' | 'time_start' | 'time_end' | 'quota'>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
-  const { data: sessions, isLoading, refetch } = useGymDbSessions();
+  const { data: allSessionsForCalendar = [], isLoading: isLoadingAll } = useGymDbSessions();
+  const { data: paged = { rows: [], total: 0 }, isLoading, refetch } = useGymDbSessionsPaged(search, page, pageSize, sortBy || undefined, sortDir);
+  const sessions = paged.rows;
+  const totalCount = paged.total;
   const endpoint = '/api';
 
   const endFor = (label: string): string | null => {
@@ -60,7 +69,7 @@ export default function SchedulesPage() {
     updated_at: '',
   });
 
-  const calendarSessions: GymSession[] = (sessions || []).map((s: GymDbSession, idx) => {
+  const calendarSessions: GymSession[] = (allSessionsForCalendar || []).map((s: GymDbSession, idx) => {
     const timeEnd = s.time_end ?? endFor(s.session_name) ?? '00:00';
     return {
       id: `gymdb-${s.session_name}-${s.time_start}-${idx}`,
@@ -87,6 +96,21 @@ export default function SchedulesPage() {
     return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md font-medium ${color}`}>{name}</span>;
   };
 
+  const toggleSort = (key: 'session_name' | 'time_start' | 'time_end' | 'quota') => {
+    setPage(1);
+    if (sortBy === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(key);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIndicator = ({ active, dir }: { active: boolean; dir: 'asc' | 'desc' }) => {
+    if (!active) return <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />;
+    return dir === 'asc' ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />;
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -110,7 +134,16 @@ export default function SchedulesPage() {
           </TabsList>
 
           <TabsContent value="sessions" className="space-y-4 mt-4">
-            <div className="flex justify-end">
+            <div className="flex items-center justify-between gap-3">
+              <div className="relative w-full md:w-80">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                  placeholder="Search session name or time (HH:MM)"
+                  className="pl-9"
+                />
+              </div>
               <Button onClick={() => setSessionDialogOpen(true)}>
                 <Plus className="h-4 w-4 mr-2" />
                 Create Session
@@ -123,22 +156,43 @@ export default function SchedulesPage() {
                 <Skeleton className="h-12 w-full" />
               </div>
             ) : sessions && sessions.length > 0 ? (
+              <div className="space-y-2">
               <div className="rounded-lg border bg-card overflow-hidden">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-16">No</TableHead>
-                      <TableHead>Session</TableHead>
-                      <TableHead>Time Start</TableHead>
-                      <TableHead>Time End</TableHead>
-                      <TableHead>Quota</TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('session_name')}>
+                          Session
+                          <SortIndicator active={sortBy === 'session_name'} dir={sortDir} />
+                        </button>
+                      </TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('time_start')}>
+                          Time Start
+                          <SortIndicator active={sortBy === 'time_start'} dir={sortDir} />
+                        </button>
+                      </TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('time_end')}>
+                          Time End
+                          <SortIndicator active={sortBy === 'time_end'} dir={sortDir} />
+                        </button>
+                      </TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('quota')}>
+                          Quota
+                          <SortIndicator active={sortBy === 'quota'} dir={sortDir} />
+                        </button>
+                      </TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {sessions.map((session, index) => (
                       <TableRow key={`${session.session_name}-${session.time_start}-${index}`}>
-                        <TableCell className="font-medium">{index + 1}</TableCell>
+                        <TableCell className="font-medium">{(page - 1) * pageSize + index + 1}</TableCell>
                         <TableCell className="font-medium"><SessionBadge name={session.session_name} /></TableCell>
                         <TableCell>{formatTime(session.time_start)}</TableCell>
                         <TableCell>{session.time_end ? formatTime(session.time_end) : '-'}</TableCell>
@@ -174,6 +228,25 @@ export default function SchedulesPage() {
                     ))}
                   </TableBody>
                 </Table>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Rows per page</span>
+                  <Tabs value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+                    <TabsList>
+                      <TabsTrigger value="6">6</TabsTrigger>
+                      <TabsTrigger value="10">10</TabsTrigger>
+                      <TabsTrigger value="20">20</TabsTrigger>
+                      <TabsTrigger value="50">50</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-muted-foreground">Page {page} of {Math.max(1, Math.ceil(totalCount / pageSize))}</span>
+                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>Prev</Button>
+                  <Button variant="outline" size="sm" onClick={() => setPage((p) => (p < Math.ceil(totalCount / pageSize) ? p + 1 : p))} disabled={page >= Math.ceil(totalCount / pageSize)}>Next</Button>
+                </div>
+              </div>
               </div>
             ) : (
               <div className="flex items-center justify-center py-16">

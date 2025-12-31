@@ -63,11 +63,11 @@ export function useAddGymUser() {
     mutationFn: async (_userData: { name: string; employee_id: string }) => {
       throw new Error('Add user is not supported; users are sourced from MasterDB');
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gym-users'] });
       toast({
         title: "User Added",
-        description: `${data.name} has been added successfully.`,
+        description: "User has been added successfully.",
       });
     },
     onError: (error: Error) => {
@@ -93,11 +93,11 @@ export function useAddGymUserFromVault() {
     }) => {
       throw new Error('Add from Vault not supported; users come from MasterDB');
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['gym-users'] });
       toast({
         title: "Added to Gym Users",
-        description: `${data.name} can now access the gym.`,
+        description: "User can now access the gym.",
       });
     },
     onError: (error: Error) => {
