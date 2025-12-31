@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subDays, addDays } from 'date-fns';
-import { FileText, Download, Calendar, Users, Clock, TrendingUp, Filter } from 'lucide-react';
+import { FileText, Download, Calendar, Users, Clock, TrendingUp, Filter, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -41,6 +41,11 @@ interface LiveTapRange {
   date: string;
   time_in: string | null;
   time_out: string | null;
+}
+
+interface ReportQueryResult {
+  rows: BookingRecord[];
+  total: number;
 }
 
 function formatBookingId(n: number | null | undefined): string {
@@ -182,6 +187,10 @@ export default function ReportsPage() {
   const [filterDept, setFilterDept] = useState('all');
   const [filterGender, setFilterGender] = useState<'all' | 'Male' | 'Female'>('all');
   const [filterSession, setFilterSession] = useState('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(6);
+  const [sortBy, setSortBy] = useState<null | 'department' | 'employee_id' | 'name' | 'gender' | 'session' | 'booking_id'>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
   const { start, end } = getDateRange(
     dateRange,
@@ -191,17 +200,17 @@ export default function ReportsPage() {
 
   const isLoading = false;
 
-  const { data: bookingData = [], isLoading: bookingsLoading } = useQuery({
-    queryKey: ['gym-reports', dateRange, customStartDate, customEndDate],
+  const { data: bookingDataRes = { rows: [], total: 0 } as ReportQueryResult, isLoading: bookingsLoading } = useQuery<ReportQueryResult>({
+    queryKey: ['gym-reports', dateRange, customStartDate, customEndDate, page, pageSize, sortBy, sortDir],
     queryFn: async () => {
       const fromStr = format(start, 'yyyy-MM-dd');
       const toStr = format(end, 'yyyy-MM-dd');
       const tryFetch = async (base: string) => {
-        const resp = await fetch(`${base}/gym-reports?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
+        const resp = await fetch(`${base}/gym-reports?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(pageSize))}&sort_by=${encodeURIComponent(String(sortBy || ''))}&sort_dir=${encodeURIComponent(String(sortDir))}`);
         const json = await resp.json();
-        if (!json || !json.ok) return [] as BookingRecord[];
+        if (!json || !json.ok) return { rows: [], total: 0 } as ReportQueryResult;
         const rows = Array.isArray(json.reports) ? json.reports : [];
-        return rows.map((r: unknown) => {
+        const mapped = rows.map((r: unknown) => {
           const obj = r as {
             BookingID?: number;
             booking_id?: number;
@@ -237,16 +246,39 @@ export default function ReportsPage() {
             status: null,
           } as BookingRecord;
         }) as BookingRecord[];
+        return { rows: mapped, total: Number(json.total || 0) } as ReportQueryResult;
       };
       try {
         const data = await tryFetch('/api');
-        if (Array.isArray(data) && data.length >= 0) return data;
+        if (data && Array.isArray(data.rows)) return data;
         return await tryFetch('');
       } catch (_) {
         return await tryFetch('');
       }
     },
   });
+
+  const bookingData = bookingDataRes.rows;
+  const totalCount = bookingDataRes.total;
+
+  useEffect(() => {
+    setPage(1);
+  }, [dateRange, customStartDate, customEndDate, sortBy, sortDir]);
+
+  const toggleSort = (key: 'department' | 'employee_id' | 'name' | 'gender' | 'session' | 'booking_id') => {
+    setPage(1);
+    if (sortBy === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortBy(key);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIndicator = ({ active, dir }: { active: boolean; dir: 'asc' | 'desc' }) => {
+    if (!active) return <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />;
+    return dir === 'asc' ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />;
+  };
 
   const { data: liveRange = [] } = useQuery({
     queryKey: ['gym-live-status-range', dateRange, customStartDate, customEndDate],
@@ -590,7 +622,7 @@ export default function ReportsPage() {
               <CardTitle className="text-lg">Reports</CardTitle>
             </div>
             <CardDescription>
-              {filteredData.length} records found
+              {filteredData.length} records on this page
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -606,21 +638,52 @@ export default function ReportsPage() {
                 <p>No attendance records found for this period.</p>
               </div>
             ) : (
+              <div className="space-y-4">
               <div className="rounded-md border overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
                       <TableHead className="w-16">No</TableHead>
-                      <TableHead>Booking ID</TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('booking_id')}>
+                          Booking ID
+                          <SortIndicator active={sortBy === 'booking_id'} dir={sortDir} />
+                        </button>
+                      </TableHead>
                       <TableHead>Card No</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Employee ID</TableHead>
-                      <TableHead>Department</TableHead>
-                      <TableHead>Gender</TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('name')}>
+                          Name
+                          <SortIndicator active={sortBy === 'name'} dir={sortDir} />
+                        </button>
+                      </TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('employee_id')}>
+                          Employee ID
+                          <SortIndicator active={sortBy === 'employee_id'} dir={sortDir} />
+                        </button>
+                      </TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('department')}>
+                          Department
+                          <SortIndicator active={sortBy === 'department'} dir={sortDir} />
+                        </button>
+                      </TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('gender')}>
+                          Gender
+                          <SortIndicator active={sortBy === 'gender'} dir={sortDir} />
+                        </button>
+                      </TableHead>
                       <TableHead>In</TableHead>
                       <TableHead>Out</TableHead>
                       <TableHead>Time Schedule</TableHead>
-                      <TableHead>Session</TableHead>
+                      <TableHead>
+                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('session')}>
+                          Session
+                          <SortIndicator active={sortBy === 'session'} dir={sortDir} />
+                        </button>
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -649,6 +712,35 @@ export default function ReportsPage() {
                     ))}
                   </TableBody>
                 </Table>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Rows per page</span>
+                  <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+                    <SelectTrigger className="w-24">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="6">6</SelectItem>
+                      <SelectItem value="10">10</SelectItem>
+                      <SelectItem value="20">20</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-muted-foreground">
+                    Page {page} of {Math.max(1, Math.ceil(totalCount / pageSize))}
+                  </span>
+                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+                    Prev
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setPage((p) => (p < Math.ceil(totalCount / pageSize) ? p + 1 : p))} disabled={page >= Math.ceil(totalCount / pageSize)}>
+                    Next
+                  </Button>
+                </div>
+              </div>
               </div>
             )}
           </CardContent>

@@ -3229,6 +3229,13 @@ router.get('/gym-reports', async (req, res) => {
   const toStr = String(req.query.to || '').trim();
   const fromDate = fromStr && /^\d{4}-\d{2}-\d{2}$/.test(fromStr) ? new Date(fromStr) : null;
   const toDate = toStr && /^\d{4}-\d{2}-\d{2}$/.test(toStr) ? new Date(toStr) : null;
+  const pageRaw = Number(String(req.query.page || '').trim());
+  const limitRaw = Number(String(req.query.limit || '').trim());
+  const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? pageRaw : 1;
+  const limit = Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(limitRaw, 200) : 50;
+  const offset = (page - 1) * limit;
+  const sortKeyRaw = String(req.query.sort_by || '').trim().toLowerCase();
+  const sortDirRaw = String(req.query.sort_dir || '').trim().toLowerCase();
 
   const config = {
     server: DB_SERVER,
@@ -3265,18 +3272,43 @@ router.get('/gym-reports', async (req, res) => {
     if (hasTimeStart) selectCols.push('TimeStart');
     if (hasTimeEnd) selectCols.push('TimeEnd');
 
-    const req1 = pool.request();
-    let query;
+    const whereClause = fromDate && toDate ? `WHERE [${bookingDateCol}] BETWEEN @from AND @to` : '';
+    const reqCount = pool.request();
+    const reqData = pool.request();
     if (fromDate && toDate) {
-      req1.input('from', sql.Date, fromDate);
-      req1.input('to', sql.Date, toDate);
-      query = `SELECT ${selectCols.join(', ')} FROM dbo.gym_reports WHERE [${bookingDateCol}] BETWEEN @from AND @to ORDER BY [${bookingDateCol}] DESC, ReportID DESC`;
-    } else {
-      query = `SELECT TOP 200 ${selectCols.join(', ')} FROM dbo.gym_reports ORDER BY [${bookingDateCol}] DESC, ReportID DESC`;
+      reqCount.input('from', sql.Date, fromDate);
+      reqCount.input('to', sql.Date, toDate);
+      reqData.input('from', sql.Date, fromDate);
+      reqData.input('to', sql.Date, toDate);
     }
-    const r = await req1.query(query);
+    reqData.input('offset', sql.Int, offset);
+    reqData.input('limit', sql.Int, limit);
+
+    const countSql = `SELECT COUNT(1) AS total FROM dbo.gym_reports ${whereClause}`;
+    const sortMap = {
+      department: '[Department]',
+      employee_id: '[EmployeeID]',
+      name: '[Name]',
+      gender: '[Gender]',
+      session: '[SessionName]',
+      booking_id: '[BookingID]',
+      booking_date: `[${bookingDateCol}]`,
+    };
+    const sortCol = sortMap[sortKeyRaw] || null;
+    const dir = sortDirRaw === 'asc' ? 'ASC' : 'DESC';
+    const orderSql = sortCol
+      ? `${sortCol} ${dir}, [${bookingDateCol}] DESC, ReportID DESC`
+      : `[${bookingDateCol}] DESC, ReportID DESC`;
+
+    const dataSql = `SELECT ${selectCols.join(', ')} FROM dbo.gym_reports ${whereClause} ORDER BY ${orderSql} OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
+
+    const countRes = await reqCount.query(countSql);
+    const dataRes = await reqData.query(dataSql);
+
     await pool.close();
-    return res.json({ ok: true, reports: Array.isArray(r?.recordset) ? r.recordset : [] });
+    const total = Number(countRes?.recordset?.[0]?.total || 0);
+    const reports = Array.isArray(dataRes?.recordset) ? dataRes.recordset : [];
+    return res.json({ ok: true, total, reports });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, reports: [] });
