@@ -36,6 +36,13 @@ interface BookingRecord {
   status?: string | null;
 }
 
+interface LiveTapRange {
+  employee_id: string;
+  date: string;
+  time_in: string | null;
+  time_out: string | null;
+}
+
 function formatBookingId(n: number | null | undefined): string {
   if (typeof n !== 'number' || !Number.isFinite(n)) return '-';
   return `GYMBOOK${String(n)}`;
@@ -205,6 +212,48 @@ export default function ReportsPage() {
     },
   });
 
+  const { data: liveRange = [] } = useQuery({
+    queryKey: ['gym-live-status-range', dateRange, customStartDate, customEndDate],
+    queryFn: async () => {
+      const fromStr = format(start, 'yyyy-MM-dd');
+      const toStr = format(end, 'yyyy-MM-dd');
+      const tryFetch = async (base: string) => {
+        const resp = await fetch(`${base}/gym-live-status-range?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
+        const json = await resp.json();
+        if (!json || !json.ok) return [] as LiveTapRange[];
+        const taps = Array.isArray(json.taps) ? json.taps : [];
+        return taps.map((t: unknown) => {
+          const obj = t as { employee_id?: string; date?: string; time_in?: string | null; time_out?: string | null };
+          return {
+            employee_id: String(obj.employee_id || ''),
+            date: String(obj.date || ''),
+            time_in: obj.time_in != null ? String(obj.time_in) : null,
+            time_out: obj.time_out != null ? String(obj.time_out) : null,
+          } as LiveTapRange;
+        });
+      };
+      try {
+        const data = await tryFetch('/api');
+        if (Array.isArray(data)) return data;
+        return await tryFetch('');
+      } catch (_) {
+        return await tryFetch('');
+      }
+    },
+    staleTime: 5000,
+  });
+
+  const liveMap = new Map<string, { time_in: string | null; time_out: string | null }>(
+    (liveRange || []).map((p) => [`${p.employee_id}__${p.date}`, { time_in: p.time_in, time_out: p.time_out }])
+  );
+
+  const formatTimeOnly = (iso: string | null): string => {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '-';
+    return format(d, 'HH:mm');
+  };
+
   const departments = Array.from(
     new Set((bookingData || []).map((r) => r.department).filter((d): d is string => Boolean(d && d.trim())))
   ).sort((a, b) => a.localeCompare(b));
@@ -252,8 +301,8 @@ export default function ReportsPage() {
       String(record.employee_id ?? ''),
       String(record.department ?? ''),
       String(record.gender ?? ''),
-      '-',
-      '-',
+      formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_in),
+      formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_out),
       record.time_start && record.time_end
         ? `${record.time_start} - ${record.time_end}`
         : String(record.time_start ?? ''),
@@ -548,8 +597,12 @@ export default function ReportsPage() {
                         <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
                         <TableCell>{record.department || '-'}</TableCell>
                         <TableCell className="font-medium">{getGenderChip(record.gender)}</TableCell>
-                        <TableCell className="font-mono text-sm">-</TableCell>
-                        <TableCell className="font-mono text-sm">-</TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_in)}
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_out)}
+                        </TableCell>
                         <TableCell className="font-mono text-sm">
                           {record.time_start && record.time_end
                             ? `${record.time_start} - ${record.time_end}`

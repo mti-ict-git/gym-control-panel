@@ -2844,4 +2844,103 @@ router.get('/gym-live-status', async (req, res) => {
   }
 });
 
+router.get('/gym-live-status-range', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', taps: [] });
+  }
+
+  const fromStr = String(req.query.from || '').trim();
+  const toStr = String(req.query.to || '').trim();
+  const now = new Date();
+  const fromDate = fromStr ? new Date(fromStr) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const toDate = toStr ? new Date(toStr) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const fromOk = fromDate instanceof Date && !isNaN(fromDate.getTime());
+  const toOk = toDate instanceof Date && !isNaN(toDate.getTime());
+  const fromSafe = fromOk ? fromDate : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const toSafe = toOk ? toDate : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const config = {
+    server,
+    port: Number(DB_PORT || 1433),
+    database,
+    user,
+    password,
+    requestTimeout: 8000,
+    options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
+    pool: { max: 4, min: 0, idleTimeoutMillis: 5000 },
+  };
+  try {
+    let pool = null;
+    try {
+      pool = await new sql.ConnectionPool(config).connect();
+
+      const unitRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
+      const units = unitRaw ? unitRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
+      const req2 = pool.request();
+      req2.input('from', sql.Date, fromSafe);
+      req2.input('to', sql.Date, toSafe);
+      const safeUnits = units.filter((u) => /^[A-Za-z0-9_-]+$/.test(u)).slice(0, 50);
+      safeUnits.forEach((u, idx) => req2.input(`u${idx}`, sql.VarChar(50), u));
+      const inList = safeUnits.map((_, idx) => `@u${idx}`).join(',');
+      const unitWhere = safeUnits.length > 0 ? `AND UnitNo IN (${inList})` : '';
+      const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
+      const exitPattern = (envTrim(process.env.GYM_EXIT_EVENT) || 'VALID EXIT ACCESS').toUpperCase();
+      req2.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
+      req2.input('exitPat', sql.VarChar(120), `%${exitPattern}%`);
+      const aggRes = await req2.query(
+        `SELECT EmployeeID AS employee_id,
+           CAST(TxnTime AS date) AS tap_date,
+           MIN(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat THEN TxnTime END) AS time_in,
+           MAX(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @exitPat THEN TxnTime END) AS time_out
+         FROM dbo.gym_live_taps
+         WHERE EmployeeID IS NOT NULL AND LTRIM(RTRIM(EmployeeID)) <> ''
+           AND CAST(TxnTime AS date) BETWEEN @from AND @to
+           ${unitWhere}
+         GROUP BY EmployeeID, CAST(TxnTime AS date)`
+      );
+
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const pad3 = (n) => String(n).padStart(3, '0');
+      const toUtc8Iso = (d) => {
+        if (!(d instanceof Date) || isNaN(d.getTime())) return null;
+        const y = d.getUTCFullYear();
+        const m = pad2(d.getUTCMonth() + 1);
+        const day = pad2(d.getUTCDate());
+        const hh = pad2(d.getUTCHours());
+        const mm = pad2(d.getUTCMinutes());
+        const ss = pad2(d.getUTCSeconds());
+        const ms = pad3(d.getUTCMilliseconds());
+        return `${y}-${m}-${day}T${hh}:${mm}:${ss}.${ms}+08:00`;
+      };
+
+      const padDate = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      };
+
+      const taps = (Array.isArray(aggRes?.recordset) ? aggRes.recordset : []).map((r) => {
+        const empId = r?.employee_id != null ? String(r.employee_id).trim() : '';
+        const dt = r?.tap_date instanceof Date ? r.tap_date : (r?.tap_date ? new Date(String(r.tap_date)) : null);
+        const ti = r?.time_in instanceof Date ? r.time_in : (r?.time_in ? new Date(String(r.time_in)) : null);
+        const to = r?.time_out instanceof Date ? r.time_out : (r?.time_out ? new Date(String(r.time_out)) : null);
+        return { employee_id: empId, date: dt ? padDate(dt) : '', time_in: toUtc8Iso(ti), time_out: toUtc8Iso(to) };
+      }).filter((t) => t.employee_id && t.date);
+
+      return res.json({ ok: true, taps });
+    } finally {
+      if (pool) await pool.close().catch(() => {});
+    }
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, taps: [] });
+  }
+});
+
 export default router;

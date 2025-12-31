@@ -696,3 +696,15 @@ Reports:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-31 14:30:00 +08:00
+
+Backend:
+- Added date-aware endpoint GET /gym-live-status-range that aggregates Time In/Out per employee per day within a range.
+
+Reports:
+- Wired In/Out columns to use /gym-live-status-range keyed by employee_id + booking_date; CSV export now includes In/Out for the selected period.
+
+Verification:
+- Ran lint: warnings only.
+- Ran TypeScript integrity check: passed (noEmit).
