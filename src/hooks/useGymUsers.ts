@@ -67,7 +67,7 @@ export function useAddGymUser() {
       queryClient.invalidateQueries({ queryKey: ['gym-users'] });
       toast({
         title: "User Added",
-        description: "User has been added successfully.",
+        description: `${data.name} has been added successfully.`,
       });
     },
     onError: (error: Error) => {
@@ -97,7 +97,7 @@ export function useAddGymUserFromVault() {
       queryClient.invalidateQueries({ queryKey: ['gym-users'] });
       toast({
         title: "Added to Gym Users",
-        description: "User can now access the gym.",
+        description: `${data.name} can now access the gym.`,
       });
     },
     onError: (error: Error) => {

@@ -15,6 +15,36 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true,
         secure: false,
       },
+      "/gym-controller-access": {
+        target: process.env.VITE_BACKEND_URL || "http://localhost:5055",
+        changeOrigin: true,
+        secure: false,
+      },
+      "/gym-controller-settings": {
+        target: process.env.VITE_BACKEND_URL || "http://localhost:5055",
+        changeOrigin: true,
+        secure: false,
+      },
+      "/gym-access-committee": {
+        target: process.env.VITE_BACKEND_URL || "http://localhost:5055",
+        changeOrigin: true,
+        secure: false,
+      },
+      "/gym-access-committee-add": {
+        target: process.env.VITE_BACKEND_URL || "http://localhost:5055",
+        changeOrigin: true,
+        secure: false,
+      },
+      "/gym-access-committee-remove": {
+        target: process.env.VITE_BACKEND_URL || "http://localhost:5055",
+        changeOrigin: true,
+        secure: false,
+      },
+      "/employee-core": {
+        target: process.env.VITE_BACKEND_URL || "http://localhost:5055",
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
   plugins: [react()],
