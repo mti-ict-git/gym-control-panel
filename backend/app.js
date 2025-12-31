@@ -245,3 +245,31 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
 
   setTimeout(loop, 5000);
 }
+
+const enableReportsAutoSync = String(process.env.GYM_REPORTS_SYNC_ENABLE || '1').trim().toLowerCase();
+if (['1', 'true', 'yes', 'y'].includes(enableReportsAutoSync)) {
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const today = new Date();
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+        const day = ymd(d);
+        const url = `http://localhost:${PORT}/gym-reports-sync?from=${encodeURIComponent(day)}&to=${encodeURIComponent(day)}`;
+        try {
+          const r = await fetch(url, { method: 'POST' });
+          await r.text();
+        } catch (_) {}
+      }
+    } catch (_) {
+    } finally {
+      running = false;
+      setTimeout(tick, 20000);
+    }
+  };
+  setTimeout(tick, 10000);
+}

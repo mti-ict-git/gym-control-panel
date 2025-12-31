@@ -192,15 +192,51 @@ export default function ReportsPage() {
   const isLoading = false;
 
   const { data: bookingData = [], isLoading: bookingsLoading } = useQuery({
-    queryKey: ['gym-bookings', dateRange, customStartDate, customEndDate],
+    queryKey: ['gym-reports', dateRange, customStartDate, customEndDate],
     queryFn: async () => {
       const fromStr = format(start, 'yyyy-MM-dd');
       const toStr = format(end, 'yyyy-MM-dd');
       const tryFetch = async (base: string) => {
-        const resp = await fetch(`${base}/gym-bookings?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
+        const resp = await fetch(`${base}/gym-reports?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
         const json = await resp.json();
         if (!json || !json.ok) return [] as BookingRecord[];
-        return (json.bookings || []) as BookingRecord[];
+        const rows = Array.isArray(json.reports) ? json.reports : [];
+        return rows.map((r: unknown) => {
+          const obj = r as {
+            BookingID?: number;
+            booking_id?: number;
+            EmployeeID?: string;
+            employee_id?: string;
+            CardNo?: string | null;
+            Name?: string | null;
+            Department?: string | null;
+            Gender?: string | null;
+            SessionName?: string | null;
+            BookingDate?: string | Date | null;
+            ReportDate?: string | Date | null;
+            TimeStart?: string | null;
+            TimeEnd?: string | null;
+          };
+          return {
+            booking_id: Number(obj.BookingID ?? obj.booking_id ?? 0),
+            employee_id: String(obj.EmployeeID ?? obj.employee_id ?? ''),
+            card_no: obj.CardNo != null ? String(obj.CardNo) : null,
+            employee_name: obj.Name != null ? String(obj.Name) : null,
+            name: obj.Name != null ? String(obj.Name) : null,
+            department: obj.Department != null ? String(obj.Department) : null,
+            gender: obj.Gender != null ? String(obj.Gender) : null,
+            session_name: obj.SessionName != null ? String(obj.SessionName) : '',
+            booking_date:
+              obj.BookingDate
+                ? String(obj.BookingDate).slice(0, 10)
+                : obj.ReportDate
+                ? String(obj.ReportDate).slice(0, 10)
+                : '',
+            time_start: obj.TimeStart != null ? String(obj.TimeStart) : null,
+            time_end: obj.TimeEnd != null ? String(obj.TimeEnd) : null,
+            status: null,
+          } as BookingRecord;
+        }) as BookingRecord[];
       };
       try {
         const data = await tryFetch('/api');

@@ -6,6 +6,7 @@ import { envTrim, envBool } from '../lib/env.js';
 const router = express.Router();
 
 let gymLiveStatusCache = { atMs: 0, payload: null };
+const gymLiveRangeCache = new Map();
 
 router.get('/env-dump', (req, res) => {
   const out = {
@@ -119,6 +120,39 @@ router.post('/gym-reports-init', async (req, res) => {
     } else {
       await pool.request().query(
         "IF COL_LENGTH('dbo.gym_reports', 'Name') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD Name VARCHAR(100) NULL END"
+      );
+      await pool.request().query(
+        "IF COL_LENGTH('dbo.gym_reports', 'CardNo') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD CardNo VARCHAR(50) NULL END"
+      );
+      await pool.request().query(
+        "IF COL_LENGTH('dbo.gym_reports', 'BookingDate') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD BookingDate DATE NULL END"
+      );
+      await pool.request().query(
+        "IF COL_LENGTH('dbo.gym_reports', 'BookingDate') IS NOT NULL AND COL_LENGTH('dbo.gym_reports', 'ReportDate') IS NOT NULL BEGIN EXEC('UPDATE dbo.gym_reports SET BookingDate = ReportDate WHERE BookingDate IS NULL AND ReportDate IS NOT NULL') END"
+      );
+      await pool.request().query(
+        "IF COL_LENGTH('dbo.gym_reports', 'TimeStart') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD TimeStart VARCHAR(5) NULL END"
+      );
+      await pool.request().query(
+        "IF COL_LENGTH('dbo.gym_reports', 'TimeEnd') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD TimeEnd VARCHAR(5) NULL END"
+      );
+    }
+
+    const idx1 = await pool.request().query(
+      "SELECT 1 AS ok FROM sys.indexes WHERE name = 'UX_gym_reports_BookingID' AND object_id = OBJECT_ID('dbo.gym_reports')"
+    );
+    if (!Array.isArray(idx1?.recordset) || idx1.recordset.length === 0) {
+      await pool.request().query(
+        "CREATE UNIQUE INDEX UX_gym_reports_BookingID ON dbo.gym_reports(BookingID) WHERE BookingID IS NOT NULL"
+      );
+    }
+
+    const idx2 = await pool.request().query(
+      "SELECT 1 AS ok FROM sys.indexes WHERE name = 'UX_gym_reports_EmpDateSessionStart' AND object_id = OBJECT_ID('dbo.gym_reports')"
+    );
+    if (!Array.isArray(idx2?.recordset) || idx2.recordset.length === 0) {
+      await pool.request().query(
+        "IF COL_LENGTH('dbo.gym_reports','BookingDate') IS NOT NULL AND COL_LENGTH('dbo.gym_reports','TimeStart') IS NOT NULL BEGIN EXEC('CREATE UNIQUE INDEX UX_gym_reports_EmpDateSessionStart ON dbo.gym_reports(EmployeeID, BookingDate, SessionName, TimeStart)') END"
       );
     }
     await pool.close();
@@ -2878,6 +2912,18 @@ router.get('/gym-live-status-range', async (req, res) => {
     let pool = null;
     try {
       pool = await new sql.ConnectionPool(config).connect();
+      const padKeyDate = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      };
+      const key = `${padKeyDate(fromSafe)}|${padKeyDate(toSafe)}`;
+      const ttlMs = 5000;
+      const cached = gymLiveRangeCache.get(key);
+      if (cached && Date.now() - cached.atMs < ttlMs) {
+        return res.json(cached.payload);
+      }
 
       const unitRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
       const units = unitRaw ? unitRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
@@ -2933,7 +2979,9 @@ router.get('/gym-live-status-range', async (req, res) => {
         return { employee_id: empId, date: dt ? padDate(dt) : '', time_in: toUtc8Iso(ti), time_out: toUtc8Iso(to) };
       }).filter((t) => t.employee_id && t.date);
 
-      return res.json({ ok: true, taps });
+      const payload = { ok: true, taps };
+      gymLiveRangeCache.set(key, { atMs: Date.now(), payload });
+      return res.json(payload);
     } finally {
       if (pool) await pool.close().catch(() => {});
     }
@@ -2943,4 +2991,294 @@ router.get('/gym-live-status-range', async (req, res) => {
   }
 });
 
+router.post('/gym-reports-sync', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const fromStr = String(req.query.from || req.body?.from || '').trim();
+  const toStr = String(req.query.to || req.body?.to || '').trim();
+  const now = new Date();
+  const fromDate = fromStr ? new Date(fromStr) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const toDate = toStr ? new Date(toStr) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const fromOk = fromDate instanceof Date && !isNaN(fromDate.getTime());
+  const toOk = toDate instanceof Date && !isNaN(toDate.getTime());
+  const fromSafe = fromOk ? fromDate : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const toSafe = toOk ? toDate : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const masterDbRaw = envTrim(process.env.MASTER_DB_DATABASE);
+  const masterDbSafe = masterDbRaw && /^[A-Za-z0-9_]+$/.test(masterDbRaw) ? masterDbRaw : '';
+  const selectName = masterDbSafe ? 'COALESCE(ec.name, gb.EmployeeName) AS employee_name,' : 'gb.EmployeeName AS employee_name,';
+  const selectDept = masterDbSafe ? 'COALESCE(ee.department, gb.Department) AS department,' : 'gb.Department AS department,';
+  const joinMaster = masterDbSafe
+    ? `LEFT JOIN [${masterDbSafe}].dbo.employee_core ec ON gb.EmployeeID = ec.employee_id
+       LEFT JOIN [${masterDbSafe}].dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE'`
+    : '';
+
+  const config = {
+    server,
+    port: Number(DB_PORT || 1433),
+    database,
+    user,
+    password,
+    requestTimeout: 8000,
+    options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
+    pool: { max: 4, min: 0, idleTimeoutMillis: 5000 },
+  };
+  try {
+    let pool = null;
+    try {
+      pool = await new sql.ConnectionPool(config).connect();
+
+      const reqB = pool.request();
+      reqB.input('from', sql.Date, fromSafe);
+      reqB.input('to', sql.Date, toSafe);
+      const bookingsRes = await reqB.query(
+        `SELECT
+          gb.BookingID AS booking_id,
+          gb.EmployeeID AS employee_id,
+          gb.CardNo AS card_no,
+          ${selectName}
+          ${selectDept}
+          gb.Gender AS gender,
+          s.Session AS session_name,
+          CONVERT(varchar(5), s.StartTime, 108) AS time_start,
+          CONVERT(varchar(5), s.EndTime, 108) AS time_end,
+          gb.BookingDate AS booking_date
+        FROM dbo.gym_booking gb
+        LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
+        ${joinMaster}
+        WHERE gb.BookingDate BETWEEN @from AND @to AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+        ORDER BY gb.BookingDate ASC, s.StartTime ASC`
+      );
+
+      const unitRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
+      const units = unitRaw ? unitRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
+      const req2 = pool.request();
+      req2.input('from', sql.Date, fromSafe);
+      req2.input('to', sql.Date, toSafe);
+      const safeUnits = units.filter((u) => /^[A-Za-z0-9_-]+$/.test(u)).slice(0, 50);
+      safeUnits.forEach((u, idx) => req2.input(`u${idx}`, sql.VarChar(50), u));
+      const inList = safeUnits.map((_, idx) => `@u${idx}`).join(',');
+      const unitWhere = safeUnits.length > 0 ? `AND UnitNo IN (${inList})` : '';
+      const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
+      const exitPattern = (envTrim(process.env.GYM_EXIT_EVENT) || 'VALID EXIT ACCESS').toUpperCase();
+      req2.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
+      req2.input('exitPat', sql.VarChar(120), `%${exitPattern}%`);
+      const aggRes = await req2.query(
+        `SELECT EmployeeID AS employee_id,
+           CAST(TxnTime AS date) AS tap_date,
+           MIN(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat THEN TxnTime END) AS time_in,
+           MAX(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @exitPat THEN TxnTime END) AS time_out
+         FROM dbo.gym_live_taps
+         WHERE EmployeeID IS NOT NULL AND LTRIM(RTRIM(EmployeeID)) <> ''
+           AND CAST(TxnTime AS date) BETWEEN @from AND @to
+           ${unitWhere}
+         GROUP BY EmployeeID, CAST(TxnTime AS date)`
+      );
+
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const toYmd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      const tapMap = new Map(
+        (Array.isArray(aggRes?.recordset) ? aggRes.recordset : []).map((r) => {
+          const empId = r?.employee_id != null ? String(r.employee_id).trim() : '';
+          const dt = r?.tap_date instanceof Date ? r.tap_date : (r?.tap_date ? new Date(String(r.tap_date)) : null);
+          const ti = r?.time_in instanceof Date ? r.time_in : (r?.time_in ? new Date(String(r.time_in)) : null);
+          const to = r?.time_out instanceof Date ? r.time_out : (r?.time_out ? new Date(String(r.time_out)) : null);
+          return [empId && dt ? `${empId}__${toYmd(dt)}` : '', { time_in: ti, time_out: to }];
+        })
+      );
+
+      const colsQ = await pool.request().query("SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='gym_reports'");
+      const colNames = new Set((Array.isArray(colsQ?.recordset) ? colsQ.recordset : []).map((r) => String(r.name)));
+      const bookingDateCol = colNames.has('BookingDate') ? 'BookingDate' : (colNames.has('ReportDate') ? 'ReportDate' : 'BookingDate');
+      const hasTimeStart = colNames.has('TimeStart');
+      const hasTimeEnd = colNames.has('TimeEnd');
+
+      const rows = Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset : [];
+      let inserted = 0;
+      let updated = 0;
+      for (const r of rows) {
+        const bookingId = Number(r?.booking_id || 0) || null;
+        const employeeId = r?.employee_id != null ? String(r.employee_id).trim() : '';
+        const bookingDate = r?.booking_date instanceof Date ? r.booking_date : (r?.booking_date ? new Date(String(r.booking_date)) : null);
+        if (!employeeId || !bookingDate) continue;
+        const key = `${employeeId}__${toYmd(bookingDate)}`;
+        const tap = tapMap.get(key) || { time_in: null, time_out: null };
+
+        const reqU = pool.request();
+        reqU.input('booking_id', sql.Int, bookingId);
+        reqU.input('employee_id', sql.VarChar(20), employeeId);
+        reqU.input('card_no', sql.VarChar(50), r?.card_no != null ? String(r.card_no).trim() : null);
+        reqU.input('name', sql.VarChar(100), r?.employee_name != null ? String(r.employee_name).trim() : null);
+        reqU.input('department', sql.VarChar(100), r?.department != null ? String(r.department).trim() : null);
+        reqU.input('gender', sql.VarChar(10), r?.gender != null ? String(r.gender).trim() : null);
+        reqU.input('session_name', sql.VarChar(50), r?.session_name != null ? String(r.session_name).trim() : null);
+        reqU.input('booking_date', sql.Date, bookingDate);
+        if (hasTimeStart) reqU.input('time_start', sql.VarChar(5), r?.time_start != null ? String(r.time_start).trim() : null);
+        if (hasTimeEnd) reqU.input('time_end', sql.VarChar(5), r?.time_end != null ? String(r.time_end).trim() : null);
+        reqU.input('time_in', sql.DateTime, tap.time_in || null);
+        reqU.input('time_out', sql.DateTime, tap.time_out || null);
+
+        let affected = 0;
+        if (bookingId && Number.isFinite(bookingId)) {
+          const up = await reqU.query(
+            `UPDATE dbo.gym_reports SET EmployeeID=@employee_id, CardNo=@card_no, Name=@name, Department=@department, Gender=@gender, SessionName=@session_name, ${bookingDateCol}=@booking_date${hasTimeStart ? ', TimeStart=@time_start' : ''}${hasTimeEnd ? ', TimeEnd=@time_end' : ''} WHERE BookingID=@booking_id`
+          );
+          affected = Array.isArray(up?.rowsAffected) ? Number(up.rowsAffected[0] || 0) : 0;
+        }
+        if (!affected) {
+          const whereExtra = `AND ISNULL(SessionName,'') = ISNULL(@session_name,'')` + (hasTimeStart ? ` AND ISNULL(TimeStart,'') = ISNULL(@time_start,'')` : '');
+          const up2 = await reqU.query(
+            `UPDATE dbo.gym_reports SET CardNo=@card_no, Name=@name, Department=@department, Gender=@gender, SessionName=@session_name${hasTimeStart ? ', TimeStart=@time_start' : ''}${hasTimeEnd ? ', TimeEnd=@time_end' : ''} WHERE EmployeeID=@employee_id AND ${bookingDateCol}=@booking_date ${whereExtra}`
+          );
+          affected = Array.isArray(up2?.rowsAffected) ? Number(up2.rowsAffected[0] || 0) : 0;
+        }
+        if (affected) {
+          updated += 1;
+          const whereExtra2 = `AND ISNULL(SessionName,'') = ISNULL(@session_name,'')` + (hasTimeStart ? ` AND ISNULL(TimeStart,'') = ISNULL(@time_start,'')` : '');
+          const upTimes = await reqU.query(
+            `UPDATE dbo.gym_reports SET TimeIn = COALESCE(@time_in, TimeIn), TimeOut = COALESCE(@time_out, TimeOut) WHERE EmployeeID=@employee_id AND ${bookingDateCol}=@booking_date ${whereExtra2}`
+          );
+          void upTimes;
+          continue;
+        }
+
+        const insertCols = ['BookingID','EmployeeID','CardNo','Name','Department','Gender','SessionName', bookingDateCol];
+        if (hasTimeStart) insertCols.push('TimeStart');
+        if (hasTimeEnd) insertCols.push('TimeEnd');
+        insertCols.push('TimeIn','TimeOut');
+        const insertVals = ['@booking_id','@employee_id','@card_no','@name','@department','@gender','@session_name','@booking_date'];
+        if (hasTimeStart) insertVals.push('@time_start');
+        if (hasTimeEnd) insertVals.push('@time_end');
+        insertVals.push('@time_in','@time_out');
+        const ins = await reqU.query(
+          `INSERT INTO dbo.gym_reports (${insertCols.join(', ')}) VALUES (${insertVals.join(', ')})`
+        );
+        inserted += Array.isArray(ins?.rowsAffected) ? Number(ins.rowsAffected[0] || 0) : 0;
+      }
+
+      return res.json({ ok: true, inserted, updated });
+    } finally {
+      if (pool) await pool.close().catch(() => {});
+    }
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
 export default router;
+router.post('/gym-reports-backfill', async (req, res) => {
+  try {
+    const fromStr = String(req.query.from || req.body?.from || '').trim();
+    const toStr = String(req.query.to || req.body?.to || '').trim();
+    const now = new Date();
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const toYmd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    const fromDate = fromStr ? new Date(fromStr) : now;
+    const toDate = toStr ? new Date(toStr) : fromDate;
+    const fromSafe = fromDate instanceof Date && !isNaN(fromDate.getTime()) ? fromDate : now;
+    const toSafe = toDate instanceof Date && !isNaN(toDate.getTime()) ? toDate : fromSafe;
+    const from = toYmd(fromSafe);
+    const to = toYmd(toSafe);
+    const port = Number(process.env.PORT || 5055);
+    const url = `http://localhost:${port}/gym-reports-sync?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+    const r = await fetch(url, { method: 'POST' });
+    const json = await r.json().catch(() => null);
+    if (!json || json.ok !== true) {
+      return res.status(200).json({ ok: false, error: json?.error || 'Backfill failed' });
+    }
+    return res.json({ ok: true, inserted: Number(json.inserted || 0), updated: Number(json.updated || 0) });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.get('/gym-reports-schema', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', columns: [] });
+  }
+  const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const r = await pool.request().query("SELECT COLUMN_NAME AS name, DATA_TYPE AS type FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='gym_reports' ORDER BY ORDINAL_POSITION");
+    await pool.close();
+    const columns = Array.isArray(r?.recordset) ? r.recordset : [];
+    return res.json({ ok: true, columns });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, columns: [] });
+  }
+});
+
+router.get('/gym-reports', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', reports: [] });
+  }
+
+  const fromStr = String(req.query.from || '').trim();
+  const toStr = String(req.query.to || '').trim();
+  const fromDate = fromStr && /^\d{4}-\d{2}-\d{2}$/.test(fromStr) ? new Date(fromStr) : null;
+  const toDate = toStr && /^\d{4}-\d{2}-\d{2}$/.test(toStr) ? new Date(toStr) : null;
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+
+    const colsQ = await pool.request().query("SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='gym_reports'");
+    const colNames = new Set((Array.isArray(colsQ?.recordset) ? colsQ.recordset : []).map((r) => String(r.name)));
+    const bookingDateCol = colNames.has('BookingDate') ? 'BookingDate' : (colNames.has('ReportDate') ? 'ReportDate' : 'ReportDate');
+    const hasTimeStart = colNames.has('TimeStart');
+    const hasTimeEnd = colNames.has('TimeEnd');
+
+    const selectCols = [
+      'ReportID',
+      'BookingID',
+      'Name',
+      'EmployeeID',
+      'Department',
+      'Gender',
+      'SessionName',
+      bookingDateCol + ' AS BookingDate',
+      'TimeIn',
+      'TimeOut',
+      'CreatedAt',
+      'CardNo',
+    ];
+    if (hasTimeStart) selectCols.push('TimeStart');
+    if (hasTimeEnd) selectCols.push('TimeEnd');
+
+    const req1 = pool.request();
+    let query;
+    if (fromDate && toDate) {
+      req1.input('from', sql.Date, fromDate);
+      req1.input('to', sql.Date, toDate);
+      query = `SELECT ${selectCols.join(', ')} FROM dbo.gym_reports WHERE [${bookingDateCol}] BETWEEN @from AND @to ORDER BY [${bookingDateCol}] DESC, ReportID DESC`;
+    } else {
+      query = `SELECT TOP 200 ${selectCols.join(', ')} FROM dbo.gym_reports ORDER BY [${bookingDateCol}] DESC, ReportID DESC`;
+    }
+    const r = await req1.query(query);
+    await pool.close();
+    return res.json({ ok: true, reports: Array.isArray(r?.recordset) ? r.recordset : [] });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, reports: [] });
+  }
+});

@@ -708,3 +708,45 @@ Reports:
 Verification:
 - Ran lint: warnings only.
 - Ran TypeScript integrity check: passed (noEmit).
+
+2025-12-31 14:35:00 +08:00
+
+Performance:
+- Added 5s cache for /gym-live-status-range keyed by from|to to reduce repeated queries within the same period.
+
+Verification:
+- Lint: warnings only.
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 14:42:00 +08:00
+
+Backend:
+- Added POST /gym-reports-sync that upserts bookings for a date range into dbo.gym_reports and attaches Time In/Out from live taps.
+
+Worker:
+- Enabled auto sync (env GYM_REPORTS_SYNC_ENABLE=1) to run every ~20s for today and keep dbo.gym_reports updated as new data arrives.
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 14:48:00 +08:00
+
+Database:
+- Ensured unique indexes on dbo.gym_reports:
+  - UX_gym_reports_BookingID (filtered WHERE BookingID IS NOT NULL)
+  - UX_gym_reports_EmpDateSessionStart (EmployeeID, BookingDate, SessionName, TimeStart)
+- Updated upsert matching in /gym-reports-sync to include SessionName and TimeStart.
+
+Verification:
+- Ran lint: warnings only.
+- TypeScript integrity: passed (noEmit).
+
+2025-12-31 14:52:00 +08:00
+
+Backend:
+- Added POST /gym-reports-backfill wrapper to trigger /gym-reports-sync for an arbitrary date range; returns inserted/updated counts.
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).
