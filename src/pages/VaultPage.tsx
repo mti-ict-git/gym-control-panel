@@ -88,6 +88,7 @@ export default function VaultPage() {
     isLoading: isLoadingVault,
     error: vaultError,
   } = useVaultUsersPaged({
+    q: '',
     page,
     pageSize,
     sortBy,

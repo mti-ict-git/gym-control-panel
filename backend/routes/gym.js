@@ -863,6 +863,16 @@ router.post('/gym-booking-update-status', async (req, res) => {
 });
 
 router.post('/gym-controller-access', async (req, res) => {
+  const debug = envBool(process.env.GYM_CONTROLLER_ACCESS_DEBUG, false);
+  const reqId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const debugEvents = [];
+  const log = (event, data) => {
+    if (!debug) return;
+    const entry = { t: new Date().toISOString(), event, data: data ?? null };
+    debugEvents.push(entry);
+    console.log('[gym-controller-access]', reqId, entry);
+  };
+
   const {
     DB_SERVER,
     DB_PORT,
@@ -891,6 +901,7 @@ router.post('/gym-controller-access', async (req, res) => {
   const tzAllow = envTrim(process.env.GYM_ACCESS_TZ_ALLOW) || '01';
   const tzDeny = envTrim(process.env.GYM_ACCESS_TZ_DENY) || '00';
   const customAccessTz = allow ? tzAllow : tzDeny;
+  log('start', { employee_id: employeeId, unit_no: unitNo, allow, tz: customAccessTz });
 
   const baseUrl =
     envTrim(process.env.VAULT_UPLOAD_ASMX_BASE_URL) ||
@@ -923,15 +934,17 @@ router.post('/gym-controller-access', async (req, res) => {
 
   try {
     let cardNo = card_no != null ? String(card_no).trim() : '';
+    let cardNoSource = cardNo ? 'request' : null;
 
     if (!cardNo) {
-      const pool = await sql.connect(config);
+      const pool = await new sql.ConnectionPool(config).connect();
       const req1 = pool.request();
       req1.input('emp', sql.VarChar(50), employeeId);
       const r1 = await req1.query(
         "SELECT TOP 1 CardNo FROM dbo.gym_booking WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY BookingDate DESC, CreatedAt DESC"
       );
       cardNo = r1?.recordset?.[0]?.CardNo != null ? String(r1.recordset[0].CardNo).trim() : '';
+      if (cardNo) cardNoSource = 'gym_booking';
       if (!cardNo) {
         const req2 = pool.request();
         req2.input('emp', sql.NVarChar(50), employeeId);
@@ -939,14 +952,102 @@ router.post('/gym-controller-access', async (req, res) => {
           "SELECT TOP 1 CardNo FROM dbo.gym_live_taps WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY TxnTime DESC"
         );
         cardNo = r2?.recordset?.[0]?.CardNo != null ? String(r2.recordset[0].CardNo).trim() : '';
+        if (cardNo) cardNoSource = 'gym_live_taps';
       }
 
       await pool.close();
     }
 
     if (!cardNo) {
-      return res.status(200).json({ ok: false, error: 'CardNo not found for employee_id' });
+      const pickColumn = (columns, candidates) => {
+        const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
+        for (const cand of candidates) {
+          const hit = map.get(String(cand).toLowerCase());
+          if (hit) return hit;
+        }
+        return null;
+      };
+
+      const cardServer = envTrim(process.env.CARD_DB_SERVER) || envTrim(process.env.CARDDB_SERVER);
+      const cardDatabase = envTrim(process.env.CARD_DB_DATABASE) || envTrim(process.env.CARDDB_NAME);
+      const cardUser = envTrim(process.env.CARD_DB_USER) || envTrim(process.env.CARDDB_USER);
+      const cardPassword = envTrim(process.env.CARD_DB_PASSWORD) || envTrim(process.env.CARDDB_PASSWORD);
+
+      if (cardServer && cardDatabase && cardUser && cardPassword) {
+        const cardConfig = {
+          server: cardServer,
+          port: Number(process.env.CARD_DB_PORT || process.env.CARDDB_PORT || 1433),
+          database: cardDatabase,
+          user: cardUser,
+          password: cardPassword,
+          options: {
+            encrypt: envBool(process.env.CARD_DB_ENCRYPT, false) || envBool(process.env.CARDDB_ENCRYPT, false),
+            trustServerCertificate:
+              envBool(process.env.CARD_DB_TRUST_SERVER_CERTIFICATE, true) ||
+              envBool(process.env.CARDDB_TRUST_SERVER_CERTIFICATE, true),
+          },
+          pool: { max: 1, min: 0, idleTimeoutMillis: 5000 },
+        };
+
+        const tableCandidates = ['CardDB', 'employee_card', 'employee_cards', 'cards', 'card'];
+        let cardPool;
+        try {
+          cardPool = await new sql.ConnectionPool(cardConfig).connect();
+          const tableResult = await cardPool.request().query(
+            `SELECT TOP 1 TABLE_SCHEMA AS schema_name, TABLE_NAME AS table_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME IN (${tableCandidates
+              .map((t) => `'${String(t).replace(/'/g, "''")}'`)
+              .join(', ')}) ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA`
+          );
+          const row = tableResult?.recordset?.[0] || null;
+          if (row?.schema_name && row?.table_name) {
+            const schema = String(row.schema_name);
+            const table = String(row.table_name);
+            const colsResult = await cardPool.request().query(
+              `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = '${schema.replace(/'/g, "''")}' AND TABLE_NAME = '${table.replace(/'/g, "''")}'`
+            );
+            const cols = (colsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
+            const empCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
+            const cardCol = pickColumn(cols, ['card_no', 'CardNo', 'card_number', 'CardNumber', 'id_card', 'IDCard']);
+            const activeCol = pickColumn(cols, ['is_active', 'IsActive', 'active', 'Active', 'status', 'Status']);
+            const delStateCol = pickColumn(cols, ['del_state', 'DelState']);
+            const blockCol = pickColumn(cols, ['block', 'Block', 'is_blocked', 'IsBlocked']);
+
+            if (empCol && cardCol) {
+              const req = cardPool.request();
+              req.input('id', sql.VarChar(100), employeeId);
+              const delStateWhere = delStateCol ? `AND ([${delStateCol}] = 0 OR [${delStateCol}] IS NULL)` : '';
+              const blockWhere = blockCol
+                ? `AND ([${blockCol}] IS NULL OR [${blockCol}] = 0 OR UPPER(CAST([${blockCol}] AS varchar(50))) IN ('UNBLOCK','FALSE','0'))`
+                : '';
+              const orderBy = activeCol
+                ? `ORDER BY CASE WHEN ([${activeCol}] = 1 OR UPPER(CAST([${activeCol}] AS varchar(50))) IN ('ACTIVE','AKTIF','1','TRUE')) THEN 0 ELSE 1 END`
+                : '';
+              const r = await req.query(
+                `SELECT TOP 1 [${cardCol}] AS card_no FROM [${schema}].[${table}] WHERE [${empCol}] = @id ${delStateWhere} ${blockWhere} ${orderBy}`
+              );
+              const c = r?.recordset?.[0]?.card_no != null ? String(r.recordset[0].card_no).trim() : '';
+              if (c) {
+                cardNo = c;
+                cardNoSource = 'carddb';
+              }
+            }
+          }
+          await cardPool.close();
+        } catch (_) {
+          try {
+            if (cardPool) await cardPool.close();
+          } catch (_) {}
+        }
+      }
     }
+
+    if (!cardNo) {
+      log('cardNo_not_found');
+      return res
+        .status(200)
+        .json({ ok: false, error: 'CardNo not found for employee_id', debug: debug ? { reqId, events: debugEvents } : undefined });
+    }
+    log('cardNo_resolved', { source: cardNoSource });
 
     const url = new URL(`${baseUrl.replace(/\/+$/, '')}/UploadCardByDoorUnitNo`);
     url.searchParams.set('CardNo', cardNo);
@@ -963,8 +1064,9 @@ router.post('/gym-controller-access', async (req, res) => {
       uploadStatus: extractTag(body, 'UploadStatus'),
       log: extractTag(body, 'Log'),
     };
+    log('vault_response', { http_ok: Boolean(r.ok), http_status: r.status, upload_status: parsed.uploadStatus });
 
-    const pool2 = await sql.connect(config);
+    const pool2 = await new sql.ConnectionPool(config).connect();
     await pool2.request().query(`IF OBJECT_ID('dbo.gym_controller_access_override','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_controller_access_override (
         EmployeeID VARCHAR(20) NOT NULL,
@@ -985,10 +1087,20 @@ router.post('/gym-controller-access', async (req, res) => {
     await pool2.close();
 
     const uploadOk = String(parsed.uploadStatus || '').trim() === '1';
-    return res.json({ ok: uploadOk && r.ok, employee_id: employeeId, unit_no: unitNo, tz: customAccessTz, parsed, body });
+    log('done', { ok: uploadOk && r.ok });
+    return res.json({
+      ok: uploadOk && r.ok,
+      employee_id: employeeId,
+      unit_no: unitNo,
+      tz: customAccessTz,
+      parsed,
+      body,
+      debug: debug ? { reqId, events: debugEvents } : undefined,
+    });
   } catch (error) {
     const message = error?.message || String(error);
-    return res.status(200).json({ ok: false, error: message });
+    log('error', { message });
+    return res.status(200).json({ ok: false, error: message, debug: debug ? { reqId, events: debugEvents } : undefined });
   }
 });
 

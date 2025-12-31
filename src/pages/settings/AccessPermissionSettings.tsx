@@ -262,9 +262,21 @@ export default function AccessPermissionSettings() {
       };
 
       const ids = [...committeeIds];
-      const results = await Promise.allSettled(ids.map((id) => updateOne(id)));
-      const failed = results.filter((r) => r.status === 'rejected').length;
-      if (failed > 0) throw new Error(`Updated ${ids.length - failed}/${ids.length}. ${failed} failed.`);
+      const failures: string[] = [];
+      for (const id of ids) {
+        try {
+          await updateOne(id);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          failures.push(`${id}: ${msg}`);
+        }
+      }
+
+      if (failures.length > 0) {
+        const preview = failures.slice(0, 3).join(' | ');
+        const more = failures.length > 3 ? ` (+${failures.length - 3} more)` : '';
+        throw new Error(`Updated ${ids.length - failures.length}/${ids.length}. ${failures.length} failed. ${preview}${more}`);
+      }
       return true;
     },
     onSuccess: async (_data, allow) => {

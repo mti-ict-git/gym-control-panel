@@ -67,7 +67,7 @@ export function useAddGymUser() {
       queryClient.invalidateQueries({ queryKey: ['gym-users'] });
       toast({
         title: "User Added",
-        description: `${data.name} has been added successfully.`,
+        description: 'Operation not supported.',
       });
     },
     onError: (error: Error) => {
@@ -97,7 +97,7 @@ export function useAddGymUserFromVault() {
       queryClient.invalidateQueries({ queryKey: ['gym-users'] });
       toast({
         title: "Added to Gym Users",
-        description: `${data.name} can now access the gym.`,
+        description: 'Operation not supported.',
       });
     },
     onError: (error: Error) => {
