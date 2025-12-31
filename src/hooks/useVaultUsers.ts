@@ -58,6 +58,8 @@ export function useVaultUsers() {
   return useQuery({
     queryKey: ['vault-users'],
     queryFn: async (): Promise<VaultUser[]> => {
+      const endpoint = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_DB_TEST_ENDPOINT as string | undefined;
+      const base = endpoint && endpoint.trim().length > 0 ? endpoint : '/api';
       const todayJakarta = startOfTodayJakartaUtcDate();
       const tomorrow = new Date(todayJakarta.getTime() + 24 * 60 * 60_000);
       const dayAfter = new Date(todayJakarta.getTime() + 2 * 24 * 60 * 60_000);
@@ -83,7 +85,7 @@ export function useVaultUsers() {
 
       let json: GymDbBookingResponse = null;
       try {
-        json = await tryFetch(`/api/gym-bookings?${urlParams}`);
+        json = await tryFetch(`${base}/gym-bookings?${urlParams}`);
       } catch (_) {
         json = await tryFetch(`/gym-bookings?${urlParams}`);
       }
@@ -188,6 +190,8 @@ export function useVaultUsersPaged(params: {
       if (sortBy) urlParams.set('sort_by', sortBy);
       if (sortDir) urlParams.set('sort_dir', sortDir);
 
+      const endpoint = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_DB_TEST_ENDPOINT as string | undefined;
+      const base = endpoint && endpoint.trim().length > 0 ? endpoint : '/api';
       const tryFetch = async (url: string): Promise<GymDbBookingResponse> => {
         const r = await fetch(url);
         const j = (await r.json()) as GymDbBookingResponse;
@@ -197,7 +201,7 @@ export function useVaultUsersPaged(params: {
 
       let json: GymDbBookingResponse = null;
       try {
-        json = await tryFetch(`/api/gym-bookings?${urlParams.toString()}`);
+        json = await tryFetch(`${base}/gym-bookings?${urlParams.toString()}`);
       } catch (_) {
         json = await tryFetch(`/gym-bookings?${urlParams.toString()}`);
       }

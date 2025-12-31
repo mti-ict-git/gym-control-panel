@@ -25,6 +25,7 @@ import ActiveDirectorySettings from "./pages/settings/ActiveDirectorySettings";
 import WhatsAppSettings from "./pages/settings/WhatsAppSettings";
 import ControllerSettings from "./pages/settings/ControllerSettings";
 import AccessPermissionSettings from "./pages/settings/AccessPermissionSettings";
+import DayAccessSettings from "./pages/settings/DayAccessSettings";
 
 const queryClient = new QueryClient();
 
@@ -113,6 +114,7 @@ const App = () => (
               <Route path="config/whatsapp" element={<WhatsAppSettings />} />
               <Route path="config/controller" element={<ControllerSettings />} />
               <Route path="config/access-permission" element={<AccessPermissionSettings />} />
+              <Route path="config/day-access" element={<DayAccessSettings />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

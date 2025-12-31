@@ -1,5 +1,5 @@
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { User, Shield, Settings, Users, MessageCircle, Server, ChevronDown, ChevronRight, KeyRound } from 'lucide-react';
+import { User, Shield, Settings, Users, MessageCircle, Server, ChevronDown, ChevronRight, KeyRound, CalendarDays } from 'lucide-react';
 import { useState } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { cn } from '@/lib/utils';
@@ -49,6 +49,7 @@ export default function SettingsLayout() {
     { icon: MessageCircle, label: 'WhatsApp', path: '/settings/config/whatsapp' },
     { icon: Server, label: 'Controller', path: '/settings/config/controller' },
     { icon: KeyRound, label: 'Access Permission', path: '/settings/config/access-permission' },
+    { icon: CalendarDays, label: 'Day Access', path: '/settings/config/day-access' },
   ];
 
   const isConfigActive = configNavItems.some(item => currentPath === item.path);

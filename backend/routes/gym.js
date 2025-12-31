@@ -61,13 +61,6 @@ router.post('/gym-reports-add-name', async (req, res) => {
   };
 
   try {
-    const keyParts = [from, to, qRaw, statusRaw, approvalRaw, sortKeyRaw, sortDirRaw, usePaging ? page : 'np', usePaging ? limit : 'nl'];
-    const cacheKey = keyParts.map((x) => String(x)).join('|');
-    const now = Date.now();
-    const cached = gymBookingsCache.get(cacheKey);
-    if (cached && now - cached.atMs < 3000) {
-      return res.json(cached.payload);
-    }
     const pool = await getGymDbPool(config);
     const existsRes = await pool.request().query("SELECT OBJECT_ID('dbo.gym_reports', 'U') AS id;");
     const exists = Boolean(existsRes?.recordset?.[0]?.id);
@@ -115,6 +108,13 @@ router.post('/gym-reports-init', async (req, res) => {
   };
 
   try {
+    const keyParts = [from, to, qRaw, statusRaw, approvalRaw, sortKeyRaw, sortDirRaw, usePaging ? page : 'np', usePaging ? limit : 'nl'];
+    const cacheKey = keyParts.map((x) => String(x)).join('|');
+    const now = Date.now();
+    const cached = gymBookingsCache.get(cacheKey);
+    if (cached && now - cached.atMs < 3000) {
+      return res.json(cached.payload);
+    }
     const pool = await sql.connect(config);
     const existsRes = await pool.request().query("SELECT OBJECT_ID('dbo.gym_reports', 'U') AS id;");
     const exists = Boolean(existsRes?.recordset?.[0]?.id);
@@ -838,7 +838,6 @@ router.get('/gym-bookings', async (req, res) => {
       : [];
 
     const payload = usePaging ? { ok: true, total, bookings } : { ok: true, bookings };
-    gymBookingsCache.set(cacheKey, { atMs: now, payload });
     return res.json(payload);
   } catch (error) {
     const message = error?.message || String(error);
