@@ -2039,6 +2039,100 @@ router.delete('/gym-booking/:id', async (req, res) => {
   }
 });
 
+router.get('/gym-controller-settings', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const config = {
+    server,
+    port: Number(DB_PORT || 1433),
+    database,
+    user,
+    password,
+    options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    await pool.request().query(`IF OBJECT_ID('dbo.gym_controller_settings','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_controller_settings (
+        Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
+        EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_settings_CreatedAt DEFAULT GETDATE(),
+        UpdatedAt DATETIME NULL
+      );
+    END`);
+    await pool.request().query(`IF NOT EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
+      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize) VALUES (1, 0)`);
+
+    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
+    await pool.close();
+
+    const row = r?.recordset?.[0] || null;
+    const updatedAt = row?.UpdatedAt ? new Date(row.UpdatedAt).toISOString() : row?.CreatedAt ? new Date(row.CreatedAt).toISOString() : null;
+    return res.json({ ok: true, enable_auto_organize: row?.EnableAutoOrganize ? true : false, updated_at: updatedAt });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.post('/gym-controller-settings', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const enableRaw = req?.body?.enable_auto_organize;
+  const enable = enableRaw === true || enableRaw === 1 || String(enableRaw || '').trim().toLowerCase() === 'true';
+
+  const config = {
+    server,
+    port: Number(DB_PORT || 1433),
+    database,
+    user,
+    password,
+    options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    await pool.request().query(`IF OBJECT_ID('dbo.gym_controller_settings','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_controller_settings (
+        Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
+        EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_settings_CreatedAt DEFAULT GETDATE(),
+        UpdatedAt DATETIME NULL
+      );
+    END`);
+
+    const req1 = pool.request();
+    req1.input('EnableAutoOrganize', sql.Bit, enable ? 1 : 0);
+    await req1.query(`IF EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
+      UPDATE dbo.gym_controller_settings SET EnableAutoOrganize = @EnableAutoOrganize, UpdatedAt = SYSDATETIME() WHERE Id = 1
+    ELSE
+      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, UpdatedAt) VALUES (1, @EnableAutoOrganize, SYSDATETIME())`);
+    await pool.close();
+
+    return res.json({ ok: true, enable_auto_organize: enable });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
 router.post('/db-connections-init', async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
@@ -2414,24 +2508,18 @@ router.get('/gym-live-status', async (req, res) => {
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
   try {
     const pool = await new sql.ConnectionPool(config).connect();
-    const masterDbRaw = envTrim(process.env.MASTER_DB_DATABASE) || 'MTIMasterEmployeeDB';
-    const masterDb = /^[A-Za-z0-9_]+$/.test(masterDbRaw) ? masterDbRaw : 'MTIMasterEmployeeDB';
     const req1 = pool.request();
     req1.input('today', sql.Date, new Date());
     const result = await req1.query(
-      `SELECT ec.name AS employee_name,
-        gb.EmployeeID AS employee_id,
-        ee.department AS department,
+      `SELECT gb.EmployeeID AS employee_id,
         s.Session AS session_name,
         CONVERT(varchar(5), s.StartTime, 108) AS time_start,
         CONVERT(varchar(5), s.EndTime, 108) AS time_end,
         gb.Status AS booking_status
       FROM dbo.gym_booking gb
       LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
-      LEFT JOIN ${masterDb}.dbo.employee_core ec ON gb.EmployeeID = ec.employee_id
-      LEFT JOIN ${masterDb}.dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE'
       WHERE gb.BookingDate = @today AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
-      ORDER BY s.StartTime ASC, ec.name ASC`
+      ORDER BY s.StartTime ASC, gb.EmployeeID ASC`
     );
     const unitRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
     const units = unitRaw ? unitRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
@@ -2497,44 +2585,72 @@ router.get('/gym-live-status', async (req, res) => {
       ).filter((v) => v.length > 0)
     );
     const additionalEmpIds = Array.from(tapMap.keys()).filter((k) => k && !bookedEmpIds.has(k)).slice(0, 200);
-    let additionalInfo = new Map();
-    if (additionalEmpIds.length > 0) {
-      const {
-        MASTER_DB_SERVER,
-        MASTER_DB_PORT,
-        MASTER_DB_DATABASE,
-        MASTER_DB_USER,
-        MASTER_DB_PASSWORD,
-        MASTER_DB_ENCRYPT,
-        MASTER_DB_TRUST_SERVER_CERTIFICATE,
-      } = process.env;
-      const mServer = envTrim(MASTER_DB_SERVER);
-      const mDatabase = envTrim(MASTER_DB_DATABASE);
-      const mUser = envTrim(MASTER_DB_USER);
-      const mPassword = envTrim(MASTER_DB_PASSWORD);
-      if (mServer && mDatabase && mUser && mPassword) {
-        const mConfig = {
-          server: mServer,
-          port: Number(MASTER_DB_PORT || 1433),
-          database: mDatabase,
-          user: mUser,
-          password: mPassword,
-          options: { encrypt: envBool(MASTER_DB_ENCRYPT, false), trustServerCertificate: envBool(MASTER_DB_TRUST_SERVER_CERTIFICATE, true) },
-          pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
-        };
-        try {
-          const mPool = await new sql.ConnectionPool(mConfig).connect();
+    const {
+      MASTER_DB_SERVER,
+      MASTER_DB_PORT,
+      MASTER_DB_DATABASE,
+      MASTER_DB_USER,
+      MASTER_DB_PASSWORD,
+      MASTER_DB_ENCRYPT,
+      MASTER_DB_TRUST_SERVER_CERTIFICATE,
+    } = process.env;
+    const mServer = envTrim(MASTER_DB_SERVER);
+    const mDatabase = envTrim(MASTER_DB_DATABASE);
+    const mUser = envTrim(MASTER_DB_USER);
+    const mPassword = envTrim(MASTER_DB_PASSWORD);
+    const pickColumn = (columns, candidates) => {
+      const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
+      for (const cand of candidates) {
+        const hit = map.get(String(cand).toLowerCase());
+        if (hit) return hit;
+      }
+      return null;
+    };
+    const pickSchemaForTable = async (pool2, tableName) => {
+      const safe = String(tableName || '').trim();
+      if (!/^[A-Za-z0-9_]+$/.test(safe)) return null;
+      const reqS = pool2.request();
+      reqS.input('tableName', sql.VarChar(128), safe);
+      const r = await reqS.query(
+        "SELECT TOP 1 TABLE_SCHEMA AS schema_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA"
+      );
+      const schemaName = r?.recordset?.[0]?.schema_name ? String(r.recordset[0].schema_name) : null;
+      return schemaName && schemaName.trim().length > 0 ? schemaName : null;
+    };
+    const infoEmpIds = Array.from(new Set(Array.from(bookedEmpIds).concat(additionalEmpIds))).slice(0, 400);
+    let empInfo = new Map();
+    if (infoEmpIds.length > 0 && mServer && mDatabase && mUser && mPassword) {
+      const mConfig = {
+        server: mServer,
+        port: Number(MASTER_DB_PORT || 1433),
+        database: mDatabase,
+        user: mUser,
+        password: mPassword,
+        options: { encrypt: envBool(MASTER_DB_ENCRYPT, false), trustServerCertificate: envBool(MASTER_DB_TRUST_SERVER_CERTIFICATE, true) },
+        pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+      };
+      try {
+        const mPool = await new sql.ConnectionPool(mConfig).connect();
+        const coreSchema = (await pickSchemaForTable(mPool, 'employee_core')) || 'dbo';
+        const colsRes = await mPool.request().query(
+          `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${coreSchema.replace(/'/g, "''")}' AND TABLE_NAME='employee_core'`
+        );
+        const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+        const employeeIdCol = pickColumn(cols, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
+        const nameCol = pickColumn(cols, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
+        const deptCol = pickColumn(cols, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
+        if (employeeIdCol && nameCol) {
           const reqM = mPool.request();
-          additionalEmpIds.forEach((id, idx) => reqM.input(`e${idx}`, sql.VarChar(50), id));
-          const inList = additionalEmpIds.map((_, idx) => `@e${idx}`).join(',');
-          const qM = `
-            SELECT ec.employee_id, ec.name AS employee_name, ee.department
-            FROM ${mDatabase}.dbo.employee_core ec
-            LEFT JOIN ${mDatabase}.dbo.employee_employment ee ON ec.employee_id = ee.employee_id AND ee.status = 'ACTIVE'
-            WHERE ec.employee_id IN (${inList})
-          `;
+          infoEmpIds.forEach((id, idx) => reqM.input(`e${idx}`, sql.VarChar(100), id));
+          const inList = infoEmpIds.map((_, idx) => `@e${idx}`).join(',');
+          const selectCols = [
+            `[${employeeIdCol}] AS employee_id`,
+            `[${nameCol}] AS employee_name`,
+            deptCol ? `[${deptCol}] AS department` : `CAST(NULL AS varchar(255)) AS department`,
+          ].join(', ');
+          const qM = `SELECT ${selectCols} FROM [${coreSchema}].[employee_core] WHERE [${employeeIdCol}] IN (${inList})`;
           const rM = await reqM.query(qM);
-          additionalInfo = new Map(
+          empInfo = new Map(
             (Array.isArray(rM?.recordset) ? rM.recordset : []).map((x) => {
               const id = x?.employee_id != null ? String(x.employee_id).trim() : '';
               const name = x?.employee_name != null ? String(x.employee_name).trim() : null;
@@ -2542,16 +2658,61 @@ router.get('/gym-live-status', async (req, res) => {
               return [id, { name, department: dept }];
             })
           );
-          await mPool.close();
-        } catch (_) {}
-      }
+
+          const employmentSchema = await pickSchemaForTable(mPool, 'employee_employment');
+          if (employmentSchema) {
+            const empColsRes = await mPool.request().query(
+              `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${employmentSchema.replace(/'/g, "''")}' AND TABLE_NAME='employee_employment'`
+            );
+            const empCols = (empColsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+            const empIdCol2 = pickColumn(empCols, ['employee_id', 'EmployeeID', 'employeeid', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
+            const deptCol2 = pickColumn(empCols, ['department', 'Department', 'dept', 'Dept', 'department_name', 'DepartmentName', 'dept_name', 'DeptName']);
+            const endDateCol = pickColumn(empCols, ['end_date', 'EndDate', 'enddate', 'termination_date', 'TerminationDate']);
+            const startDateCol = pickColumn(empCols, ['start_date', 'StartDate', 'startdate', 'effective_date', 'EffectiveDate']);
+            if (empIdCol2 && deptCol2) {
+              const reqE = mPool.request();
+              infoEmpIds.forEach((id, idx) => reqE.input(`e${idx}`, sql.VarChar(100), id));
+              const inList2 = infoEmpIds.map((_, idx) => `@e${idx}`).join(',');
+              const orderParts = [];
+              if (endDateCol) orderParts.push(`CASE WHEN [${endDateCol}] IS NULL THEN 0 ELSE 1 END`);
+              if (startDateCol) orderParts.push(`[${startDateCol}] DESC`);
+              orderParts.push(`[${empIdCol2}] ASC`);
+              const orderBy = orderParts.join(', ');
+              const qE = `
+                WITH ranked AS (
+                  SELECT
+                    [${empIdCol2}] AS employee_id,
+                    [${deptCol2}] AS department,
+                    ROW_NUMBER() OVER (PARTITION BY [${empIdCol2}] ORDER BY ${orderBy}) AS rn
+                  FROM [${employmentSchema}].[employee_employment]
+                  WHERE [${empIdCol2}] IN (${inList2})
+                )
+                SELECT employee_id, department FROM ranked WHERE rn = 1
+              `;
+              const rE = await reqE.query(qE);
+              const rows = Array.isArray(rE?.recordset) ? rE.recordset : [];
+              for (const row of rows) {
+                const id = row?.employee_id != null ? String(row.employee_id).trim() : '';
+                const dept = row?.department != null ? String(row.department).trim() : '';
+                if (!id || !dept) continue;
+                const current = empInfo.get(id) || { name: null, department: null };
+                if (current.department == null || !String(current.department).trim()) {
+                  empInfo.set(id, { name: current.name, department: dept });
+                }
+              }
+            }
+          }
+        }
+        await mPool.close();
+      } catch (_) {}
     }
     await pool.close();
     const people = Array.isArray(result?.recordset)
       ? result.recordset.map((r) => {
-          const name = r?.employee_name != null ? String(r.employee_name).trim() : null;
           const empId = r?.employee_id != null ? String(r.employee_id).trim() : null;
-          const dept = r?.department != null ? String(r.department).trim() : null;
+          const info = empId ? (empInfo.get(empId) || { name: null, department: null }) : { name: null, department: null };
+          const name = info.name;
+          const dept = info.department;
           const sess = r?.session_name != null ? String(r.session_name).trim() : '';
           const ts = r?.time_start != null ? String(r.time_start).trim() : null;
           const te = r?.time_end != null ? String(r.time_end).trim() : null;
@@ -2566,7 +2727,7 @@ router.get('/gym-live-status', async (req, res) => {
       : [];
     const extra = additionalEmpIds.map((empId) => {
       const tap = tapMap.get(empId) || { time_in: null, time_out: null, status: null };
-      const info = additionalInfo.get(empId) || { name: null, department: null };
+      const info = empInfo.get(empId) || { name: null, department: null };
       const fallbackStatus = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'LEFT');
       return { name: info.name, employee_id: empId, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: tap.status || fallbackStatus };
     });
