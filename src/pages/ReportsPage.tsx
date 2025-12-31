@@ -19,7 +19,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 
-type DateRange = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'custom';
+type DateRange = 'today' | 'next2days' | 'yesterday' | 'week' | 'month' | 'year' | 'custom' | 'all';
 
 interface BookingRecord {
   booking_id: number;
@@ -42,9 +42,13 @@ function formatBookingId(n: number | null | undefined): string {
 function getDateRange(range: DateRange, customStart?: Date, customEnd?: Date): { start: Date; end: Date } {
   const now = new Date();
   
-  switch (range) {
-    case 'today':
-      return { start: startOfDay(now), end: endOfDay(addDays(now, 1)) };
+    switch (range) {
+      case 'today':
+        return { start: startOfDay(now), end: endOfDay(now) };
+      case 'next2days':
+        return { start: startOfDay(now), end: endOfDay(addDays(now, 2)) };
+      case 'all':
+        return { start: new Date('1970-01-01'), end: new Date('2100-01-01') };
     case 'yesterday': {
       const yesterday = subDays(now, 1);
       return { start: startOfDay(yesterday), end: endOfDay(yesterday) };
@@ -143,7 +147,7 @@ function getGenderLabel(gender: string | null) {
 }
 
 export default function ReportsPage() {
-  const [dateRange, setDateRange] = useState<DateRange>('today');
+  const [dateRange, setDateRange] = useState<DateRange>('all');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
@@ -207,7 +211,28 @@ export default function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `gym-attendance-${format(start, 'yyyy-MM-dd')}-to-${format(end, 'yyyy-MM-dd')}.csv`;
+    const filename = (() => {
+      switch (dateRange) {
+        case 'all':
+          return 'gym-attendance-all.csv';
+        case 'next2days':
+          return 'gym-attendance-next-2-days.csv';
+        case 'today':
+          return 'gym-attendance-today.csv';
+        case 'yesterday':
+          return 'gym-attendance-yesterday.csv';
+        case 'week':
+          return 'gym-attendance-this-week.csv';
+        case 'month':
+          return 'gym-attendance-this-month.csv';
+        case 'year':
+          return 'gym-attendance-this-year.csv';
+        case 'custom':
+        default:
+          return `gym-attendance-${format(start, 'yyyy-MM-dd')}-to-${format(end, 'yyyy-MM-dd')}.csv`;
+      }
+    })();
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -245,7 +270,9 @@ export default function ReportsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="all">All</SelectItem>
                     <SelectItem value="today">Today</SelectItem>
+                    <SelectItem value="next2days">Next 2 Days</SelectItem>
                     <SelectItem value="yesterday">Yesterday</SelectItem>
                     <SelectItem value="week">This Week</SelectItem>
                     <SelectItem value="month">This Month</SelectItem>
@@ -279,7 +306,11 @@ export default function ReportsPage() {
               )}
 
               <div className="text-sm text-muted-foreground">
-                Showing: {format(start, 'MMM d, yyyy')} - {format(end, 'MMM d, yyyy')}
+                {dateRange === 'all' ? (
+                  <>Showing: All Time</>
+                ) : (
+                  <>Showing: {format(start, 'MMM d, yyyy')} - {format(end, 'MMM d, yyyy')}</>
+                )}
               </div>
             </div>
           </CardContent>

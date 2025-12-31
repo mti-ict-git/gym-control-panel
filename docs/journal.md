@@ -522,3 +522,24 @@ UI:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+
+2025-12-31 10:15:00 +08:00
+
+Reports:
+- Set default period to All and moved All to top of Period dropdown.
+- Added Next 2 Days period; kept Today strictly single day.
+- Showing label displays All Time when All is selected.
+- CSV export filename becomes gym-attendance-all.csv when All is selected; otherwise uses start-to-end.
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).
+
+2025-12-31 10:28:00 +08:00
+
+Reports:
+- CSV export filenames now vary by Period selection: all, next-2-days, today, yesterday, this-week, this-month, this-year, or from-to for custom.
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).
