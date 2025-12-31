@@ -5,12 +5,12 @@
 - Hybrid web app (desktop + mobile) built with Vite + React, styled with Shadcn UI + TailwindCSS
 - Authentication via Supabase; protected routes use a guard component
 - Backend modularized at http://localhost:5055 (Node.js + Express + MSSQL)
-- Default route redirects to /register for first-time onboarding
+- Default route redirects to /booking for first-time onboarding
 
 ## User Journey
 
-1. Landing → Register (Gym Booking)
-   - Visiting / redirects to /register
+1. Landing → Booking (Gym Booking)
+   - Visiting / redirects to /booking
    - User enters Employee ID, selects Date (tomorrow or next day) and Session, then submits
    - Success toast confirms registration and navigates to Gym Booking list
    - Admin sign-in/sign-up is handled at /login (tabs: Sign In, Sign Up); employees do not need accounts for booking (HRIS-synced)
@@ -52,7 +52,7 @@
 
 ## Screens & Wireframes
 
-### Register (/register)
+### Booking (/booking)
 - Centered Card with inputs and clear CTAs
 - Validation messages inline; toast for success or error
 
@@ -60,7 +60,7 @@ Components
 - Card, CardHeader, CardContent, Input, Label, Button, Toaster
 
 ### Login (/login)
-- Similar to Register, includes forgot-password link (optional)
+- Similar to Booking, includes forgot-password link (optional)
 
 ### Dashboard (/dashboard)
 - Grid layout with stat cards, occupancy card, chart panels

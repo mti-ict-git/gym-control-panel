@@ -37,9 +37,9 @@ const App = () => (
       <AuthProvider>
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <Routes>
-            <Route path="/" element={<Navigate to="/register" replace />} />
+            <Route path="/" element={<Navigate to="/booking" replace />} />
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/booking" element={<RegisterPage />} />
             <Route
               path="/dashboard"
               element={

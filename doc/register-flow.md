@@ -1,6 +1,6 @@
-# Register Flow — Frontend and Backend
+# Booking Flow — Frontend and Backend
 
-- Trigger: User clicks Register on the Gym Booking form
+- Trigger: User clicks Book on the Gym Booking form
 - Goal: Create a booking in GymDB with quota/duplicate checks and enrich data from MasterDB/CardDB
 
 ## Frontend
