@@ -22,12 +22,7 @@ export function useGymLiveStatus() {
         if (r.status >= 500) throw new Error(j?.error || 'Server error');
         return j;
       };
-      const endpoint = String(import.meta.env.VITE_BACKEND_URL || '').trim();
       const candidates: string[] = [];
-      if (endpoint) {
-        candidates.push(`${endpoint}/api/gym-live-status`);
-        candidates.push(`${endpoint}/gym-live-status`);
-      }
       candidates.push('/api/gym-live-status');
       candidates.push('/gym-live-status');
       let json: LiveStatusResponse = null;
