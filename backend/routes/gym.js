@@ -2261,17 +2261,18 @@ router.get('/gym-accounts', async (req, res) => {
     const colLastSignIn = Array.isArray(hasLastSignIn?.recordset) && hasLastSignIn.recordset.length > 0;
     const hasEmailVerified = await pool.request().query("SELECT 1 AS ok FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'EmailVerified'");
     const colEmailVerified = Array.isArray(hasEmailVerified?.recordset) && hasEmailVerified.recordset.length > 0;
-    const selectCols = ['AccountID', 'Username', 'Email', 'Role', 'IsActive', 'CreatedAt', 'UpdatedAt'];
+    const utcDateExpr = (col) => `DATEADD(minute, DATEDIFF(minute, GETDATE(), GETUTCDATE()), ${col}) AS ${col}`;
+    const selectCols = ['AccountID', 'Username', 'Email', 'Role', 'IsActive', utcDateExpr('CreatedAt'), utcDateExpr('UpdatedAt')];
     if (colEmailVerified) selectCols.push('EmailVerified');
-    if (colLastSignIn) selectCols.push('LastSignIn');
-    if (colLastSignInAt) selectCols.push('LastSignInAt');
+    if (colLastSignIn) selectCols.push(utcDateExpr('LastSignIn'));
+    if (colLastSignInAt) selectCols.push(utcDateExpr('LastSignInAt'));
     let result;
     try {
       result = await pool.request().query(
         `SELECT ${selectCols.join(', ')} FROM dbo.gym_account ORDER BY CreatedAt DESC`
       );
     } catch (e) {
-      const minimalCols = ['AccountID', 'Username', 'Email', 'Role', 'IsActive', 'CreatedAt', 'UpdatedAt'];
+      const minimalCols = ['AccountID', 'Username', 'Email', 'Role', 'IsActive', utcDateExpr('CreatedAt'), utcDateExpr('UpdatedAt')];
       result = await pool.request().query(
         `SELECT ${minimalCols.join(', ')} FROM dbo.gym_account ORDER BY CreatedAt DESC`
       );
