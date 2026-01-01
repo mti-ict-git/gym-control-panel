@@ -33,6 +33,8 @@ interface BookingRecord {
   booking_date: string;
   time_start: string | null;
   time_end: string | null;
+  time_in: string | null;
+  time_out: string | null;
   status?: string | null;
 }
 
@@ -206,6 +208,9 @@ export default function ReportsPage() {
       const fromStr = format(start, 'yyyy-MM-dd');
       const toStr = format(end, 'yyyy-MM-dd');
       const tryFetch = async (base: string) => {
+        try {
+          await fetch(`${base}/gym-reports-backfill?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`, { method: 'POST' });
+        } catch (_) { void 0; }
         const resp = await fetch(`${base}/gym-reports?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(pageSize))}&sort_by=${encodeURIComponent(String(sortBy || ''))}&sort_dir=${encodeURIComponent(String(sortDir))}`);
         const json = await resp.json();
         if (!json || !json.ok) return { rows: [], total: 0 } as ReportQueryResult;
@@ -225,6 +230,8 @@ export default function ReportsPage() {
             ReportDate?: string | Date | null;
             TimeStart?: string | null;
             TimeEnd?: string | null;
+            TimeIn?: string | Date | null;
+            TimeOut?: string | Date | null;
           };
           return {
             booking_id: Number(obj.BookingID ?? obj.booking_id ?? 0),
@@ -243,6 +250,8 @@ export default function ReportsPage() {
                 : '',
             time_start: obj.TimeStart != null ? String(obj.TimeStart) : null,
             time_end: obj.TimeEnd != null ? String(obj.TimeEnd) : null,
+            time_in: obj.TimeIn != null ? String(obj.TimeIn) : null,
+            time_out: obj.TimeOut != null ? String(obj.TimeOut) : null,
             status: null,
           } as BookingRecord;
         }) as BookingRecord[];
@@ -314,40 +323,7 @@ export default function ReportsPage() {
     return dir === 'asc' ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />;
   };
 
-  const { data: liveRange = [] } = useQuery({
-    queryKey: ['gym-live-status-range', dateRange, customStartDate, customEndDate],
-    queryFn: async () => {
-      const fromStr = format(start, 'yyyy-MM-dd');
-      const toStr = format(end, 'yyyy-MM-dd');
-      const tryFetch = async (base: string) => {
-        const resp = await fetch(`${base}/gym-live-status-range?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
-        const json = await resp.json();
-        if (!json || !json.ok) return [] as LiveTapRange[];
-        const taps = Array.isArray(json.taps) ? json.taps : [];
-        return taps.map((t: unknown) => {
-          const obj = t as { employee_id?: string; date?: string; time_in?: string | null; time_out?: string | null };
-          return {
-            employee_id: String(obj.employee_id || ''),
-            date: String(obj.date || ''),
-            time_in: obj.time_in != null ? String(obj.time_in) : null,
-            time_out: obj.time_out != null ? String(obj.time_out) : null,
-          } as LiveTapRange;
-        });
-      };
-      try {
-        const data = await tryFetch('/api');
-        if (Array.isArray(data)) return data;
-        return await tryFetch('');
-      } catch (_) {
-        return await tryFetch('');
-      }
-    },
-    staleTime: 5000,
-  });
-
-  const liveMap = new Map<string, { time_in: string | null; time_out: string | null }>(
-    (liveRange || []).map((p) => [`${p.employee_id}__${p.date}`, { time_in: p.time_in, time_out: p.time_out }])
-  );
+  // In/Out now sourced directly from gym_reports (TimeIn/TimeOut)
 
   const formatTimeOnly = (iso: string | null): string => {
     if (!iso) return '-';
@@ -734,10 +710,10 @@ export default function ReportsPage() {
                         <TableCell>{record.department || '-'}</TableCell>
                         <TableCell className="font-medium">{getGenderChip(record.gender)}</TableCell>
                         <TableCell className="font-mono text-sm">
-                          {formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_in)}
+                          {formatTimeOnly(record.time_in)}
                         </TableCell>
                         <TableCell className="font-mono text-sm">
-                          {formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_out)}
+                          {formatTimeOnly(record.time_out)}
                         </TableCell>
                         <TableCell className="font-mono text-sm">
                           {(() => {
