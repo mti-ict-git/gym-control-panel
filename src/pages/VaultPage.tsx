@@ -45,6 +45,21 @@ function SessionBadge({ name }: { name: string }) {
   );
 }
 
+function TimeScheduleBadge({ session, start, end }: { session: string | null; start: string | null; end: string | null }) {
+  const key = String(session || '').toLowerCase();
+  const color = key.includes('morning')
+    ? 'bg-green-100 text-green-900'
+    : key.includes('afternoon')
+    ? 'bg-blue-100 text-blue-900'
+    : key.includes('night') && (key.includes('1') || key.includes('- 1'))
+    ? 'bg-purple-100 text-purple-900'
+    : key.includes('night') && (key.includes('2') || key.includes('- 2'))
+    ? 'bg-amber-100 text-amber-900'
+    : 'bg-slate-100 text-slate-900';
+  const text = start && end ? `${start} - ${end}` : start ? start : 'COMITTE';
+  return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md font-medium ${color}`}>{text}</span>;
+}
+
 function GenderBadge({ gender }: { gender: string | null }) {
   if (!gender) return <span className="text-muted-foreground">-</span>;
   const g = gender.trim().toLowerCase();
@@ -237,8 +252,8 @@ export default function VaultPage() {
                         <div><SessionBadge name={user.session_name || '-'} /></div>
                         </div>
                         <div className="col-span-6">
-                          <div className="text-muted-foreground">Time Schedule</div>
-                          <div>{user.time_start && user.time_end ? `${user.time_start} - ${user.time_end}` : user.time_start || '-'}</div>
+                        <div className="text-muted-foreground">Time Schedule</div>
+                          <div><TimeScheduleBadge session={user.session_name} start={user.time_start} end={user.time_end} /></div>
                         </div>
                         <div className="col-span-6">
                           <div className="text-muted-foreground">Date</div>
@@ -381,7 +396,7 @@ export default function VaultPage() {
                         <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
                         <TableCell className="hidden md:table-cell"><SessionBadge name={user.session_name || '-'} /></TableCell>
                         <TableCell className="hidden md:table-cell">
-                          {user.time_start && user.time_end ? `${user.time_start} - ${user.time_end}` : user.time_start || '-'}
+                          <TimeScheduleBadge session={user.session_name} start={user.time_start} end={user.time_end} />
                         </TableCell>
                         <TableCell>{user.booking_date}</TableCell>
                         <TableCell className="text-center">

@@ -155,6 +155,25 @@ function getSessionChip(session: string | null) {
   );
 }
 
+function getScheduleChip(session: string | null, text: string) {
+  const label = String(session || '').trim().toLowerCase();
+  const content = String(text || '').trim() || 'COMITTE';
+  const color = label.startsWith('morning')
+    ? 'bg-green-100 text-green-700 border-green-200'
+    : label.startsWith('afternoon')
+    ? 'bg-blue-100 text-blue-700 border-blue-200'
+    : label.includes('night') && label.includes('1')
+    ? 'bg-purple-100 text-purple-700 border-purple-200'
+    : label.includes('night') && label.includes('2')
+    ? 'bg-amber-100 text-amber-700 border-amber-200'
+    : 'bg-slate-100 text-slate-700 border-slate-200';
+  return (
+    <span className={`inline-flex items-center rounded-md bg-slate-100 border px-2 py-1 text-xs font-medium ${color}`}>
+      {content}
+    </span>
+  );
+}
+
 function getGenderLabel(gender: string | null) {
   const v = String(gender || '').trim().toUpperCase();
   if (v === 'M' || v === 'MALE') return 'Male';
@@ -715,12 +734,13 @@ export default function ReportsPage() {
                         <TableCell className="font-mono text-sm">
                           {formatTimeOnly(record.time_out)}
                         </TableCell>
-                        <TableCell className="font-mono text-sm">
+                        <TableCell className="font-medium">
                           {(() => {
                             const s = bookingSchedulesMap.get(record.booking_id);
                             const start = record.time_start ?? s?.time_start ?? null;
                             const end = record.time_end ?? s?.time_end ?? null;
-                            return start && end ? `${start} - ${end}` : start || '-';
+                            const text = start && end ? `${start} - ${end}` : start || '';
+                            return getScheduleChip(record.session_name, text);
                           })()}
                         </TableCell>
                         <TableCell className="font-medium">{getSessionChip(record.session_name)}</TableCell>
