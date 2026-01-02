@@ -1444,45 +1444,46 @@ router.post('/gym-booking-create', async (req, res) => {
 
     const masterPool = await sql.connect(masterConfig);
 
+    let empRow = null;
     const coreSchema = await pickSchemaForTable(masterPool, 'employee_core');
-    if (!coreSchema) {
-      await masterPool.close();
-      return res.status(200).json({ ok: false, error: 'Missing table employee_core' });
+    if (coreSchema) {
+      const columnsResult = await masterPool.request().query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'employee_core' AND TABLE_SCHEMA = '${coreSchema.replace(/'/g, "''")}'`
+      );
+      const columns = (columnsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
+
+      const employeeIdCol = pickColumn(columns, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID']);
+      const nameCol = pickColumn(columns, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
+      const deptCol = pickColumn(columns, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
+      const cardCol = pickColumn(columns, ['id_card', 'ID Card', 'IDCard', 'card_no', 'Card No', 'CardNo']);
+      const staffNoCol = pickColumn(columns, ['staff_no', 'StaffNo', 'employee_no', 'EmployeeNo']);
+      const genderCol = pickColumn(columns, ['gender', 'Gender', 'sex', 'Sex', 'jenis_kelamin', 'Jenis Kelamin']);
+
+      if (!employeeIdCol || !nameCol) {
+        // Fall back: minimal info
+        empRow = { employee_id: employeeId, name: employeeId, department: null, card_no: null, staff_no: employeeId, gender: null };
+      } else {
+        const selectCols = [
+          `[${employeeIdCol}] AS employee_id`,
+          `[${nameCol}] AS name`,
+          deptCol ? `[${deptCol}] AS department` : `CAST(NULL AS varchar(255)) AS department`,
+          cardCol ? `[${cardCol}] AS card_no` : `CAST(NULL AS varchar(255)) AS card_no`,
+          staffNoCol ? `[${staffNoCol}] AS staff_no` : `CAST(NULL AS varchar(255)) AS staff_no`,
+          genderCol ? `[${genderCol}] AS gender` : `CAST(NULL AS varchar(50)) AS gender`,
+        ].join(',\n        ');
+
+        const empReq = masterPool.request();
+        empReq.input('id', sql.VarChar(100), employeeId);
+        const empResult = await empReq.query(
+          `SELECT TOP 1 ${selectCols} FROM [${coreSchema}].[employee_core] WHERE [${employeeIdCol}] = @id`
+        );
+        empRow = Array.isArray(empResult?.recordset) ? empResult.recordset[0] : null;
+      }
+    } else {
+      // No employee_core: proceed with minimal defaults
+      empRow = { employee_id: employeeId, name: employeeId, department: null, card_no: null, staff_no: employeeId, gender: null };
     }
 
-    const columnsResult = await masterPool.request().query(
-      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'employee_core' AND TABLE_SCHEMA = '${coreSchema.replace(/'/g, "''")}'`
-    );
-    const columns = (columnsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
-
-    const employeeIdCol = pickColumn(columns, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID']);
-    const nameCol = pickColumn(columns, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
-    const deptCol = pickColumn(columns, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
-    const cardCol = pickColumn(columns, ['id_card', 'ID Card', 'IDCard', 'card_no', 'Card No', 'CardNo']);
-    const staffNoCol = pickColumn(columns, ['staff_no', 'StaffNo', 'employee_no', 'EmployeeNo']);
-    const genderCol = pickColumn(columns, ['gender', 'Gender', 'sex', 'Sex', 'jenis_kelamin', 'Jenis Kelamin']);
-
-    if (!employeeIdCol || !nameCol) {
-      await masterPool.close();
-      return res.status(200).json({ ok: false, error: 'employee_core must have employee_id and Name columns' });
-    }
-
-    const selectCols = [
-      `[${employeeIdCol}] AS employee_id`,
-      `[${nameCol}] AS name`,
-      deptCol ? `[${deptCol}] AS department` : `CAST(NULL AS varchar(255)) AS department`,
-      cardCol ? `[${cardCol}] AS card_no` : `CAST(NULL AS varchar(255)) AS card_no`,
-      staffNoCol ? `[${staffNoCol}] AS staff_no` : `CAST(NULL AS varchar(255)) AS staff_no`,
-      genderCol ? `[${genderCol}] AS gender` : `CAST(NULL AS varchar(50)) AS gender`,
-    ].join(',\n        ');
-
-    const empReq = masterPool.request();
-    empReq.input('id', sql.VarChar(100), employeeId);
-    const empResult = await empReq.query(
-      `SELECT TOP 1 ${selectCols} FROM [${coreSchema}].[employee_core] WHERE [${employeeIdCol}] = @id`
-    );
-
-    const empRow = Array.isArray(empResult?.recordset) ? empResult.recordset[0] : null;
     if (!empRow) {
       await masterPool.close();
       return res.status(200).json({ ok: false, error: 'Employee not found' });
@@ -1530,6 +1531,44 @@ router.post('/gym-booking-create', async (req, res) => {
     const gender = empRow.gender != null && String(empRow.gender).trim() ? String(empRow.gender).trim() : 'UNKNOWN';
 
     const gymPool2 = await sql.connect(gymConfig);
+    // Ensure local employee directory and upsert minimal info
+    await gymPool2.request().query(
+      `IF OBJECT_ID('dbo.gym_employee','U') IS NULL BEGIN
+         CREATE TABLE dbo.gym_employee (
+           EmployeeID VARCHAR(20) NOT NULL PRIMARY KEY,
+           Name VARCHAR(100) NOT NULL,
+           Department VARCHAR(100) NULL,
+           CardNo VARCHAR(50) NULL,
+           Gender VARCHAR(10) NULL,
+           CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_employee_CreatedAt DEFAULT GETDATE(),
+           UpdatedAt DATETIME NULL
+         );
+       END;`
+    );
+    const upReq = gymPool2.request();
+    upReq.input('EmployeeID', sql.VarChar(20), employeeId);
+    upReq.input('Name', sql.VarChar(100), employeeName);
+    upReq.input('Department', sql.VarChar(100), department || null);
+    upReq.input('CardNo', sql.VarChar(50), cardNo || null);
+    upReq.input('Gender', sql.VarChar(10), gender || null);
+    await upReq.query(
+      `IF EXISTS (SELECT 1 FROM dbo.gym_employee WHERE EmployeeID = @EmployeeID)
+       BEGIN
+         UPDATE dbo.gym_employee
+         SET Name = @Name,
+             Department = @Department,
+             CardNo = @CardNo,
+             Gender = @Gender,
+             UpdatedAt = GETDATE()
+         WHERE EmployeeID = @EmployeeID;
+       END
+       ELSE
+       BEGIN
+         INSERT INTO dbo.gym_employee (EmployeeID, Name, Department, CardNo, Gender)
+         VALUES (@EmployeeID, @Name, @Department, @CardNo, @Gender);
+       END;`
+    );
+
     const insertReq = gymPool2.request();
     insertReq.input('employee_id', sql.VarChar(20), employeeId);
     insertReq.input('card_no', sql.VarChar(50), cardNo);

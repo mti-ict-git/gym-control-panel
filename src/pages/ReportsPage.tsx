@@ -397,7 +397,7 @@ export default function ReportsPage() {
       String((record.name ?? record.employee_name) ?? ''),
       String(record.employee_id ?? ''),
       String(record.department ?? ''),
-      String(record.gender ?? ''),
+      getGenderLabel(record.gender),
       formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_in),
       formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_out),
       (() => {
