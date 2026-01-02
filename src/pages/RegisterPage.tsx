@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
  
 import { useForm, FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -10,6 +10,7 @@ import treadmillImg from '@/assets/treadmill.png';
 import benchPressImg from '@/assets/bench-press.png';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -62,6 +63,13 @@ export default function RegisterPage() {
   const contactPhone = '+6285852047041';
   const [errorOpen, setErrorOpen] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
+  const [eulaOpen, setEulaOpen] = useState(false);
+  const [eulaAccepted, setEulaAccepted] = useState(false);
+  const [pendingData, setPendingData] = useState<FormData | null>(null);
+  const defaultEulaText = 'By proceeding, you agree to use the gym facilities responsibly, follow all safety guidelines, and acknowledge that schedules and quotas are subject to change. You consent to your booking data being processed for attendance and capacity management.';
+  const [eulaText, setEulaText] = useState<string>(defaultEulaText);
+  const [eulaScrolled, setEulaScrolled] = useState(false);
+  const eulaBoxRef = useRef<HTMLDivElement | null>(null);
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -261,7 +269,7 @@ export default function RegisterPage() {
     return () => { clearTimeout(t); ctrl.abort(); };
   }, [selectedDate, selectedGymDbSession, availability]);
 
-  const onSubmit = async (data: FormData) => {
+  const submitRegistration = async (data: FormData) => {
     setIsSubmitting(true);
     try {
       const tryPost = async (url: string) => {
@@ -296,8 +304,6 @@ export default function RegisterPage() {
       }
 
       const selectedSession = selectedGymDbSession;
-
-      
 
       const bId = payload && typeof payload.booking_id === 'number' ? payload.booking_id : null;
       if (selectedSession) {
@@ -337,6 +343,39 @@ export default function RegisterPage() {
       setIsSubmitting(false);
     }
   };
+
+  const onSubmit = async (data: FormData) => {
+    setPendingData(data);
+    setEulaAccepted(false);
+    setEulaOpen(true);
+  };
+
+  useEffect(() => {
+    const loadEula = async () => {
+      try {
+        const tryFetch = async (path: string) => {
+          const resp = await fetch(path);
+          if (!resp.ok) throw new Error('Failed to fetch ' + path);
+          const txt = await resp.text();
+          return txt;
+        };
+        const txt = await tryFetch('/eula.md').catch(async () => tryFetch('/eula.txt'));
+        setEulaText(txt);
+      } catch (_) {
+        setEulaText(defaultEulaText);
+      }
+    };
+    if (eulaOpen) {
+      void loadEula();
+    }
+  }, [eulaOpen]);
+
+  useEffect(() => {
+    const el = eulaBoxRef.current;
+    if (!el) return;
+    const canScroll = el.scrollHeight > el.clientHeight + 1;
+    setEulaScrolled(!canScroll);
+  }, [eulaText, eulaOpen]);
 
   const onInvalid = (errors: FieldErrors<FormData>) => {
     console.log('Validation errors:', errors);
@@ -669,6 +708,44 @@ export default function RegisterPage() {
               </Button>
             </form>
           </Form>
+          <Dialog open={eulaOpen} onOpenChange={(open) => { setEulaOpen(open); if (!open) { setPendingData(null); setEulaAccepted(false); } }}>
+            <DialogContent className="max-w-3xl sm:max-w-3xl p-8">
+              <DialogHeader>
+                <DialogTitle>End User License Agreement</DialogTitle>
+                <DialogDescription>
+                  Please review and accept the agreement before proceeding with your registration.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 text-sm text-slate-700">
+                <div
+                  ref={eulaBoxRef}
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
+                    if (atBottom) setEulaScrolled(true);
+                  }}
+                  className="max-h-[60vh] overflow-auto rounded-md border border-slate-200 p-4 bg-slate-50 whitespace-pre-wrap"
+                >
+                  {eulaText}
+                </div>
+                <label className="flex items-center gap-3 text-slate-800">
+                  <Checkbox disabled={!eulaScrolled} checked={eulaAccepted} onCheckedChange={(v) => setEulaAccepted(Boolean(v))} />
+                  <span>I accept the EULA terms</span>
+                </label>
+                {!eulaScrolled && (
+                  <div className="text-xs text-slate-500">Scroll to the bottom to enable acceptance</div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setEulaOpen(false); setPendingData(null); setEulaAccepted(false); }}>
+                  Cancel
+                </Button>
+                <Button disabled={!eulaScrolled || !eulaAccepted || !pendingData || isSubmitting} onClick={async () => { if (!pendingData) return; await submitRegistration(pendingData); setEulaOpen(false); setPendingData(null); setEulaAccepted(false); }} className="bg-amber-400 hover:bg-amber-500 text-slate-900">
+                  I Accept and Register
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Dialog open={successOpen} onOpenChange={setSuccessOpen}>
             <DialogContent>
               <DialogHeader>
