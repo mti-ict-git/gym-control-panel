@@ -59,8 +59,48 @@ export default function RegisterPage() {
   const [successOpen, setSuccessOpen] = useState(false);
   const [successInfo, setSuccessInfo] = useState<{ bookingId: number | null; date: Date | null; sessionName: string; timeStart: string; timeEnd: string } | null>(null);
   const [datePopoverOpen, setDatePopoverOpen] = useState(false);
-  const contactName = 'Gym Coordinator';
-  const contactPhone = '+6285852047041';
+  const defaultContactName = 'Gym Coordinator';
+  const defaultContactPhone = '+6281275000560';
+  const [contactName, setContactName] = useState<string>(defaultContactName);
+  const [contactPhone, setContactPhone] = useState<string>(defaultContactPhone);
+
+  useEffect(() => {
+    const lsName = typeof window !== 'undefined' ? localStorage.getItem('gym_support_contact_name') : null;
+    const lsPhone = typeof window !== 'undefined' ? localStorage.getItem('gym_support_contact_phone') : null;
+    if (lsName && lsName.trim().length > 0) setContactName(lsName);
+    if (lsPhone && lsPhone.trim().length > 0) setContactPhone(lsPhone);
+
+    (async () => {
+      const tryFetch = async (url: string) => {
+        const resp = await fetch(url);
+        return await resp.json();
+      };
+      try {
+        const json = await tryFetch('/api/app-settings/support-contact');
+        if (json?.ok && json.name && json.phone) {
+          setContactName(String(json.name));
+          setContactPhone(String(json.phone));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('gym_support_contact_name', String(json.name));
+            localStorage.setItem('gym_support_contact_phone', String(json.phone));
+          }
+        }
+      } catch (_) {
+        void 0;
+        try {
+          const json = await tryFetch('/app-settings/support-contact');
+          if (json?.ok && json.name && json.phone) {
+            setContactName(String(json.name));
+            setContactPhone(String(json.phone));
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('gym_support_contact_name', String(json.name));
+              localStorage.setItem('gym_support_contact_phone', String(json.phone));
+            }
+          }
+        } catch (_) { void 0; }
+      }
+    })();
+  }, []);
   const [errorOpen, setErrorOpen] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
   const [eulaOpen, setEulaOpen] = useState(false);

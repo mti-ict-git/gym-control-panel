@@ -6,6 +6,7 @@ import testerRouter from './routes/tester.js';
 import masterRouter from './routes/master.js';
 import gymRouter from './routes/gym.js';
 import authRouter from './routes/auth.js';
+import settingsRouter from './routes/settings.js';
 import { envBool, envTrim } from './lib/env.js';
 
 dotenv.config();
@@ -19,10 +20,12 @@ app.use('/api', testerRouter);
 app.use('/api', masterRouter);
 app.use('/api', gymRouter);
 app.use('/api', authRouter);
+app.use('/api', settingsRouter);
 app.use(testerRouter);
 app.use(masterRouter);
 app.use(gymRouter);
 app.use(authRouter);
+app.use(settingsRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });

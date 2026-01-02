@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MessageCircle, CheckCircle, XCircle, Send } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -26,6 +26,44 @@ export default function WhatsAppSettings() {
     phone: '',
     message: 'This is a test message from Gym Management System.',
   });
+
+  const readLs = (k: string): string => (typeof window !== 'undefined' ? String(localStorage.getItem(k) || '') : '');
+  const [supportContact, setSupportContact] = useState({
+    name: readLs('gym_support_contact_name') || 'Gym Coordinator',
+    phone: readLs('gym_support_contact_phone') || '+6281275000560',
+  });
+
+  // Load from API on mount
+  useEffect(() => {
+    (async () => {
+      const tryFetch = async (url: string) => {
+        const resp = await fetch(url);
+        return await resp.json();
+      };
+      try {
+        const json = await tryFetch('/api/app-settings/support-contact');
+        if (json?.ok && json.name && json.phone) {
+          setSupportContact({ name: json.name, phone: json.phone });
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('gym_support_contact_name', String(json.name));
+            localStorage.setItem('gym_support_contact_phone', String(json.phone));
+          }
+        }
+      } catch (_) {
+        void 0;
+        try {
+          const json = await tryFetch('/app-settings/support-contact');
+          if (json?.ok && json.name && json.phone) {
+            setSupportContact({ name: json.name, phone: json.phone });
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('gym_support_contact_name', String(json.name));
+              localStorage.setItem('gym_support_contact_phone', String(json.phone));
+            }
+          }
+        } catch (_) { void 0; }
+      }
+    })();
+  }, []);
 
   const handleTestConnection = async () => {
     setIsTesting(true);
@@ -77,6 +115,32 @@ export default function WhatsAppSettings() {
     });
     
     setIsSaving(false);
+  };
+
+  const handleSaveSupport = async () => {
+    const name = String(supportContact.name || '').trim();
+    const phone = String(supportContact.phone || '').trim();
+    const payload = { name, phone };
+    const tryPost = async (url: string) => {
+      const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      return await resp.json();
+    };
+    let ok = false;
+    try {
+      const json = await tryPost('/api/app-settings/support-contact');
+      ok = Boolean(json?.ok);
+    } catch (_) {
+      void 0;
+      try {
+        const json = await tryPost('/app-settings/support-contact');
+        ok = Boolean(json?.ok);
+      } catch (_) { void 0; }
+    }
+    if (ok && typeof window !== 'undefined') {
+      localStorage.setItem('gym_support_contact_name', name);
+      localStorage.setItem('gym_support_contact_phone', phone);
+    }
+    toast({ title: ok ? 'Support Contact Saved' : 'Save Failed', description: ok ? 'Register page will use this contact.' : 'Could not save to server. Value is kept locally.' , variant: ok ? undefined : 'destructive' });
   };
 
   return (
@@ -205,6 +269,41 @@ export default function WhatsAppSettings() {
             <Send className="h-4 w-4 mr-2" />
             Send Test Message
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <MessageCircle className="h-5 w-5 text-muted-foreground" />
+            <CardTitle className="text-lg">Support Contact</CardTitle>
+          </div>
+          <CardDescription>Configure the WhatsApp contact shown on Register page</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="supportName">Contact Name</Label>
+              <Input
+                id="supportName"
+                value={supportContact.name}
+                onChange={(e) => setSupportContact({ ...supportContact, name: e.target.value })}
+                placeholder="Gym Coordinator"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="supportPhone">Contact WhatsApp</Label>
+              <Input
+                id="supportPhone"
+                value={supportContact.phone}
+                onChange={(e) => setSupportContact({ ...supportContact, phone: e.target.value })}
+                placeholder="+6281275000560"
+              />
+            </div>
+          </div>
+          <div className="flex gap-3 pt-2">
+            <Button variant="outline" onClick={handleSaveSupport}>Save Support Contact</Button>
+          </div>
         </CardContent>
       </Card>
     </div>
