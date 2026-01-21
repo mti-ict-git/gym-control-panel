@@ -483,12 +483,11 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         const booking = bookingMap.get(employeeId) || null;
         const inRange = Boolean(booking?.inRange);
         const current = overrideMap.get(employeeId) || null;
-        const currentSource = current && typeof current === 'object' && current.source ? current.source : 'MANUAL';
 
         if (inRange) {
           pushAccessEvent({ t: new Date().toISOString(), type: 'grant', employee_id: employeeId, unit_no: unitNo });
           await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER');
-        } else if (current && currentSource === 'WORKER') {
+        } else if (current) {
           pushAccessEvent({ t: new Date().toISOString(), type: 'prune', employee_id: employeeId, unit_no: unitNo });
           await updateEmployeeAccess(employeeId, false, booking?.card_no || null, 'WORKER');
         }

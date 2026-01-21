@@ -63,6 +63,12 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
+### Gym Booking admin features
+
+- Register page lets employees book gym sessions with quota checks.
+- Vault (Gym Booking) page shows today and upcoming bookings with filters.
+- Users with Committee or Super Admin role can delete bookings from the Vault list.
+
 ## How can I deploy this project?
 
 Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.

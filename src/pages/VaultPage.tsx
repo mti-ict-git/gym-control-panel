@@ -7,13 +7,13 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter }
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useVaultUsersPaged, VaultUser } from '@/hooks/useVaultUsers';
-import { useGymDbSessions } from '@/hooks/useGymDbSessions';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useMemo, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { useUserRole } from '@/hooks/useUserRole';
 
 const UTC8_OFFSET_MINUTES = 8 * 60;
 
@@ -196,6 +196,7 @@ export default function VaultPage() {
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'BOOKED' | 'IN_GYM' | 'OUT'>('ALL');
   const [approvalFilter, setApprovalFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
   const [deleteBookingId, setDeleteBookingId] = useState<number | null>(null);
+  const { isCommittee, isSuperAdmin } = useUserRole();
 
   const apiStatus = (s: typeof statusFilter): 'BOOKED' | 'CHECKIN' | 'COMPLETED' | undefined => {
     if (s === 'BOOKED') return 'BOOKED';
@@ -320,11 +321,7 @@ export default function VaultPage() {
       toast.error(message);
     },
   });
-
-  const isCommiteBooking = (user: VaultUser): boolean => {
-    const label = normalizeSession(user.session_name);
-    return label === '';
-  };
+  const canDeleteBooking = isCommittee || isSuperAdmin;
 
   return (
     <AppLayout>
@@ -548,7 +545,7 @@ export default function VaultPage() {
                             >
                               <Lock className="h-4 w-4" />
                             </Button>
-                            {isCommiteBooking(user) && (
+                            {canDeleteBooking && (
                               <Button
                                 size="icon"
                                 variant="outline"
@@ -684,7 +681,7 @@ export default function VaultPage() {
                                   >
                                     <Lock className="h-4 w-4" />
                                   </Button>
-                                  {isCommiteBooking(user) && (
+                                  {canDeleteBooking && (
                                     <Button
                                       size="sm"
                                       variant="outline"

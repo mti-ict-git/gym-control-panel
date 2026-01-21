@@ -118,6 +118,14 @@ Frontend:
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
+2026-01-21 20:26:59 +0800
+
+Enhancement:
+- Added delete action in Gym Booking (Vault) list for COMITTE bookings only.
+
+Verification:
+- Ran lint: 0 errors, warnings only.
+- Ran TypeScript integrity check: passed (noEmit).
 2025-12-30 21:07:00 +08:00
 
 Database Connections Refactor:
