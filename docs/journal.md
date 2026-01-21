@@ -283,6 +283,16 @@ Verification:
 - Lint: 0 errors.
 - TypeScript integrity check: passed (noEmit).
 
+Wednesday, January 21, 2026 4:51:06 PM
+
+Reliability Fix:
+- Controller access route updates overrides only after successful upload.
+- Background worker re-attempts uploads when override is stale by time.
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).
+
 2025-12-30 15:25:26 +08:00
 
 Enhancement:

@@ -233,11 +233,11 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     const overridesRes = await pool
       .request()
       .input('unit', sql.VarChar(20), unitNo)
-      .query(`SELECT EmployeeID, CustomAccessTZ FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
+      .query(`SELECT EmployeeID, CustomAccessTZ, UpdatedAt FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
     const overrideMap = new Map(
       (Array.isArray(overridesRes?.recordset) ? overridesRes.recordset : []).map((r) => [
         String(r.EmployeeID).trim(),
-        String(r.CustomAccessTZ).trim(),
+        { tz: String(r.CustomAccessTZ).trim(), updatedAt: r?.UpdatedAt ? new Date(r.UpdatedAt).toISOString() : null },
       ])
     );
 
@@ -372,8 +372,14 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
 
     const updateEmployeeAccess = async (employeeId, allow, cardNo) => {
       const desiredTz = allow ? tzAllow : tzDeny;
-      const currentTz = overrideMap.get(employeeId) || null;
-      if (currentTz === desiredTz) return;
+      const current = overrideMap.get(employeeId) || null;
+      const currentTz = current && typeof current === 'object' ? current.tz : (current || null);
+      const updatedAt = current && typeof current === 'object' ? current.updatedAt : null;
+      if (currentTz === desiredTz) {
+        const maxAgeMs = Number(process.env.GYM_CONTROLLER_ACCESS_MAX_AGE_MS || 10 * 60 * 1000);
+        const recent = updatedAt ? (Date.now() - new Date(updatedAt).getTime()) < maxAgeMs : false;
+        if (recent) return;
+      }
       const body = {
         employee_id: employeeId,
         access: allow ? true : false,
@@ -388,7 +394,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
           body: JSON.stringify(body),
         });
         const json = await resp.json().catch(() => null);
-        if (json?.ok) overrideMap.set(employeeId, desiredTz);
+        if (json?.ok) overrideMap.set(employeeId, { tz: desiredTz, updatedAt: new Date().toISOString() });
       } catch (_) {
       }
     };

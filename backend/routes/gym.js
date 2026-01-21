@@ -1112,27 +1112,28 @@ router.post('/gym-controller-access', async (req, res) => {
     };
     log('vault_response', { http_ok: Boolean(r.ok), http_status: r.status, upload_status: parsed.uploadStatus });
 
-    const pool2 = await new sql.ConnectionPool(config).connect();
-    await pool2.request().query(`IF OBJECT_ID('dbo.gym_controller_access_override','U') IS NULL BEGIN
-      CREATE TABLE dbo.gym_controller_access_override (
-        EmployeeID VARCHAR(20) NOT NULL,
-        UnitNo VARCHAR(20) NOT NULL,
-        CustomAccessTZ VARCHAR(2) NOT NULL,
-        UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
-        CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
-      );
-    END`);
-    const req3 = pool2.request();
-    req3.input('emp', sql.VarChar(20), employeeId);
-    req3.input('unit', sql.VarChar(20), unitNo);
-    req3.input('tz', sql.VarChar(2), customAccessTz);
-    await req3.query(`IF EXISTS (SELECT 1 FROM dbo.gym_controller_access_override WHERE EmployeeID=@emp AND UnitNo=@unit)
-      UPDATE dbo.gym_controller_access_override SET CustomAccessTZ=@tz, UpdatedAt=GETDATE() WHERE EmployeeID=@emp AND UnitNo=@unit
-    ELSE
-      INSERT INTO dbo.gym_controller_access_override (EmployeeID, UnitNo, CustomAccessTZ) VALUES (@emp, @unit, @tz)`);
-    await pool2.close();
-
     const uploadOk = String(parsed.uploadStatus || '').trim() === '1';
+    if (uploadOk && r.ok) {
+      const pool2 = await new sql.ConnectionPool(config).connect();
+      await pool2.request().query(`IF OBJECT_ID('dbo.gym_controller_access_override','U') IS NULL BEGIN
+        CREATE TABLE dbo.gym_controller_access_override (
+          EmployeeID VARCHAR(20) NOT NULL,
+          UnitNo VARCHAR(20) NOT NULL,
+          CustomAccessTZ VARCHAR(2) NOT NULL,
+          UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
+          CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
+        );
+      END`);
+      const req3 = pool2.request();
+      req3.input('emp', sql.VarChar(20), employeeId);
+      req3.input('unit', sql.VarChar(20), unitNo);
+      req3.input('tz', sql.VarChar(2), customAccessTz);
+      await req3.query(`IF EXISTS (SELECT 1 FROM dbo.gym_controller_access_override WHERE EmployeeID=@emp AND UnitNo=@unit)
+        UPDATE dbo.gym_controller_access_override SET CustomAccessTZ=@tz, UpdatedAt=GETDATE() WHERE EmployeeID=@emp AND UnitNo=@unit
+      ELSE
+        INSERT INTO dbo.gym_controller_access_override (EmployeeID, UnitNo, CustomAccessTZ) VALUES (@emp, @unit, @tz)`);
+      await pool2.close();
+    }
     log('done', { ok: uploadOk && r.ok });
     return res.json({
       ok: uploadOk && r.ok,
