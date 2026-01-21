@@ -293,6 +293,33 @@ Verification:
 - Lint: passed (warnings only).
 - TypeScript integrity check: passed (noEmit).
 
+2026-01-21 17:25:46 +08:00
+
+Test Preparation:
+- Started backend server on http://localhost:5055.
+- Fetched sessions; confirmed presence of test_range 17:30–17:35 via GET /gym-sessions.
+- Booked MTI230279 for today in session_id "test_range__17:30" using POST /gym-booking-create.
+- Response: ok=true, booking_id=612, schedule_id=5.
+
+References:
+- Booking create route: [gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L1208-L1606)
+- Controller access endpoint: [gym.js](file:///c:/Scripts/Projects/gym-control-panel/backend/routes/gym.js#L911-L1152)
+- Auto-organize worker: [app.js](file:///c:/Scripts/Projects/gym-control-panel/backend/app.js#L150-L420)
+
+Notes:
+- Worker toggles controller access based on in-range bookings with grace windows; settings can be viewed via GET /gym-controller-settings. The override table updates only after successful controller uploads.
+
+2026-01-21 17:37:09 +08:00
+
+Realtime Visibility:
+- Added SSE stream endpoints GET /gym-access-stream and /api/gym-access-stream to emit grant/prune/attempt/success/fail events from the worker.
+- Added GET /gym-access-log to return recent events snapshot.
+- Verified stream by observing worker_tick_start/prune/worker_tick_end with next_interval_ms=300000.
+
+Verification:
+- Lint: passed (warnings only).
+- TypeScript integrity check: passed (noEmit).
+
 2025-12-30 15:25:26 +08:00
 
 Enhancement:

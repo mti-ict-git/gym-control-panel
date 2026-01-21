@@ -15,6 +15,59 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const sseClients = new Set();
+const accessEvents = [];
+const pushAccessEvent = (evt) => {
+  try {
+    accessEvents.push(evt);
+    if (accessEvents.length > 500) accessEvents.shift();
+    const data = `data: ${JSON.stringify(evt)}\n\n`;
+    for (const res of sseClients) {
+      res.write(data);
+    }
+  } catch (_) {}
+};
+
+app.get('/api/gym-access-stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  for (const evt of accessEvents) {
+    res.write(`data: ${JSON.stringify(evt)}\n\n`);
+  }
+  sseClients.add(res);
+  req.on('close', () => {
+    try {
+      sseClients.delete(res);
+    } catch (_) {}
+  });
+});
+
+app.get('/gym-access-stream', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  for (const evt of accessEvents) {
+    res.write(`data: ${JSON.stringify(evt)}\n\n`);
+  }
+  sseClients.add(res);
+  req.on('close', () => {
+    try {
+      sseClients.delete(res);
+    } catch (_) {}
+  });
+});
+
+app.get('/api/gym-access-log', (_req, res) => {
+  res.json({ ok: true, events: accessEvents.slice(-200) });
+});
+
+app.get('/gym-access-log', (_req, res) => {
+  res.json({ ok: true, events: accessEvents.slice(-200) });
+});
+
 // Support both /api prefix and root-level routes to tolerate different proxy setups
 app.use('/api', testerRouter);
 app.use('/api', masterRouter);
@@ -380,6 +433,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         const recent = updatedAt ? (Date.now() - new Date(updatedAt).getTime()) < maxAgeMs : false;
         if (recent) return;
       }
+      pushAccessEvent({ t: new Date().toISOString(), type: 'attempt', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz, card_no: cardNo ? String(cardNo).trim() : null });
       const body = {
         employee_id: employeeId,
         access: allow ? true : false,
@@ -394,12 +448,20 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
           body: JSON.stringify(body),
         });
         const json = await resp.json().catch(() => null);
-        if (json?.ok) overrideMap.set(employeeId, { tz: desiredTz, updatedAt: new Date().toISOString() });
+        if (json?.ok) {
+          overrideMap.set(employeeId, { tz: desiredTz, updatedAt: new Date().toISOString() });
+          pushAccessEvent({ t: new Date().toISOString(), type: 'success', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz });
+        } else {
+          pushAccessEvent({ t: new Date().toISOString(), type: 'fail', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz, error: json && typeof json === 'object' ? String(json.error || '') : '' });
+        }
       } catch (_) {
+        const message = _ && typeof _ === 'object' && 'message' in _ ? String(_.message) : String(_);
+        pushAccessEvent({ t: new Date().toISOString(), type: 'error', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz, error: message });
       }
     };
 
     for (const employeeId of alwaysAllow) {
+      pushAccessEvent({ t: new Date().toISOString(), type: 'always_allow', employee_id: employeeId, unit_no: unitNo });
       await updateEmployeeAccess(employeeId, true, null);
     }
 
@@ -410,6 +472,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         if (alwaysAllow.has(employeeId)) continue;
         const booking = bookingMap.get(employeeId) || null;
         const allow = booking ? Boolean(booking.inRange) : false;
+        pushAccessEvent({ t: new Date().toISOString(), type: allow ? 'grant' : 'prune', employee_id: employeeId, unit_no: unitNo });
         await updateEmployeeAccess(employeeId, allow, booking?.card_no || null);
       }
     }
@@ -422,11 +485,13 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     running = true;
     let nextIntervalMs = 60000;
     try {
+      pushAccessEvent({ t: new Date().toISOString(), type: 'worker_tick_start' });
       const r = await runOnce();
       nextIntervalMs = Number(r?.nextIntervalMs || 60000);
     } catch (_) {
       nextIntervalMs = 60000;
     } finally {
+      pushAccessEvent({ t: new Date().toISOString(), type: 'worker_tick_end', next_interval_ms: clamp(nextIntervalMs, 5000, 60 * 60 * 1000) });
       running = false;
       setTimeout(loop, clamp(nextIntervalMs, 5000, 60 * 60 * 1000));
     }
