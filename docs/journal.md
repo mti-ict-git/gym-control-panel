@@ -447,6 +447,15 @@ Verification:
 - Ran lint: 0 errors (warnings only: react-refresh/only-export-components).
 - Ran TypeScript integrity check: passed (npx tsc --noEmit).
 
+2026-01-21 19:14:51 +0800
+
+Bugfix:
+- Updated /gym-live-status to treat access as granted when either the user is within the booking time window (access_required) or an override exists, so current-session bookings and manual grants no longer show red "No Access" while in-range.
+
+Verification:
+- Ran lint: 0 errors (warnings only: react-refresh/only-export-components).
+- Ran TypeScript integrity check: passed (npx tsc --noEmit).
+
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
