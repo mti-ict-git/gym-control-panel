@@ -10,7 +10,7 @@ export interface GymDbSession {
 type ResponsePayload = { ok: boolean; error?: string; sessions?: GymDbSession[] } | null;
 
 export function useGymDbSessions() {
-  return useQuery({
+  return useQuery<GymDbSession[], Error, GymDbSession[]>({
     queryKey: ['gymdb-sessions'],
     queryFn: async (): Promise<GymDbSession[]> => {
       const endpoint = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_DB_TEST_ENDPOINT as string | undefined;
@@ -35,7 +35,6 @@ export function useGymDbSessions() {
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
-    keepPreviousData: true,
   });
 }
 
@@ -46,7 +45,7 @@ export interface GymDbSessionsPagedResult {
 
 export function useGymDbSessionsPaged(q: string, page: number, pageSize: number, sortBy?: 'session_name' | 'time_start' | 'time_end' | 'quota', sortDir: 'asc' | 'desc' = 'asc') {
   interface GymSessionsResponse { ok: boolean; sessions?: GymDbSession[]; total?: number; error?: string }
-  return useQuery<GymDbSessionsPagedResult>({
+  return useQuery<GymDbSessionsPagedResult, Error, GymDbSessionsPagedResult>({
     queryKey: ['gymdb-sessions-paged', q, page, pageSize, sortBy || '', sortDir],
     queryFn: async (): Promise<GymDbSessionsPagedResult> => {
       const endpoint = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_DB_TEST_ENDPOINT as string | undefined;
@@ -79,6 +78,6 @@ export function useGymDbSessionsPaged(q: string, page: number, pageSize: number,
     },
     staleTime: 30_000,
     refetchOnWindowFocus: false,
-    keepPreviousData: true,
+    placeholderData: (prev) => prev,
   });
 }

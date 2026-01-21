@@ -398,8 +398,8 @@ export default function ReportsPage() {
       String(record.employee_id ?? ''),
       String(record.department ?? ''),
       getGenderLabel(record.gender),
-      formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_in),
-      formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_out),
+      formatTimeOnly(record.time_in),
+      formatTimeOnly(record.time_out),
       (() => {
         const s = bookingSchedulesMap.get(record.booking_id);
         const start = record.time_start ?? s?.time_start ?? null;

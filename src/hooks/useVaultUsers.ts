@@ -55,7 +55,7 @@ function buildJakartaScheduleTimeIso(dateStr: string, hhmm: string): string | nu
 }
 
 export function useVaultUsers() {
-  return useQuery({
+  return useQuery<VaultUser[], Error, VaultUser[]>({
     queryKey: ['vault-users'],
     queryFn: async (): Promise<VaultUser[]> => {
       const endpoint = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_DB_TEST_ENDPOINT as string | undefined;
@@ -126,7 +126,7 @@ export function useVaultUsers() {
     },
     staleTime: 30_000,
     refetchOnWindowFocus: false,
-    keepPreviousData: true,
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -163,7 +163,7 @@ export function useVaultUsersPaged(params: {
   const sortBy = params.sortBy;
   const sortDir = params.sortDir || 'desc';
 
-  return useQuery<VaultUsersPagedResult>({
+  return useQuery<VaultUsersPagedResult, Error, VaultUsersPagedResult>({
     queryKey: ['vault-users-paged', q, page, pageSize, status || '', approvalStatus || '', sortBy || '', sortDir],
     queryFn: async (): Promise<VaultUsersPagedResult> => {
       const todayJakarta = startOfTodayJakartaUtcDate();
@@ -246,6 +246,6 @@ export function useVaultUsersPaged(params: {
     },
     staleTime: 30_000,
     refetchOnWindowFocus: false,
-    keepPreviousData: true,
+    placeholderData: (prev) => prev,
   });
 }
