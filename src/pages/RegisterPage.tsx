@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
  
 import { useForm, FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -10,6 +10,7 @@ import treadmillImg from '@/assets/treadmill.png';
 import benchPressImg from '@/assets/bench-press.png';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -58,10 +59,135 @@ export default function RegisterPage() {
   const [successOpen, setSuccessOpen] = useState(false);
   const [successInfo, setSuccessInfo] = useState<{ bookingId: number | null; date: Date | null; sessionName: string; timeStart: string; timeEnd: string } | null>(null);
   const [datePopoverOpen, setDatePopoverOpen] = useState(false);
-  const contactName = 'Gym Coordinator';
-  const contactPhone = '+6285852047041';
+  const defaultContactName = 'Gym Coordinator';
+  const defaultContactPhone = '+6281275000560';
+  const [contactName, setContactName] = useState<string>(defaultContactName);
+  const [contactPhone, setContactPhone] = useState<string>(defaultContactPhone);
+
+  useEffect(() => {
+    const lsName = typeof window !== 'undefined' ? localStorage.getItem('gym_support_contact_name') : null;
+    const lsPhone = typeof window !== 'undefined' ? localStorage.getItem('gym_support_contact_phone') : null;
+    if (lsName && lsName.trim().length > 0) setContactName(lsName);
+    if (lsPhone && lsPhone.trim().length > 0) setContactPhone(lsPhone);
+
+    (async () => {
+      const tryFetch = async (url: string) => {
+        const resp = await fetch(url);
+        return await resp.json();
+      };
+      try {
+        const json = await tryFetch('/api/app-settings/support-contact');
+        if (json?.ok && json.name && json.phone) {
+          setContactName(String(json.name));
+          setContactPhone(String(json.phone));
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('gym_support_contact_name', String(json.name));
+            localStorage.setItem('gym_support_contact_phone', String(json.phone));
+          }
+        }
+      } catch (_) {
+        void 0;
+        try {
+          const json = await tryFetch('/app-settings/support-contact');
+          if (json?.ok && json.name && json.phone) {
+            setContactName(String(json.name));
+            setContactPhone(String(json.phone));
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('gym_support_contact_name', String(json.name));
+              localStorage.setItem('gym_support_contact_phone', String(json.phone));
+            }
+          }
+        } catch (_) { void 0; }
+      }
+    })();
+  }, []);
   const [errorOpen, setErrorOpen] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
+  const [eulaOpen, setEulaOpen] = useState(false);
+  const [eulaAccepted, setEulaAccepted] = useState(false);
+  const [pendingData, setPendingData] = useState<FormData | null>(null);
+  const defaultEulaText = 'By proceeding, you agree to use the gym facilities responsibly, follow all safety guidelines, and acknowledge that schedules and quotas are subject to change. You consent to your booking data being processed for attendance and capacity management.';
+  const [eulaText, setEulaText] = useState<string>(defaultEulaText);
+  const [eulaScrolled, setEulaScrolled] = useState(false);
+  const eulaBoxRef = useRef<HTMLDivElement | null>(null);
+
+  const renderEula = (text: string): JSX.Element => {
+    const lines = String(text || '').split(/\r?\n/);
+    const elements: JSX.Element[] = [];
+    let ol: string[] = [];
+    let ul: string[] = [];
+    const flushLists = () => {
+      if (ol.length > 0) {
+        const items = ol.slice();
+        elements.push(
+          <ol key={`ol-${elements.length}`} className="list-decimal pl-5 space-y-1">
+            {items.map((t, i) => (
+              <li key={`oli-${i}`}>{t}</li>
+            ))}
+          </ol>
+        );
+        ol = [];
+      }
+      if (ul.length > 0) {
+        const items = ul.slice();
+        elements.push(
+          <ul key={`ul-${elements.length}`} className="list-disc pl-5 space-y-1">
+            {items.map((t, i) => (
+              <li key={`uli-${i}`}>{t}</li>
+            ))}
+          </ul>
+        );
+        ul = [];
+      }
+    };
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i] ?? '';
+      const line = raw.trimEnd();
+      if (line.startsWith('## ')) {
+        flushLists();
+        elements.push(
+          <h3 key={`h3-${i}`} className="text-sm font-semibold text-slate-800 mt-3">
+            {line.slice(3)}
+          </h3>
+        );
+        continue;
+      }
+      if (line.startsWith('# ')) {
+        flushLists();
+        elements.push(
+          <h2 key={`h2-${i}`} className="text-base font-bold text-slate-900 mt-1">
+            {line.slice(2)}
+          </h2>
+        );
+        continue;
+      }
+      if (/^-{3,}$/.test(line)) {
+        flushLists();
+        elements.push(<div key={`hr-${i}`} className="border-t border-slate-200 my-2" />);
+        continue;
+      }
+      if (/^\d+\.\s+/.test(line)) {
+        ol.push(line.replace(/^\d+\.\s+/, ''));
+        continue;
+      }
+      if (/^(?:-|\*)\s+/.test(line)) {
+        ul.push(line.replace(/^(?:-|\*)\s+/, ''));
+        continue;
+      }
+      if (line.trim().length === 0) {
+        flushLists();
+        continue;
+      }
+      flushLists();
+      elements.push(
+        <p key={`p-${i}`} className="text-slate-700">
+          {line}
+        </p>
+      );
+    }
+    flushLists();
+    return <div className="space-y-2">{elements}</div>;
+  };
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -137,6 +263,63 @@ export default function RegisterPage() {
 
   const timeEndForSession = (session: GymDbSession): string =>
     session.time_end ?? endFor(session.session_name) ?? session.time_start;
+
+  const sessionColorClass = (name: string): string => {
+    const key = String(name || '').toLowerCase();
+    return key.includes('morning')
+      ? 'bg-green-100 text-green-900 border-green-200'
+      : key.includes('afternoon')
+      ? 'bg-blue-100 text-blue-900 border-blue-200'
+      : key.includes('night') && (key.includes('1') || key.includes('- 1'))
+      ? 'bg-purple-100 text-purple-900 border-purple-200'
+      : key.includes('night') && (key.includes('2') || key.includes('- 2'))
+      ? 'bg-amber-100 text-amber-900 border-amber-200'
+      : 'bg-slate-100 text-slate-900 border-slate-200';
+  };
+
+  const sessionFieldTone = (name: string): string => {
+    const key = String(name || '').toLowerCase();
+    return key.includes('morning')
+      ? 'border-green-300 bg-green-50'
+      : key.includes('afternoon')
+      ? 'border-blue-300 bg-blue-50'
+      : key.includes('night') && (key.includes('1') || key.includes('- 1'))
+      ? 'border-purple-300 bg-purple-50'
+      : key.includes('night') && (key.includes('2') || key.includes('- 2'))
+      ? 'border-amber-300 bg-amber-50'
+      : 'border-slate-300 bg-slate-50';
+  };
+
+  const sessionDotColor = (name: string): string => {
+    const key = String(name || '').toLowerCase();
+    return key.includes('morning')
+      ? 'bg-green-500'
+      : key.includes('afternoon')
+      ? 'bg-blue-500'
+      : key.includes('night') && (key.includes('1') || key.includes('- 1'))
+      ? 'bg-purple-500'
+      : key.includes('night') && (key.includes('2') || key.includes('- 2'))
+      ? 'bg-amber-500'
+      : 'bg-slate-400';
+  };
+
+  const availabilityTone = (remaining: number, quota: number): string => {
+    if (remaining <= 0) return 'border-red-300 bg-red-50';
+    if (remaining <= Math.ceil(quota * 0.3)) return 'border-yellow-300 bg-yellow-50';
+    return 'border-green-300 bg-green-50';
+  };
+
+  const availabilityTextColor = (remaining: number, quota: number): string => {
+    if (remaining <= 0) return 'text-red-700';
+    if (remaining <= Math.ceil(quota * 0.3)) return 'text-yellow-700';
+    return 'text-green-700';
+  };
+
+  const availabilityDotColor = (remaining: number, quota: number): string => {
+    if (remaining <= 0) return 'bg-red-500';
+    if (remaining <= Math.ceil(quota * 0.3)) return 'bg-yellow-500';
+    return 'bg-green-500';
+  };
 
   // Auto-swipe carousel
   useEffect(() => {
@@ -261,7 +444,7 @@ export default function RegisterPage() {
     return () => { clearTimeout(t); ctrl.abort(); };
   }, [selectedDate, selectedGymDbSession, availability]);
 
-  const onSubmit = async (data: FormData) => {
+  const submitRegistration = async (data: FormData) => {
     setIsSubmitting(true);
     try {
       const tryPost = async (url: string) => {
@@ -296,8 +479,6 @@ export default function RegisterPage() {
       }
 
       const selectedSession = selectedGymDbSession;
-
-      
 
       const bId = payload && typeof payload.booking_id === 'number' ? payload.booking_id : null;
       if (selectedSession) {
@@ -338,6 +519,39 @@ export default function RegisterPage() {
     }
   };
 
+  const onSubmit = async (data: FormData) => {
+    setPendingData(data);
+    setEulaAccepted(false);
+    setEulaOpen(true);
+  };
+
+  useEffect(() => {
+    const loadEula = async () => {
+      try {
+        const tryFetch = async (path: string) => {
+          const resp = await fetch(path);
+          if (!resp.ok) throw new Error('Failed to fetch ' + path);
+          const txt = await resp.text();
+          return txt;
+        };
+        const txt = await tryFetch('/eula.md').catch(async () => tryFetch('/eula.txt'));
+        setEulaText(txt);
+      } catch (_) {
+        setEulaText(defaultEulaText);
+      }
+    };
+    if (eulaOpen) {
+      void loadEula();
+    }
+  }, [eulaOpen]);
+
+  useEffect(() => {
+    const el = eulaBoxRef.current;
+    if (!el) return;
+    const canScroll = el.scrollHeight > el.clientHeight + 1;
+    setEulaScrolled(!canScroll);
+  }, [eulaText, eulaOpen]);
+
   const onInvalid = (errors: FieldErrors<FormData>) => {
     console.log('Validation errors:', errors);
     const errorMessages = Object.values(errors)
@@ -354,10 +568,10 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex bg-slate-400/80">
+    <div className="min-h-screen flex bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200">
       {/* Left Panel - Decorative */}
-      <div className="hidden lg:flex lg:w-1/2 p-6">
-        <div className="w-full bg-slate-100 rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden">
+      <div className="hidden lg:flex lg:w-1/2 p-8">
+        <div className="w-full bg-white/60 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden border border-slate-200 shadow-xl">
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-72 h-72 border border-slate-300 rounded-full absolute" />
             <div className="w-96 h-96 border border-slate-300 rounded-full absolute" />
@@ -404,12 +618,12 @@ export default function RegisterPage() {
           <div className="flex-1" />
 
           <div className="relative z-10 text-center">
-            <h1 className="text-2xl font-semibold text-slate-800 mb-3">
+            <h1 className="text-3xl font-bold text-slate-900 mb-3 tracking-tight">
               Book your gym session
               <br />
               quick and easy.
             </h1>
-            <p className="text-slate-500 text-sm max-w-xs mx-auto">
+            <p className="text-slate-600 text-sm max-w-xs mx-auto">
               Reserve your spot for tomorrow or the next day. Stay fit, stay healthy!
             </p>
 
@@ -433,14 +647,15 @@ export default function RegisterPage() {
 
       {/* Right Panel - Form */}
       <div className="w-full lg:w-1/2 p-6 flex items-center justify-center">
-        <div className="w-full max-w-lg bg-white rounded-3xl p-10 lg:p-14 shadow-xl">
+        <div className="w-full max-w-xl bg-white rounded-3xl p-10 lg:p-14 shadow-2xl border border-slate-200">
           <div className="flex lg:hidden justify-center mb-6">
             <img src={gymIcon} alt="Gym" className="w-20 h-20 object-contain" />
           </div>
 
           <div className="text-center mb-8">
-            <h2 className="text-2xl font-semibold text-slate-900">Gym Booking</h2>
-            <p className="text-slate-500 text-sm mt-1">Register for a gym session</p>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-semibold mb-3">Super Gym</div>
+            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Gym Booking</h2>
+            <p className="text-slate-600 text-sm mt-1">Register for a gym session</p>
           </div>
 
           <Form {...form}>
@@ -450,14 +665,14 @@ export default function RegisterPage() {
                 name="employeeId"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-slate-700">Employee ID</FormLabel>
+                    <FormLabel className="text-slate-800">Employee ID</FormLabel>
                     <FormControl>
                       <Input
                         placeholder="Enter your Employee ID"
                         {...field}
                         onFocus={() => setShowEmpDropdown(true)}
                         onBlur={() => setTimeout(() => setShowEmpDropdown(false), 150)}
-                        className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors"
+                        className="h-12 rounded-xl border-slate-300 bg-slate-50 focus:bg-white transition-colors"
                       />
                     </FormControl>
                     {showEmpDropdown && (empLoading || empSuggestions.length > 0) && (
@@ -495,14 +710,14 @@ export default function RegisterPage() {
                 name="date"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
-                    <FormLabel className="text-slate-700">Date</FormLabel>
+                    <FormLabel className="text-slate-800">Date</FormLabel>
                     <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
                       <PopoverTrigger asChild>
                         <FormControl>
                           <Button
                             variant="outline"
                             className={cn(
-                              'h-12 w-full rounded-xl border-slate-200 bg-slate-50 hover:bg-white pl-3 text-left font-normal transition-colors',
+                              'h-12 w-full rounded-xl border-slate-300 bg-slate-50 hover:bg-white pl-3 text-left font-normal transition-colors',
                               !field.value && 'text-muted-foreground'
                             )}
                           >
@@ -575,13 +790,16 @@ export default function RegisterPage() {
                   name="sessionId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-slate-700">Session</FormLabel>
+                      <FormLabel className="text-slate-800">Session</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger
                             disabled={!selectedDate}
-                            className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors"
+                            className={`h-12 rounded-xl focus:ring-0 focus:ring-offset-0 transition-colors ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border-slate-300 bg-slate-50'}`}
                           >
+                            {selectedGymDbSession && (
+                              <span className={`inline-block h-2 w-2 rounded-full ${sessionDotColor(selectedGymDbSession.session_name)} mr-2`} />
+                            )}
                             <SelectValue
                               placeholder={
                                 !selectedDate
@@ -623,29 +841,48 @@ export default function RegisterPage() {
                 />
 
                 <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Time</div>
-                  <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
-                    {selectedGymDbSession
-                      ? `${selectedGymDbSession.time_start} - ${timeEndForSession(selectedGymDbSession)}`
-                      : '-'}
+                  <div className="text-sm font-medium text-slate-800 mt-2 md:mt-0">Time</div>
+                  <div className={`flex h-12 w-full items-center rounded-xl px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border border-slate-300 bg-slate-50 text-slate-700'}`}>
+                    {selectedGymDbSession ? (
+                      <>
+                        <span className={`inline-block h-2 w-2 rounded-full ${sessionDotColor(selectedGymDbSession.session_name)} mr-2`} />
+                        <span className="font-medium text-slate-800">
+                          {selectedGymDbSession.time_start} - {timeEndForSession(selectedGymDbSession)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-slate-500">-</span>
+                    )}
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-700 mt-2 md:mt-0">Available</div>
-                  <div className="flex h-12 w-full items-center rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500">
-                    {selectedGymDbSession
-                      ? availabilityLoading
-                        ? 'Loading...'
-                        : (() => {
-                            const a = availability[selectedGymDbSession.time_start];
-                            const booked = a ? a.booked : 0;
-                            const quota = a ? a.quota : selectedGymDbSession.quota;
-                            return `${booked}/${quota}`;
-                          })()
-                      : '-'}
+                  <div className="text-sm font-medium text-slate-800 mt-2 md:mt-0">Available</div>
+                  <div className={`flex h-12 w-full items-center rounded-xl px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border border-slate-300 bg-slate-50'}`}>
+                    {selectedGymDbSession ? (
+                      availabilityLoading ? (
+                        <span className="text-slate-600">Loading...</span>
+                      ) : (
+                        (() => {
+                          const a = availability[selectedGymDbSession.time_start];
+                          const booked = a ? a.booked : 0;
+                          const quota = a ? a.quota : selectedGymDbSession.quota;
+                          const remaining = Math.max(0, quota - booked);
+                          const color = availabilityTextColor(remaining, quota);
+                          const dot = availabilityDotColor(remaining, quota);
+                          return (
+                            <>
+                              <span className={`inline-block h-2 w-2 rounded-full ${dot} mr-2`} />
+                              <span className={`${color} font-medium`}>{booked}/{quota}</span>
+                            </>
+                          );
+                        })()
+                      )
+                    ) : (
+                      <span className="text-slate-500">-</span>
+                    )}
                   </div>
-                  <div className="text-xs text-slate-500">
+                  <div className="text-xs text-slate-600">
                     {selectedGymDbSession
                       ? (() => {
                           const a = availability[selectedGymDbSession.time_start];
@@ -661,7 +898,7 @@ export default function RegisterPage() {
 
               <Button
                 type="submit"
-                className="w-full h-12 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-900 font-semibold shadow-md"
+                className="w-full h-12 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-900 font-semibold shadow-lg"
                 disabled={isSubmitting}
               >
                 {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -669,6 +906,44 @@ export default function RegisterPage() {
               </Button>
             </form>
           </Form>
+          <Dialog open={eulaOpen} onOpenChange={(open) => { setEulaOpen(open); if (!open) { setPendingData(null); setEulaAccepted(false); } }}>
+            <DialogContent className="max-w-3xl sm:max-w-3xl p-8">
+              <DialogHeader>
+                <DialogTitle>End User License Agreement</DialogTitle>
+                <DialogDescription>
+                  Please review and accept the agreement before proceeding with your registration.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 text-sm text-slate-700">
+                <div
+                  ref={eulaBoxRef}
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
+                    if (atBottom) setEulaScrolled(true);
+                  }}
+                  className="max-h-[60vh] overflow-auto rounded-md border border-slate-200 p-4 bg-slate-50"
+                >
+                  {renderEula(eulaText)}
+                </div>
+                <label className="flex items-center gap-3 text-slate-800">
+                  <Checkbox disabled={!eulaScrolled} checked={eulaAccepted} onCheckedChange={(v) => setEulaAccepted(Boolean(v))} />
+                  <span>I accept the EULA terms</span>
+                </label>
+                {!eulaScrolled && (
+                  <div className="text-xs text-slate-500">Scroll to the bottom to enable acceptance</div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setEulaOpen(false); setPendingData(null); setEulaAccepted(false); }}>
+                  Cancel
+                </Button>
+                <Button disabled={!eulaScrolled || !eulaAccepted || !pendingData || isSubmitting} onClick={async () => { if (!pendingData) return; await submitRegistration(pendingData); setEulaOpen(false); setPendingData(null); setEulaAccepted(false); }} className="bg-amber-400 hover:bg-amber-500 text-slate-900">
+                  I Accept and Register
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Dialog open={successOpen} onOpenChange={setSuccessOpen}>
             <DialogContent>
               <DialogHeader>

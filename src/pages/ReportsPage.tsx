@@ -33,6 +33,8 @@ interface BookingRecord {
   booking_date: string;
   time_start: string | null;
   time_end: string | null;
+  time_in: string | null;
+  time_out: string | null;
   status?: string | null;
 }
 
@@ -153,6 +155,25 @@ function getSessionChip(session: string | null) {
   );
 }
 
+function getScheduleChip(session: string | null, text: string) {
+  const label = String(session || '').trim().toLowerCase();
+  const content = String(text || '').trim() || 'COMITTE';
+  const color = label.startsWith('morning')
+    ? 'bg-green-100 text-green-700 border-green-200'
+    : label.startsWith('afternoon')
+    ? 'bg-blue-100 text-blue-700 border-blue-200'
+    : label.includes('night') && label.includes('1')
+    ? 'bg-purple-100 text-purple-700 border-purple-200'
+    : label.includes('night') && label.includes('2')
+    ? 'bg-amber-100 text-amber-700 border-amber-200'
+    : 'bg-slate-100 text-slate-700 border-slate-200';
+  return (
+    <span className={`inline-flex items-center rounded-md bg-slate-100 border px-2 py-1 text-xs font-medium ${color}`}>
+      {content}
+    </span>
+  );
+}
+
 function getGenderLabel(gender: string | null) {
   const v = String(gender || '').trim().toUpperCase();
   if (v === 'M' || v === 'MALE') return 'Male';
@@ -206,6 +227,9 @@ export default function ReportsPage() {
       const fromStr = format(start, 'yyyy-MM-dd');
       const toStr = format(end, 'yyyy-MM-dd');
       const tryFetch = async (base: string) => {
+        try {
+          await fetch(`${base}/gym-reports-backfill?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`, { method: 'POST' });
+        } catch (_) { void 0; }
         const resp = await fetch(`${base}/gym-reports?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(pageSize))}&sort_by=${encodeURIComponent(String(sortBy || ''))}&sort_dir=${encodeURIComponent(String(sortDir))}`);
         const json = await resp.json();
         if (!json || !json.ok) return { rows: [], total: 0 } as ReportQueryResult;
@@ -225,6 +249,8 @@ export default function ReportsPage() {
             ReportDate?: string | Date | null;
             TimeStart?: string | null;
             TimeEnd?: string | null;
+            TimeIn?: string | Date | null;
+            TimeOut?: string | Date | null;
           };
           return {
             booking_id: Number(obj.BookingID ?? obj.booking_id ?? 0),
@@ -243,6 +269,8 @@ export default function ReportsPage() {
                 : '',
             time_start: obj.TimeStart != null ? String(obj.TimeStart) : null,
             time_end: obj.TimeEnd != null ? String(obj.TimeEnd) : null,
+            time_in: obj.TimeIn != null ? String(obj.TimeIn) : null,
+            time_out: obj.TimeOut != null ? String(obj.TimeOut) : null,
             status: null,
           } as BookingRecord;
         }) as BookingRecord[];
@@ -256,6 +284,40 @@ export default function ReportsPage() {
         return await tryFetch('');
       }
     },
+  });
+
+  const { data: bookingSchedulesMap = new Map<number, { time_start: string | null; time_end: string | null }>() } = useQuery({
+    queryKey: ['gym-bookings-schedule-map', dateRange, customStartDate, customEndDate],
+    queryFn: async () => {
+      const fromStr = format(start, 'yyyy-MM-dd');
+      const toStr = format(end, 'yyyy-MM-dd');
+      const tryFetch = async (base: string) => {
+        const resp = await fetch(`${base}/gym-bookings?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
+        const json = await resp.json();
+        if (!json || !json.ok) return [] as Array<{ booking_id: number; time_start: string | null; time_end: string | null }>;
+        const rows = Array.isArray(json.bookings) ? json.bookings : [];
+        return rows.map((r: unknown) => {
+          const obj = r as { booking_id?: number; time_start?: string | null; time_end?: string | null };
+          return {
+            booking_id: Number(obj.booking_id || 0),
+            time_start: obj.time_start != null ? String(obj.time_start) : null,
+            time_end: obj.time_end != null ? String(obj.time_end) : null,
+          };
+        });
+      };
+      try {
+        const rows = await tryFetch('/api');
+        const map = new Map<number, { time_start: string | null; time_end: string | null }>();
+        rows.forEach((r) => { if (Number.isFinite(r.booking_id) && r.booking_id > 0) map.set(r.booking_id, { time_start: r.time_start, time_end: r.time_end }); });
+        return map;
+      } catch (_) {
+        const rows = await tryFetch('');
+        const map = new Map<number, { time_start: string | null; time_end: string | null }>();
+        rows.forEach((r) => { if (Number.isFinite(r.booking_id) && r.booking_id > 0) map.set(r.booking_id, { time_start: r.time_start, time_end: r.time_end }); });
+        return map;
+      }
+    },
+    staleTime: 60000,
   });
 
   const bookingData = bookingDataRes.rows;
@@ -280,40 +342,7 @@ export default function ReportsPage() {
     return dir === 'asc' ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />;
   };
 
-  const { data: liveRange = [] } = useQuery({
-    queryKey: ['gym-live-status-range', dateRange, customStartDate, customEndDate],
-    queryFn: async () => {
-      const fromStr = format(start, 'yyyy-MM-dd');
-      const toStr = format(end, 'yyyy-MM-dd');
-      const tryFetch = async (base: string) => {
-        const resp = await fetch(`${base}/gym-live-status-range?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
-        const json = await resp.json();
-        if (!json || !json.ok) return [] as LiveTapRange[];
-        const taps = Array.isArray(json.taps) ? json.taps : [];
-        return taps.map((t: unknown) => {
-          const obj = t as { employee_id?: string; date?: string; time_in?: string | null; time_out?: string | null };
-          return {
-            employee_id: String(obj.employee_id || ''),
-            date: String(obj.date || ''),
-            time_in: obj.time_in != null ? String(obj.time_in) : null,
-            time_out: obj.time_out != null ? String(obj.time_out) : null,
-          } as LiveTapRange;
-        });
-      };
-      try {
-        const data = await tryFetch('/api');
-        if (Array.isArray(data)) return data;
-        return await tryFetch('');
-      } catch (_) {
-        return await tryFetch('');
-      }
-    },
-    staleTime: 5000,
-  });
-
-  const liveMap = new Map<string, { time_in: string | null; time_out: string | null }>(
-    (liveRange || []).map((p) => [`${p.employee_id}__${p.date}`, { time_in: p.time_in, time_out: p.time_out }])
-  );
+  // In/Out now sourced directly from gym_reports (TimeIn/TimeOut)
 
   const formatTimeOnly = (iso: string | null): string => {
     if (!iso) return '-';
@@ -368,12 +397,15 @@ export default function ReportsPage() {
       String((record.name ?? record.employee_name) ?? ''),
       String(record.employee_id ?? ''),
       String(record.department ?? ''),
-      String(record.gender ?? ''),
+      getGenderLabel(record.gender),
       formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_in),
       formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_out),
-      record.time_start && record.time_end
-        ? `${record.time_start} - ${record.time_end}`
-        : String(record.time_start ?? ''),
+      (() => {
+        const s = bookingSchedulesMap.get(record.booking_id);
+        const start = record.time_start ?? s?.time_start ?? null;
+        const end = record.time_end ?? s?.time_end ?? null;
+        return start && end ? `${start} - ${end}` : String(start ?? '');
+      })(),
       String(record.session_name ?? ''),
     ]);
 
@@ -697,15 +729,19 @@ export default function ReportsPage() {
                         <TableCell>{record.department || '-'}</TableCell>
                         <TableCell className="font-medium">{getGenderChip(record.gender)}</TableCell>
                         <TableCell className="font-mono text-sm">
-                          {formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_in)}
+                          {formatTimeOnly(record.time_in)}
                         </TableCell>
                         <TableCell className="font-mono text-sm">
-                          {formatTimeOnly((liveMap.get(`${String(record.employee_id)}__${String(record.booking_date)}`) || { time_in: null, time_out: null }).time_out)}
+                          {formatTimeOnly(record.time_out)}
                         </TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {record.time_start && record.time_end
-                            ? `${record.time_start} - ${record.time_end}`
-                            : record.time_start || '-'}
+                        <TableCell className="font-medium">
+                          {(() => {
+                            const s = bookingSchedulesMap.get(record.booking_id);
+                            const start = record.time_start ?? s?.time_start ?? null;
+                            const end = record.time_end ?? s?.time_end ?? null;
+                            const text = start && end ? `${start} - ${end}` : start || '';
+                            return getScheduleChip(record.session_name, text);
+                          })()}
                         </TableCell>
                         <TableCell className="font-medium">{getSessionChip(record.session_name)}</TableCell>
                       </TableRow>
