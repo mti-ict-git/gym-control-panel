@@ -466,14 +466,13 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     }
 
     if (enabled) {
-      const allEmployeeIds = new Set([...overrideMap.keys(), ...bookingMap.keys(), ...alwaysAllow]);
-      for (const employeeId of allEmployeeIds) {
+      for (const [employeeId, booking] of bookingMap.entries()) {
         if (!employeeId) continue;
         if (alwaysAllow.has(employeeId)) continue;
-        const booking = bookingMap.get(employeeId) || null;
-        const allow = booking ? Boolean(booking.inRange) : false;
-        pushAccessEvent({ t: new Date().toISOString(), type: allow ? 'grant' : 'prune', employee_id: employeeId, unit_no: unitNo });
-        await updateEmployeeAccess(employeeId, allow, booking?.card_no || null);
+        const allow = Boolean(booking?.inRange);
+        if (!allow) continue;
+        pushAccessEvent({ t: new Date().toISOString(), type: 'grant', employee_id: employeeId, unit_no: unitNo });
+        await updateEmployeeAccess(employeeId, true, booking?.card_no || null);
       }
     }
 

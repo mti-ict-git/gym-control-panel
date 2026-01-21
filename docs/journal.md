@@ -438,6 +438,15 @@ Database:
 - Initialized GymDB schema for live transactions: created table dbo.gym_live_taps and unique index UX_gym_live_taps_unique.
 - Used one-off script backend/scripts/gym-live-init.js to perform idempotent setup.
 
+2026-01-21 19:09:51 +0800
+
+Bugfix:
+- Updated gym access worker to only auto-grant within session window and avoid auto-pruning manual grants.
+
+Verification:
+- Ran lint: 0 errors (warnings only: react-refresh/only-export-components).
+- Ran TypeScript integrity check: passed (npx tsc --noEmit).
+
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).
