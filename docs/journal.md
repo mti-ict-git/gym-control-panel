@@ -456,6 +456,16 @@ Verification:
 - Ran lint: 0 errors (warnings only: react-refresh/only-export-components).
 - Ran TypeScript integrity check: passed (npx tsc --noEmit).
 
+2026-01-21 20:09:36 +0800
+
+Bugfix:
+- Added Source column to gym_controller_access_override to distinguish WORKER vs MANUAL grants.
+- Worker now auto-grants during in-range sessions and auto-prunes only WORKER overrides when out-of-range, leaving manual Vault grants untouched.
+
+Verification:
+- Ran lint: 0 errors (warnings only: react-refresh/only-export-components).
+- Ran TypeScript integrity check: passed (npx tsc --noEmit).
+
 Verification:
 - Lint: 0 errors, warnings only.
 - TypeScript integrity check: passed (noEmit).

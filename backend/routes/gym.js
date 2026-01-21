@@ -933,7 +933,7 @@ router.post('/gym-controller-access', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
   }
 
-  const { employee_id, access, unit_no, card_no } = req.body || {};
+  const { employee_id, access, unit_no, card_no, source: sourceRaw } = req.body || {};
   const employeeId = employee_id != null ? String(employee_id).trim() : '';
   if (!employeeId) {
     return res.status(400).json({ ok: false, error: 'employee_id is required' });
@@ -947,6 +947,7 @@ router.post('/gym-controller-access', async (req, res) => {
   const tzAllow = envTrim(process.env.GYM_ACCESS_TZ_ALLOW) || '01';
   const tzDeny = envTrim(process.env.GYM_ACCESS_TZ_DENY) || '00';
   const customAccessTz = allow ? tzAllow : tzDeny;
+  const source = sourceRaw != null ? String(sourceRaw).trim() : 'MANUAL';
   log('start', { employee_id: employeeId, unit_no: unitNo, allow, tz: customAccessTz });
 
   const baseUrl =
@@ -1120,18 +1121,23 @@ router.post('/gym-controller-access', async (req, res) => {
           EmployeeID VARCHAR(20) NOT NULL,
           UnitNo VARCHAR(20) NOT NULL,
           CustomAccessTZ VARCHAR(2) NOT NULL,
+          Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL',
           UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
           CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
         );
+      END`);
+      await pool2.request().query(`IF COL_LENGTH('dbo.gym_controller_access_override','Source') IS NULL BEGIN
+        ALTER TABLE dbo.gym_controller_access_override ADD Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL';
       END`);
       const req3 = pool2.request();
       req3.input('emp', sql.VarChar(20), employeeId);
       req3.input('unit', sql.VarChar(20), unitNo);
       req3.input('tz', sql.VarChar(2), customAccessTz);
+      req3.input('source', sql.VarChar(20), source);
       await req3.query(`IF EXISTS (SELECT 1 FROM dbo.gym_controller_access_override WHERE EmployeeID=@emp AND UnitNo=@unit)
-        UPDATE dbo.gym_controller_access_override SET CustomAccessTZ=@tz, UpdatedAt=GETDATE() WHERE EmployeeID=@emp AND UnitNo=@unit
+        UPDATE dbo.gym_controller_access_override SET CustomAccessTZ=@tz, UpdatedAt=GETDATE(), Source=@source WHERE EmployeeID=@emp AND UnitNo=@unit
       ELSE
-        INSERT INTO dbo.gym_controller_access_override (EmployeeID, UnitNo, CustomAccessTZ) VALUES (@emp, @unit, @tz)`);
+        INSERT INTO dbo.gym_controller_access_override (EmployeeID, UnitNo, CustomAccessTZ, Source) VALUES (@emp, @unit, @tz, @source)`);
       await pool2.close();
     }
     log('done', { ok: uploadOk && r.ok });
@@ -2833,15 +2839,20 @@ router.get('/gym-manager-all-session-preview', async (req, res) => {
         EmployeeID VARCHAR(20) NOT NULL,
         UnitNo VARCHAR(20) NOT NULL,
         CustomAccessTZ VARCHAR(2) NOT NULL,
+        Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL',
         UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
         CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
       );
     END`);
 
+    await gymPool.request().query(`IF COL_LENGTH('dbo.gym_controller_access_override','Source') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_access_override ADD Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL';
+    END`);
+
     const overridesRes = await gymPool
       .request()
       .input('unit', sql.VarChar(20), unitNo)
-      .query(`SELECT EmployeeID, CustomAccessTZ FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
+      .query(`SELECT EmployeeID, CustomAccessTZ, Source FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
     const overrideMap = new Map(
       (Array.isArray(overridesRes?.recordset) ? overridesRes.recordset : []).map((r) => [
         String(r.EmployeeID ?? '').trim(),
@@ -3555,9 +3566,14 @@ router.get('/gym-live-status', async (req, res) => {
             EmployeeID VARCHAR(20) NOT NULL,
             UnitNo VARCHAR(20) NOT NULL,
             CustomAccessTZ VARCHAR(2) NOT NULL,
+            Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL',
             UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
             CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
           );
+        END`);
+
+        await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_access_override','Source') IS NULL BEGIN
+          ALTER TABLE dbo.gym_controller_access_override ADD Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL';
         END`);
         const overridesRes = await pool
           .request()

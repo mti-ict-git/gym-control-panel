@@ -267,9 +267,14 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         EmployeeID VARCHAR(20) NOT NULL,
         UnitNo VARCHAR(20) NOT NULL,
         CustomAccessTZ VARCHAR(2) NOT NULL,
+        Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL',
         UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
         CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
       );
+    END`);
+
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_access_override','Source') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_access_override ADD Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL';
     END`);
 
     await pool.request().query(`IF OBJECT_ID('dbo.gym_access_committee','U') IS NULL BEGIN
@@ -286,11 +291,15 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     const overridesRes = await pool
       .request()
       .input('unit', sql.VarChar(20), unitNo)
-      .query(`SELECT EmployeeID, CustomAccessTZ, UpdatedAt FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
+      .query(`SELECT EmployeeID, CustomAccessTZ, UpdatedAt, Source FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
     const overrideMap = new Map(
       (Array.isArray(overridesRes?.recordset) ? overridesRes.recordset : []).map((r) => [
         String(r.EmployeeID).trim(),
-        { tz: String(r.CustomAccessTZ).trim(), updatedAt: r?.UpdatedAt ? new Date(r.UpdatedAt).toISOString() : null },
+        {
+          tz: String(r.CustomAccessTZ).trim(),
+          updatedAt: r?.UpdatedAt ? new Date(r.UpdatedAt).toISOString() : null,
+          source: r?.Source != null ? String(r.Source).trim() : 'MANUAL',
+        },
       ])
     );
 
@@ -423,7 +432,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
 
     await pool.close();
 
-    const updateEmployeeAccess = async (employeeId, allow, cardNo) => {
+    const updateEmployeeAccess = async (employeeId, allow, cardNo, source) => {
       const desiredTz = allow ? tzAllow : tzDeny;
       const current = overrideMap.get(employeeId) || null;
       const currentTz = current && typeof current === 'object' ? current.tz : (current || null);
@@ -439,6 +448,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         access: allow ? true : false,
         unit_no: unitNo,
         card_no: cardNo ? String(cardNo).trim() : undefined,
+        source: source || 'WORKER',
       };
 
       try {
@@ -449,7 +459,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         });
         const json = await resp.json().catch(() => null);
         if (json?.ok) {
-          overrideMap.set(employeeId, { tz: desiredTz, updatedAt: new Date().toISOString() });
+          overrideMap.set(employeeId, { tz: desiredTz, updatedAt: new Date().toISOString(), source: source || 'WORKER' });
           pushAccessEvent({ t: new Date().toISOString(), type: 'success', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz });
         } else {
           pushAccessEvent({ t: new Date().toISOString(), type: 'fail', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz, error: json && typeof json === 'object' ? String(json.error || '') : '' });
@@ -462,17 +472,26 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
 
     for (const employeeId of alwaysAllow) {
       pushAccessEvent({ t: new Date().toISOString(), type: 'always_allow', employee_id: employeeId, unit_no: unitNo });
-      await updateEmployeeAccess(employeeId, true, null);
+      await updateEmployeeAccess(employeeId, true, null, 'WORKER');
     }
 
     if (enabled) {
-      for (const [employeeId, booking] of bookingMap.entries()) {
+      const allEmployeeIds = new Set([...overrideMap.keys(), ...bookingMap.keys(), ...alwaysAllow]);
+      for (const employeeId of allEmployeeIds) {
         if (!employeeId) continue;
         if (alwaysAllow.has(employeeId)) continue;
-        const allow = Boolean(booking?.inRange);
-        if (!allow) continue;
-        pushAccessEvent({ t: new Date().toISOString(), type: 'grant', employee_id: employeeId, unit_no: unitNo });
-        await updateEmployeeAccess(employeeId, true, booking?.card_no || null);
+        const booking = bookingMap.get(employeeId) || null;
+        const inRange = Boolean(booking?.inRange);
+        const current = overrideMap.get(employeeId) || null;
+        const currentSource = current && typeof current === 'object' && current.source ? current.source : 'MANUAL';
+
+        if (inRange) {
+          pushAccessEvent({ t: new Date().toISOString(), type: 'grant', employee_id: employeeId, unit_no: unitNo });
+          await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER');
+        } else if (current && currentSource === 'WORKER') {
+          pushAccessEvent({ t: new Date().toISOString(), type: 'prune', employee_id: employeeId, unit_no: unitNo });
+          await updateEmployeeAccess(employeeId, false, booking?.card_no || null, 'WORKER');
+        }
       }
     }
 
