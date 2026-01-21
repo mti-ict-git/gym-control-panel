@@ -2688,6 +2688,223 @@ router.post('/gym-controller-settings', async (req, res) => {
   }
 });
 
+router.get('/gym-manager-all-session-preview', async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+    MASTER_DB_SERVER,
+    MASTER_DB_PORT,
+    MASTER_DB_DATABASE,
+    MASTER_DB_USER,
+    MASTER_DB_PASSWORD,
+    MASTER_DB_ENCRYPT,
+    MASTER_DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  const gymServer = envTrim(DB_SERVER);
+  const gymDatabase = envTrim(DB_DATABASE);
+  const gymUser = envTrim(DB_USER);
+  const gymPassword = envTrim(DB_PASSWORD);
+  if (!gymServer || !gymDatabase || !gymUser || !gymPassword) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const masterServer = envTrim(MASTER_DB_SERVER);
+  const masterDatabase = envTrim(MASTER_DB_DATABASE);
+  const masterUser = envTrim(MASTER_DB_USER);
+  const masterPassword = envTrim(MASTER_DB_PASSWORD);
+  if (!masterServer || !masterDatabase || !masterUser || !masterPassword) {
+    return res.status(500).json({ ok: false, error: 'Master DB env is not configured' });
+  }
+
+  const tzAllow = envTrim(process.env.GYM_ACCESS_TZ_ALLOW) || '01';
+  const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+  const unitNo = String(req.query.unit_no || '').trim() || envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+
+  const gymConfig = {
+    server: gymServer,
+    port: Number(DB_PORT || 1433),
+    database: gymDatabase,
+    user: gymUser,
+    password: gymPassword,
+    requestTimeout: 8000,
+    options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  const masterConfig = {
+    server: masterServer,
+    port: Number(MASTER_DB_PORT || 1433),
+    database: masterDatabase,
+    user: masterUser,
+    password: masterPassword,
+    requestTimeout: 8000,
+    options: { encrypt: envBool(MASTER_DB_ENCRYPT, false), trustServerCertificate: envBool(MASTER_DB_TRUST_SERVER_CERTIFICATE, true) },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  const pickColumn = (columns, candidates) => {
+    const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
+    for (const cand of candidates) {
+      const hit = map.get(String(cand).toLowerCase());
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  const pickSchemaForTable = async (pool, tableName) => {
+    const req1 = pool.request();
+    req1.input('tableName', sql.VarChar(128), String(tableName));
+    const r = await req1.query(
+      "SELECT TOP 1 TABLE_SCHEMA AS schema_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA"
+    );
+    const schemaName = r?.recordset?.[0]?.schema_name ? String(r.recordset[0].schema_name) : null;
+    return schemaName && schemaName.trim().length > 0 ? schemaName : null;
+  };
+
+  const normRole = (v) =>
+    String(v ?? '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toUpperCase();
+
+  const isManagerRole = (role) => {
+    const r = normRole(role);
+    if (!r) return false;
+    if (r === 'GM') return true;
+    if (r === 'MANAGER') return true;
+    if (r === 'SR MANAGER' || r === 'SR. MANAGER' || r === 'SENIOR MANAGER') return true;
+    if (r.includes('SENIOR') && r.includes('MANAGER')) return true;
+    if (r.includes('SR') && r.includes('MANAGER')) return true;
+    return false;
+  };
+
+  let gymPool = null;
+  let masterPool = null;
+  try {
+    gymPool = await new sql.ConnectionPool(gymConfig).connect();
+    await gymPool.request().query(`IF OBJECT_ID('dbo.gym_controller_access_override','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_controller_access_override (
+        EmployeeID VARCHAR(20) NOT NULL,
+        UnitNo VARCHAR(20) NOT NULL,
+        CustomAccessTZ VARCHAR(2) NOT NULL,
+        UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
+        CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
+      );
+    END`);
+
+    const overridesRes = await gymPool
+      .request()
+      .input('unit', sql.VarChar(20), unitNo)
+      .query(`SELECT EmployeeID, CustomAccessTZ FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
+    const overrideMap = new Map(
+      (Array.isArray(overridesRes?.recordset) ? overridesRes.recordset : []).map((r) => [
+        String(r.EmployeeID ?? '').trim(),
+        String(r.CustomAccessTZ ?? '').trim(),
+      ])
+    );
+
+    masterPool = await new sql.ConnectionPool(masterConfig).connect();
+    const employmentSchema = await pickSchemaForTable(masterPool, 'employee_employment');
+    if (!employmentSchema) {
+      return res.json({ ok: true, unit_no: unitNo, tz_allow: tzAllow, total_managers: 0, already_allowed: 0, to_upload: 0 });
+    }
+
+    const colsRes = await masterPool.request().query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'employee_employment' AND TABLE_SCHEMA = '${employmentSchema.replace(/'/g, "''")}'`
+    );
+    const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+    const empIdCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
+    const roleCol = pickColumn(cols, [
+      'grade',
+      'Grade',
+      'job_grade',
+      'JobGrade',
+      'job_title',
+      'JobTitle',
+      'title',
+      'Title',
+      'position',
+      'Position',
+      'job_position',
+      'JobPosition',
+      'level',
+      'Level',
+      'band',
+      'Band',
+      'rank',
+      'Rank',
+    ]);
+    const statusCol = pickColumn(cols, ['status', 'Status', 'employment_status', 'EmploymentStatus', 'is_active', 'IsActive', 'active', 'Active']);
+    const endDateCol = pickColumn(cols, ['end_date', 'EndDate', 'enddate', 'termination_date', 'TerminationDate']);
+    const startDateCol = pickColumn(cols, ['start_date', 'StartDate', 'startdate', 'effective_date', 'EffectiveDate']);
+
+    if (!empIdCol || !roleCol) {
+      return res.json({ ok: false, error: 'employee_employment must have employee_id and role columns' });
+    }
+
+    const now = new Date();
+    const reqEmp = masterPool.request();
+    reqEmp.input('today', sql.Date, now);
+    const whereParts = [];
+    if (statusCol) {
+      whereParts.push(
+        `UPPER(LTRIM(RTRIM(CAST([${statusCol}] AS varchar(50))))) IN ('ACTIVE','AKTIF','A','1','TRUE')`
+      );
+    }
+    if (endDateCol) whereParts.push(`([${endDateCol}] IS NULL OR [${endDateCol}] >= @today)`);
+    if (startDateCol) whereParts.push(`([${startDateCol}] IS NULL OR [${startDateCol}] <= @today)`);
+    whereParts.push(
+      `(UPPER(LTRIM(RTRIM(CAST([${roleCol}] AS varchar(255))))) IN ('MANAGER','GM','SR MANAGER','SR. MANAGER','SENIOR MANAGER')
+        OR UPPER(LTRIM(RTRIM(CAST([${roleCol}] AS varchar(255))))) LIKE '%SR%MANAGER%'
+        OR UPPER(LTRIM(RTRIM(CAST([${roleCol}] AS varchar(255))))) LIKE '%SENIOR%MANAGER%')`
+    );
+
+    const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+    const q = `SELECT TOP 5000 [${empIdCol}] AS employee_id, [${roleCol}] AS role_value FROM [${employmentSchema}].[employee_employment] ${whereSql}`;
+    const r = await reqEmp.query(q);
+    const rows = Array.isArray(r?.recordset) ? r.recordset : [];
+
+    const managerIds = new Set();
+    for (const row of rows) {
+      const employeeId = String(row?.employee_id ?? '').trim();
+      if (!employeeId) continue;
+      if (isManagerRole(row?.role_value)) managerIds.add(employeeId);
+    }
+
+    let alreadyAllowed = 0;
+    for (const employeeId of managerIds) {
+      if (String(overrideMap.get(employeeId) || '').trim() === tzAllow) alreadyAllowed += 1;
+    }
+
+    const totalManagers = managerIds.size;
+    const toUpload = Math.max(0, totalManagers - alreadyAllowed);
+    return res.json({
+      ok: true,
+      unit_no: unitNo,
+      tz_allow: tzAllow,
+      total_managers: totalManagers,
+      already_allowed: alreadyAllowed,
+      to_upload: toUpload,
+    });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  } finally {
+    try {
+      if (gymPool) await gymPool.close();
+    } catch (_) {}
+    try {
+      if (masterPool) await masterPool.close();
+    } catch (_) {}
+  }
+});
+
 router.get('/gym-access-committee', async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);

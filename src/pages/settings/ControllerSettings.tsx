@@ -12,6 +12,7 @@ export default function ControllerSettings() {
   const { toast } = useToast();
 
   const [enabled, setEnabled] = useState(false);
+  const [enableManagerAllSessionAccess, setEnableManagerAllSessionAccess] = useState(false);
   const [graceBeforeMin, setGraceBeforeMin] = useState(0);
   const [graceAfterMin, setGraceAfterMin] = useState(0);
   const [workerIntervalSec, setWorkerIntervalSec] = useState(60);
@@ -25,6 +26,7 @@ export default function ControllerSettings() {
         return (await resp.json()) as {
           ok: boolean;
           enable_auto_organize?: boolean;
+          enable_manager_all_session_access?: boolean;
           grace_before_min?: number;
           grace_after_min?: number;
           worker_interval_ms?: number;
@@ -37,6 +39,7 @@ export default function ControllerSettings() {
         if (!json.ok) throw new Error(json.error || 'Failed to fetch controller settings');
         return {
           enable_auto_organize: Boolean(json.enable_auto_organize),
+          enable_manager_all_session_access: Boolean(json.enable_manager_all_session_access),
           grace_before_min: Number(json.grace_before_min ?? 0) || 0,
           grace_after_min: Number(json.grace_after_min ?? 0) || 0,
           worker_interval_ms: Number(json.worker_interval_ms ?? 60000) || 60000,
@@ -46,6 +49,7 @@ export default function ControllerSettings() {
         if (!json.ok) throw new Error(json.error || 'Failed to fetch controller settings');
         return {
           enable_auto_organize: Boolean(json.enable_auto_organize),
+          enable_manager_all_session_access: Boolean(json.enable_manager_all_session_access),
           grace_before_min: Number(json.grace_before_min ?? 0) || 0,
           grace_after_min: Number(json.grace_after_min ?? 0) || 0,
           worker_interval_ms: Number(json.worker_interval_ms ?? 60000) || 60000,
@@ -54,18 +58,54 @@ export default function ControllerSettings() {
     },
   });
 
+  const managerPreviewQuery = useQuery({
+    queryKey: ['gym-manager-all-session-preview'],
+    enabled: Boolean(enableManagerAllSessionAccess),
+    queryFn: async () => {
+      const tryFetch = async (url: string) => {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('Failed to fetch manager preview');
+        return (await resp.json()) as {
+          ok: boolean;
+          total_managers?: number;
+          already_allowed?: number;
+          to_upload?: number;
+          unit_no?: string;
+          error?: string;
+        };
+      };
+
+      try {
+        const json = await tryFetch('/api/gym-manager-all-session-preview');
+        if (!json.ok) throw new Error(json.error || 'Failed to fetch manager preview');
+        return json;
+      } catch (_) {
+        const json = await tryFetch('/gym-manager-all-session-preview');
+        if (!json.ok) throw new Error(json.error || 'Failed to fetch manager preview');
+        return json;
+      }
+    },
+    staleTime: 30_000,
+  });
+  const refetchManagerPreview = managerPreviewQuery.refetch;
+
   useEffect(() => {
     if (!settingsQuery.data) return;
-    setEnabled(Boolean(settingsQuery.data.enable_auto_organize));
+    const nextAuto = Boolean(settingsQuery.data.enable_auto_organize);
+    const nextManager = Boolean(settingsQuery.data.enable_manager_all_session_access);
+    setEnabled(nextAuto);
+    setEnableManagerAllSessionAccess(nextManager);
     setGraceBeforeMin(Number(settingsQuery.data.grace_before_min ?? 0) || 0);
     setGraceAfterMin(Number(settingsQuery.data.grace_after_min ?? 0) || 0);
     const ms = Number(settingsQuery.data.worker_interval_ms ?? 60000) || 60000;
     setWorkerIntervalSec(Math.max(5, Math.round(ms / 1000)));
-  }, [settingsQuery.data]);
+    if (nextManager) void refetchManagerPreview().catch(() => {});
+  }, [settingsQuery.data, refetchManagerPreview]);
 
   const updateMutation = useMutation({
     mutationFn: async (input: {
       enable_auto_organize: boolean;
+      enable_manager_all_session_access: boolean;
       grace_before_min: number;
       grace_after_min: number;
       worker_interval_ms: number;
@@ -113,6 +153,7 @@ export default function ControllerSettings() {
   const safeWorkerIntervalSec = clamp(Number(workerIntervalSec) || 60, 5, 3600);
   const payload = {
     enable_auto_organize: Boolean(enabled),
+    enable_manager_all_session_access: Boolean(enableManagerAllSessionAccess),
     grace_before_min: safeGraceBeforeMin,
     grace_after_min: safeGraceAfterMin,
     worker_interval_ms: safeWorkerIntervalSec * 1000,
@@ -145,6 +186,37 @@ export default function ControllerSettings() {
               onCheckedChange={(next) => {
                 setEnabled(next);
                 updateMutation.mutate({ ...payload, enable_auto_organize: next });
+              }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+            <div className="space-y-1">
+              <div className="text-sm font-medium">Enable Manager All Session Access</div>
+              <div className="text-sm text-muted-foreground">Manager, GM, Sr Manager get all-session access.</div>
+              {enableManagerAllSessionAccess ? (
+                managerPreviewQuery.isFetching ? (
+                  <div className="text-xs text-muted-foreground">Loading preview…</div>
+                ) : managerPreviewQuery.isError ? (
+                  <div className="text-xs text-destructive">Preview unavailable.</div>
+                ) : managerPreviewQuery.data?.ok ? (
+                  <div className="text-xs text-muted-foreground">
+                    Managers detected: {Number(managerPreviewQuery.data.total_managers ?? 0) || 0}. Already allowed: {Number(managerPreviewQuery.data.already_allowed ?? 0) || 0}. Will upload: {Number(managerPreviewQuery.data.to_upload ?? 0) || 0}.
+                  </div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">No preview data.</div>
+                )
+              ) : (
+                <div className="text-xs text-muted-foreground">Turn on to see how many managers will be uploaded.</div>
+              )}
+            </div>
+            <Switch
+              checked={enableManagerAllSessionAccess}
+              disabled={isBusy}
+              onCheckedChange={(next) => {
+                setEnableManagerAllSessionAccess(next);
+                if (next) void refetchManagerPreview().catch(() => {});
+                updateMutation.mutate({ ...payload, enable_manager_all_session_access: next });
               }}
             />
           </div>
