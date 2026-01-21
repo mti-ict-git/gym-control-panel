@@ -208,7 +208,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     return false;
   };
 
-const allEmployeeIds = new Set([...overrideMap.keys(), ...bookingMap.keys(), ...alwaysAllow]);  const lastRequiredState = new Map();
+  const lastRequiredState = new Map();
 
   const runOnce = async () => {
     const cfg = gymDbConfig();
@@ -486,7 +486,10 @@ const allEmployeeIds = new Set([...overrideMap.keys(), ...bookingMap.keys(), ...
         const inRange = Boolean(booking?.inRange);
         const current = overrideMap.get(employeeId) || null;
 
-        const prevRequired = Boolean(lastRequiredState.get(employeeId));
+        const currentTz = current && typeof current === 'object' ? current.tz : null;
+        const hadAllowOverride = currentTz === tzAllow;
+        const prevRequiredRaw = lastRequiredState.get(employeeId);
+        const prevRequired = prevRequiredRaw === undefined ? Boolean(hadAllowOverride) : Boolean(prevRequiredRaw);
         const nowRequired = Boolean(inRange);
 
         if (!prevRequired && nowRequired) {
