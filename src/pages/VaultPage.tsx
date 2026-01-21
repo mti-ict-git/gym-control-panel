@@ -1,4 +1,4 @@
-import { Database, AlertCircle, CheckCircle, XCircle, Clock, Check, X, IdCard, Users as UsersIcon, User, CalendarDays, Lock, Unlock, ArrowUpDown, ChevronUp, ChevronDown, Filter } from 'lucide-react';
+import { Database, AlertCircle, CheckCircle, XCircle, Clock, Check, X, IdCard, Users as UsersIcon, User, CalendarDays, Lock, Unlock, ArrowUpDown, ChevronUp, ChevronDown, Filter, Trash2 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { useMemo, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
 const UTC8_OFFSET_MINUTES = 8 * 60;
 
@@ -194,6 +195,7 @@ export default function VaultPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'BOOKED' | 'IN_GYM' | 'OUT'>('ALL');
   const [approvalFilter, setApprovalFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
+  const [deleteBookingId, setDeleteBookingId] = useState<number | null>(null);
 
   const apiStatus = (s: typeof statusFilter): 'BOOKED' | 'CHECKIN' | 'COMPLETED' | undefined => {
     if (s === 'BOOKED') return 'BOOKED';
@@ -290,6 +292,39 @@ export default function VaultPage() {
     });
     return { male, female };
   }, [vaultUsersFiltered]);
+
+  const deleteBookingMutation = useMutation({
+    mutationFn: async (bookingId: number) => {
+      const encodedId = encodeURIComponent(String(bookingId));
+      const tryDelete = async (url: string) => {
+        const resp = await fetch(url, { method: 'DELETE' });
+        const json: { ok: boolean; affected?: number; error?: string } = await resp.json();
+        if (!json.ok) {
+          throw new Error(json.error || 'Failed to delete booking');
+        }
+        return json;
+      };
+
+      try {
+        return await tryDelete(`/api/gym-booking/${encodedId}`);
+      } catch (_) {
+        return await tryDelete(`/gym-booking/${encodedId}`);
+      }
+    },
+    onSuccess: () => {
+      toast.success('Booking deleted');
+      queryClient.invalidateQueries({ queryKey: ['vault-users-paged'] });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : 'Failed to delete booking';
+      toast.error(message);
+    },
+  });
+
+  const isCommiteBooking = (user: VaultUser): boolean => {
+    const label = normalizeSession(user.session_name);
+    return label === '';
+  };
 
   return (
     <AppLayout>
@@ -513,6 +548,18 @@ export default function VaultPage() {
                             >
                               <Lock className="h-4 w-4" />
                             </Button>
+                            {isCommiteBooking(user) && (
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={() => setDeleteBookingId(user.booking_id)}
+                                disabled={deleteBookingMutation.isPending}
+                                aria-label={`Delete booking for ${user.name || user.employee_id}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
                           </CardFooter>
                         </Card>
                       ))}
@@ -637,6 +684,18 @@ export default function VaultPage() {
                                   >
                                     <Lock className="h-4 w-4" />
                                   </Button>
+                                  {isCommiteBooking(user) && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                      onClick={() => setDeleteBookingId(user.booking_id)}
+                                      disabled={deleteBookingMutation.isPending}
+                                      title="Delete Booking"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -681,6 +740,43 @@ export default function VaultPage() {
             </CardContent>
           </Card>
         </div>
+        <AlertDialog
+          open={deleteBookingId != null}
+          onOpenChange={(open) => {
+            if (!open) {
+              setDeleteBookingId(null);
+            }
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete Booking</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone. This will permanently delete the selected booking.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                onClick={() => {
+                  setDeleteBookingId(null);
+                }}
+              >
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => {
+                  if (deleteBookingId != null && !deleteBookingMutation.isPending) {
+                    deleteBookingMutation.mutate(deleteBookingId);
+                  }
+                }}
+                disabled={deleteBookingMutation.isPending}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </AppLayout>
   );
