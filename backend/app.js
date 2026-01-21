@@ -208,6 +208,8 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     return false;
   };
 
+const allEmployeeIds = new Set([...overrideMap.keys(), ...bookingMap.keys(), ...alwaysAllow]);  const lastRequiredState = new Map();
+
   const runOnce = async () => {
     const cfg = gymDbConfig();
     if (!cfg) return { nextIntervalMs: 60000 };
@@ -484,13 +486,27 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         const inRange = Boolean(booking?.inRange);
         const current = overrideMap.get(employeeId) || null;
 
-        if (inRange) {
+        const prevRequired = Boolean(lastRequiredState.get(employeeId));
+        const nowRequired = Boolean(inRange);
+
+        if (!prevRequired && nowRequired) {
+          console.log('[gym-worker] grant', {
+            employee_id: employeeId,
+            unit_no: unitNo,
+            card_no: booking?.card_no || null,
+          });
           pushAccessEvent({ t: new Date().toISOString(), type: 'grant', employee_id: employeeId, unit_no: unitNo });
           await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER');
-        } else if (current) {
+        } else if (prevRequired && !nowRequired && current) {
+          console.log('[gym-worker] prune', {
+            employee_id: employeeId,
+            unit_no: unitNo,
+          });
           pushAccessEvent({ t: new Date().toISOString(), type: 'prune', employee_id: employeeId, unit_no: unitNo });
           await updateEmployeeAccess(employeeId, false, booking?.card_no || null, 'WORKER');
         }
+
+        lastRequiredState.set(employeeId, nowRequired);
       }
     }
 
