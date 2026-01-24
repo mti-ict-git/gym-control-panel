@@ -831,3 +831,31 @@ Backend:
 Verification:
 - Lint: passed (warnings only).
 - TypeScript integrity check: passed (noEmit).
+2026-01-22 20:46:26 +08:00
+
+Backend:
+- Added /gym-controller/settings API (GET/POST) to manage worker.
+- Started backend and verified gym access logs (grant/attempt/success/prune).
+
+Verification:
+- Lint: 0 errors (8 warnings).
+- TypeScript integrity check: passed (noEmit).
+
+2026-01-24 17:45:43 +08:00
+
+Backend:
+- Added console log: running access grant/prune checking at <ISO> on each worker tick.
+
+Verification:
+- Lint: 0 errors (warnings only).
+- TypeScript integrity check: passed (noEmit).
+
+2026-01-24 17:48:33 +08:00
+
+Backend:
+- Changed worker tick log to GMT+8 (YYYY-MM-DD HH:mm:ss GMT+8).
+
+Verification:
+- Lint: 0 errors (warnings only).
+- TypeScript integrity check: passed (noEmit).
+

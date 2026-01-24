@@ -161,6 +161,12 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
 
   const pad2 = (n) => String(n).padStart(2, '0');
   const toYmd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const formatGmtPlus8 = (date) => {
+    const base = date instanceof Date ? date : new Date();
+    const shifted = new Date(base.getTime() + 8 * 60 * 60 * 1000);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${shifted.getUTCFullYear()}-${p(shifted.getUTCMonth() + 1)}-${p(shifted.getUTCDate())} ${p(shifted.getUTCHours())}:${p(shifted.getUTCMinutes())}:${p(shifted.getUTCSeconds())} GMT+8`;
+  };
   const parseHHMM = (hhmm) => {
     const m = /^(\d{2}):(\d{2})$/.exec(String(hhmm || '').trim());
     if (!m) return null;
@@ -316,6 +322,11 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         .filter(Boolean)
     );
 
+    console.log('[gym-worker] sources', {
+      overrides: overrideMap.size,
+      always_allow: alwaysAllow.size,
+    });
+
     if (enableManagerAllSessionAccess) {
       try {
         const masterCfg = masterDbConfig();
@@ -434,6 +445,10 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
 
     await pool.close();
 
+    console.log('[gym-worker] today_bookings_rows', {
+      rows: typeof bookingsRes !== 'undefined' && Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset.length : 0,
+    });
+
     const updateEmployeeAccess = async (employeeId, allow, cardNo, source) => {
       const desiredTz = allow ? tzAllow : tzDeny;
       const current = overrideMap.get(employeeId) || null;
@@ -444,6 +459,14 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         const recent = updatedAt ? (Date.now() - new Date(updatedAt).getTime()) < maxAgeMs : false;
         if (recent) return;
       }
+      console.log('[gym-worker] attempt', {
+        employee_id: employeeId,
+        unit_no: unitNo,
+        allow: Boolean(allow),
+        tz: desiredTz,
+        card_no: cardNo ? String(cardNo).trim() : null,
+        source: source || 'WORKER',
+      });
       pushAccessEvent({ t: new Date().toISOString(), type: 'attempt', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz, card_no: cardNo ? String(cardNo).trim() : null });
       const body = {
         employee_id: employeeId,
@@ -462,12 +485,32 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         const json = await resp.json().catch(() => null);
         if (json?.ok) {
           overrideMap.set(employeeId, { tz: desiredTz, updatedAt: new Date().toISOString(), source: source || 'WORKER' });
+          console.log('[gym-worker] success', {
+            employee_id: employeeId,
+            unit_no: unitNo,
+            allow: Boolean(allow),
+            tz: desiredTz,
+          });
           pushAccessEvent({ t: new Date().toISOString(), type: 'success', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz });
         } else {
+          console.log('[gym-worker] fail', {
+            employee_id: employeeId,
+            unit_no: unitNo,
+            allow: Boolean(allow),
+            tz: desiredTz,
+            error: json && typeof json === 'object' ? String(json.error || '') : '',
+          });
           pushAccessEvent({ t: new Date().toISOString(), type: 'fail', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz, error: json && typeof json === 'object' ? String(json.error || '') : '' });
         }
       } catch (_) {
         const message = _ && typeof _ === 'object' && 'message' in _ ? String(_.message) : String(_);
+        console.log('[gym-worker] error', {
+          employee_id: employeeId,
+          unit_no: unitNo,
+          allow: Boolean(allow),
+          tz: desiredTz,
+          error: message,
+        });
         pushAccessEvent({ t: new Date().toISOString(), type: 'error', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz, error: message });
       }
     };
@@ -479,6 +522,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
 
     if (enabled) {
       const allEmployeeIds = new Set([...overrideMap.keys(), ...bookingMap.keys(), ...alwaysAllow]);
+      console.log('[gym-worker] evaluating_employees', { count: allEmployeeIds.size });
       for (const employeeId of allEmployeeIds) {
         if (!employeeId) continue;
         if (alwaysAllow.has(employeeId)) continue;
@@ -522,6 +566,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     let nextIntervalMs = 60000;
     try {
       pushAccessEvent({ t: new Date().toISOString(), type: 'worker_tick_start' });
+      console.log('[gym-worker] running access grant/prune checking at', formatGmtPlus8(new Date()));
       const r = await runOnce();
       nextIntervalMs = Number(r?.nextIntervalMs || 60000);
     } catch (_) {
