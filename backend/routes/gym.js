@@ -3585,8 +3585,7 @@ router.get('/gym-live-status', async (req, res) => {
         END`);
         const overridesRes = await pool
           .request()
-          .input('unit', sql.VarChar(20), unitNo)
-          .query(`SELECT EmployeeID, CustomAccessTZ FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
+          .query(`SELECT EmployeeID, CustomAccessTZ FROM dbo.gym_controller_access_override`);
         const rows = Array.isArray(overridesRes?.recordset) ? overridesRes.recordset : [];
         for (const r of rows) {
           const id = r?.EmployeeID != null ? String(r.EmployeeID).trim() : '';
