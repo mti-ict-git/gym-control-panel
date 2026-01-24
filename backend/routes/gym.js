@@ -3753,7 +3753,7 @@ router.get('/gym-live-status', async (req, res) => {
         const tap = empId ? tapMap.get(empId) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
         const access_required = empId ? Boolean(accessRequiredByEmpId.get(empId)) : false;
         const override_allow = empId ? String(overrideMap.get(empId) || '').trim() === tzAllow : false;
-        const access_granted = Boolean(access_required || override_allow);
+        const access_granted = Boolean(override_allow);
         const access_indicator = toAccessIndicator(access_granted);
         return { name, employee_id: empId, department: dept, schedule: sched, time_in: tap.time_in, time_out: tap.time_out, status, access_required, access_granted, access_indicator };
       });
@@ -3764,7 +3764,7 @@ router.get('/gym-live-status', async (req, res) => {
         const fallbackStatus = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'LEFT');
         const access_required = committeeSet.has(empId);
         const override_allow = String(overrideMap.get(empId) || '').trim() === tzAllow;
-        const access_granted = Boolean(access_required || override_allow);
+        const access_granted = Boolean(override_allow);
         const access_indicator = toAccessIndicator(access_granted);
         return { name: info.name, employee_id: empId, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: fallbackStatus, access_required, access_granted, access_indicator };
       });
