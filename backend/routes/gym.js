@@ -1114,8 +1114,10 @@ router.post('/gym-controller-access', async (req, res) => {
     log('vault_response', { http_ok: Boolean(r.ok), http_status: r.status, upload_status: parsed.uploadStatus });
 
     const uploadOk = String(parsed.uploadStatus || '').trim() === '1';
-    if (uploadOk && r.ok) {
-      const pool2 = await new sql.ConnectionPool(config).connect();
+
+    let dbOk = false;
+    const pool2 = await new sql.ConnectionPool(config).connect();
+    try {
       await pool2.request().query(`IF OBJECT_ID('dbo.gym_controller_access_override','U') IS NULL BEGIN
         CREATE TABLE dbo.gym_controller_access_override (
           EmployeeID VARCHAR(20) NOT NULL,
@@ -1138,14 +1140,20 @@ router.post('/gym-controller-access', async (req, res) => {
         UPDATE dbo.gym_controller_access_override SET CustomAccessTZ=@tz, UpdatedAt=GETDATE(), Source=@source WHERE EmployeeID=@emp AND UnitNo=@unit
       ELSE
         INSERT INTO dbo.gym_controller_access_override (EmployeeID, UnitNo, CustomAccessTZ, Source) VALUES (@emp, @unit, @tz, @source)`);
+      dbOk = true;
+    } finally {
       await pool2.close();
     }
-    log('done', { ok: uploadOk && r.ok });
+
+    const finalOk = uploadOk && r.ok;
+    log('done', { ok: finalOk, db_ok: dbOk });
     return res.json({
-      ok: uploadOk && r.ok,
+      ok: finalOk,
       employee_id: employeeId,
       unit_no: unitNo,
       tz: customAccessTz,
+      db_ok: dbOk,
+      upload_ok: finalOk,
       parsed,
       body,
       debug: debug ? { reqId, events: debugEvents } : undefined,

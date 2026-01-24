@@ -531,6 +531,9 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         const current = overrideMap.get(employeeId) || null;
 
         const currentTz = current && typeof current === 'object' ? current.tz : null;
+        const currentSourceRaw = current && typeof current === 'object' ? current.source : null;
+        const currentSource = currentSourceRaw != null ? String(currentSourceRaw).trim() : 'MANUAL';
+        const isWorkerOverride = currentSource.toUpperCase() === 'WORKER';
         const hadAllowOverride = currentTz === tzAllow;
         const prevRequiredRaw = lastRequiredState.get(employeeId);
         const prevRequired = prevRequiredRaw === undefined ? Boolean(hadAllowOverride) : Boolean(prevRequiredRaw);
@@ -544,7 +547,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
           });
           pushAccessEvent({ t: new Date().toISOString(), type: 'grant', employee_id: employeeId, unit_no: unitNo });
           await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER');
-        } else if (prevRequired && !nowRequired && current) {
+        } else if (prevRequired && !nowRequired && current && isWorkerOverride) {
           console.log('[gym-worker] prune', {
             employee_id: employeeId,
             unit_no: unitNo,
