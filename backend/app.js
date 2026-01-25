@@ -104,7 +104,7 @@ if (['1','true','yes','y'].includes(enableAutoSync)) {
     if (syncing) return;
     syncing = true;
     try {
-      const since = new Date(Date.now() - 5 * 60 * 1000).toISOString().slice(0, 19);
+      const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
       const url = `http://localhost:${PORT}/gym-live-sync?since=${encodeURIComponent(since)}&limit=200`;
       const r = await fetch(url);
       await r.text();
@@ -408,7 +408,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     const bookingMap = new Map();
     if (enabled) {
       const reqBookings = pool.request();
-      reqBookings.input('today', sql.Date, todayDate);
+      reqBookings.input('todayStr', sql.VarChar(10), todayStr);
       const bookingsRes = await reqBookings.query(
         `SELECT
           gb.EmployeeID AS employee_id,
@@ -417,7 +417,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
           CONVERT(varchar(5), s.EndTime, 108) AS time_end
         FROM dbo.gym_booking gb
         LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
-        WHERE gb.BookingDate = @today
+        WHERE CONVERT(varchar(10), gb.BookingDate, 23) = @todayStr
           AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')`
       );
 
@@ -536,6 +536,17 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         const currentSourceRaw = current && typeof current === 'object' ? current.source : null;
         const currentSource = currentSourceRaw != null ? String(currentSourceRaw).trim() : 'MANUAL';
         const isWorkerOverride = currentSource.toUpperCase() === 'WORKER';
+      const updatedAt = current && typeof current === 'object' ? current.updatedAt : null;
+      const legacyManualPruneMaxAgeMs = clamp(
+        envInt(process.env.GYM_LEGACY_MANUAL_PRUNE_MAX_AGE_MS, 24 * 60 * 60 * 1000),
+        5 * 60 * 1000,
+        30 * 24 * 60 * 60 * 1000
+      );
+      const isLegacyManualOverride = currentSource.toUpperCase() === 'MANUAL';
+      const legacyManualFresh = updatedAt
+        ? Date.now() - new Date(updatedAt).getTime() <= legacyManualPruneMaxAgeMs
+        : false;
+      const isPrunableOverride = isWorkerOverride || (isLegacyManualOverride && legacyManualFresh);
         const hadAllowOverride = currentTz === tzAllow;
         const prevRequiredRaw = lastRequiredState.get(employeeId);
         const prevRequired = prevRequiredRaw === undefined ? Boolean(hadAllowOverride) : Boolean(prevRequiredRaw);
@@ -549,7 +560,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
           });
           pushAccessEvent({ t: new Date().toISOString(), type: 'grant', employee_id: employeeId, unit_no: unitNo });
           await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER');
-        } else if (prevRequired && !nowRequired && current && isWorkerOverride) {
+      } else if (prevRequired && !nowRequired && current && isPrunableOverride) {
           console.log('[gym-worker] prune', {
             employee_id: employeeId,
             unit_no: unitNo,

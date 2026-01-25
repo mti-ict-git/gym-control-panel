@@ -121,7 +121,7 @@ export default function VaultPage() {
         const r = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ employee_id, access: grant_access }),
+          body: JSON.stringify({ employee_id, access: grant_access, source: 'MANUAL_LOCK' }),
         });
         const j = await r.json();
         if (r.status >= 500) throw new Error(j?.error || 'Server error');

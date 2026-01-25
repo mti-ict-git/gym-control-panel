@@ -243,7 +243,7 @@ export default function AccessPermissionSettings() {
         const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ employee_id: employeeId, access: allow }),
+          body: JSON.stringify({ employee_id: employeeId, access: allow, source: 'MANUAL_LOCK' }),
         });
         const json = (await resp.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
         if (resp.status >= 500) throw new Error(json?.error || 'Server error');

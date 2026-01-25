@@ -868,3 +868,22 @@ Backend:
 Verification:
 - Lint: 0 errors (warnings only).
 - TypeScript integrity check: passed (noEmit).
+
+2026-01-25 10:23:28 +0800
+
+Backend:
+- Fixed “today” filtering for worker booking reads by using yyyy-MM-dd string compare.
+- Allowed pruning of recent legacy MANUAL overrides to resolve stale access.
+- Fixed “today” filtering in /gym-live-status for bookings and taps.
+
+Frontend:
+- Marked user-triggered access changes as MANUAL_LOCK source.
+
+Verification:
+- Lint: 0 errors (warnings only).
+- TypeScript integrity check: passed (noEmit).
+
+2026-01-25 10:30:30 +0800
+
+Backend:
+- Fixed /gym-live-sync auto-sync window to send full ISO timestamp with timezone.

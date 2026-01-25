@@ -3518,7 +3518,7 @@ router.get('/gym-live-status', async (req, res) => {
       const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
       const nowUtcMs = Date.now();
       const nowInTz = new Date(nowUtcMs + tzOffsetMinutes * 60_000);
-      const todayDate = new Date(Date.UTC(nowInTz.getUTCFullYear(), nowInTz.getUTCMonth(), nowInTz.getUTCDate()));
+      const todayStr = `${nowInTz.getUTCFullYear()}-${String(nowInTz.getUTCMonth() + 1).padStart(2, '0')}-${String(nowInTz.getUTCDate()).padStart(2, '0')}`;
       const toUtcMsForTodayTzTime = (hh, mm) => {
         return Date.UTC(nowInTz.getUTCFullYear(), nowInTz.getUTCMonth(), nowInTz.getUTCDate(), hh, mm, 0, 0) - tzOffsetMinutes * 60_000;
       };
@@ -3615,7 +3615,7 @@ router.get('/gym-live-status', async (req, res) => {
         : '';
 
       const req1 = pool.request();
-      req1.input('today', sql.Date, todayDate);
+      req1.input('todayStr', sql.VarChar(10), todayStr);
       const bookingsRes = await req1.query(
         `SELECT ${selectName}
           gb.EmployeeID AS employee_id,
@@ -3627,14 +3627,14 @@ router.get('/gym-live-status', async (req, res) => {
         FROM dbo.gym_booking gb
         LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
         ${joinMaster}
-        WHERE gb.BookingDate = @today AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+        WHERE CONVERT(varchar(10), gb.BookingDate, 23) = @todayStr AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
         ORDER BY s.StartTime ASC`
       );
 
       const unitRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
       const units = unitRaw ? unitRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
       const req2 = pool.request();
-      req2.input('today', sql.Date, todayDate);
+      req2.input('todayStr', sql.VarChar(10), todayStr);
       const safeUnits = units.filter((u) => /^[A-Za-z0-9_-]+$/.test(u)).slice(0, 50);
       safeUnits.forEach((u, idx) => req2.input(`u${idx}`, sql.VarChar(50), u));
       const inList = safeUnits.map((_, idx) => `@u${idx}`).join(',');
@@ -3649,7 +3649,7 @@ router.get('/gym-live-status', async (req, res) => {
            MAX(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @exitPat THEN TxnTime END) AS time_out
          FROM dbo.gym_live_taps
          WHERE EmployeeID IS NOT NULL AND LTRIM(RTRIM(EmployeeID)) <> ''
-           AND CAST(TxnTime AS date) = @today
+           AND CONVERT(varchar(10), TxnTime, 23) = @todayStr
            ${unitWhere}
          GROUP BY EmployeeID`
       );
