@@ -15,7 +15,12 @@ export type LivePersonStatus = {
 
 type LiveStatusResponse = { ok: boolean; error?: string; people?: LivePersonStatus[] } | null;
 
-export function useGymLiveStatus() {
+type UseGymLiveStatusOptions = {
+  enabled?: boolean;
+  refetchInterval?: number;
+};
+
+export function useGymLiveStatus(options?: UseGymLiveStatusOptions) {
   return useQuery({
     queryKey: ['gym-live-status'],
     queryFn: async (): Promise<LivePersonStatus[]> => {
@@ -64,6 +69,7 @@ export function useGymLiveStatus() {
         } satisfies LivePersonStatus;
       });
     },
-    refetchInterval: 2000,
+    enabled: options?.enabled,
+    refetchInterval: options?.refetchInterval ?? 2000,
   });
 }

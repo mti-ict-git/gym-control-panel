@@ -1205,7 +1205,7 @@ router.post('/gym-booking-backfill-cardno', async (req, res) => {
          WHERE c.StaffNo = gb.EmployeeID
            AND c.Status = 1
            AND (c.Block IS NULL OR c.Block = 0)
-           AND c.del_state = 1
+           AND (c.del_state = 0 OR c.del_state IS NULL)
        ) cd
        WHERE gb.CardNo IS NULL AND cd.CardNo IS NOT NULL`
     );
@@ -2827,6 +2827,11 @@ router.get('/gym-manager-all-session-preview', async (req, res) => {
       .replace(/\s+/g, ' ')
       .toUpperCase();
 
+  const normalizeEmployeeId = (value) => {
+    const v = value != null ? String(value).trim() : '';
+    return v ? v.toUpperCase() : '';
+  };
+
   const isManagerRole = (role) => {
     const r = normRole(role);
     if (!r) return false;
@@ -2863,7 +2868,7 @@ router.get('/gym-manager-all-session-preview', async (req, res) => {
       .query(`SELECT EmployeeID, CustomAccessTZ, Source FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
     const overrideMap = new Map(
       (Array.isArray(overridesRes?.recordset) ? overridesRes.recordset : []).map((r) => [
-        String(r.EmployeeID ?? '').trim(),
+        normalizeEmployeeId(r?.EmployeeID),
         String(r.CustomAccessTZ ?? '').trim(),
       ])
     );
@@ -2931,7 +2936,7 @@ router.get('/gym-manager-all-session-preview', async (req, res) => {
 
     const managerIds = new Set();
     for (const row of rows) {
-      const employeeId = String(row?.employee_id ?? '').trim();
+      const employeeId = normalizeEmployeeId(row?.employee_id);
       if (!employeeId) continue;
       if (isManagerRole(row?.role_value)) managerIds.add(employeeId);
     }
@@ -3501,6 +3506,16 @@ router.get('/gym-live-status', async (req, res) => {
     return { hh: Number(m[1]), mm: Number(m[2]) };
   };
 
+  const normalizeEmployeeId = (value) => {
+    const v = value != null ? String(value).trim() : '';
+    return v ? v.toUpperCase() : '';
+  };
+
+  const trimOrNull = (value) => {
+    const v = value != null ? String(value).trim() : '';
+    return v ? v : null;
+  };
+
   const config = {
     server,
     port: Number(DB_PORT || 1433),
@@ -3568,7 +3583,7 @@ router.get('/gym-live-status', async (req, res) => {
           .query(`SELECT EmployeeID FROM dbo.gym_access_committee WHERE UnitNo = @unit AND IsActive = 1`);
         const rows = Array.isArray(committeeRes?.recordset) ? committeeRes.recordset : [];
         for (const r of rows) {
-          const id = r?.EmployeeID != null ? String(r.EmployeeID).trim() : '';
+          const id = normalizeEmployeeId(r?.EmployeeID);
           if (id) committeeSet.add(id);
         }
       } catch (_) {}
@@ -3594,7 +3609,7 @@ router.get('/gym-live-status', async (req, res) => {
           .query(`SELECT EmployeeID, CustomAccessTZ FROM dbo.gym_controller_access_override`);
         const rows = Array.isArray(overridesRes?.recordset) ? overridesRes.recordset : [];
         for (const r of rows) {
-          const id = r?.EmployeeID != null ? String(r.EmployeeID).trim() : '';
+          const id = normalizeEmployeeId(r?.EmployeeID);
           if (!id) continue;
           overrideMap.set(id, r?.CustomAccessTZ != null ? String(r.CustomAccessTZ).trim() : '');
         }
@@ -3668,24 +3683,24 @@ router.get('/gym-live-status', async (req, res) => {
         return `${y}-${m}-${day}T${hh}:${mm}:${ss}.${ms}+08:00`;
       };
 
-      const tapMap = new Map(
-        (Array.isArray(aggRes?.recordset) ? aggRes.recordset : []).map((r) => {
-          const empId = r?.employee_id != null ? String(r.employee_id).trim() : '';
-          const ti = r?.time_in instanceof Date ? r.time_in : (r?.time_in ? new Date(String(r.time_in)) : null);
-          const to = r?.time_out instanceof Date ? r.time_out : (r?.time_out ? new Date(String(r.time_out)) : null);
-          return [empId, { time_in: toUtc8Iso(ti), time_out: toUtc8Iso(to) }];
-        })
-      );
+      const tapMap = new Map();
+      const tapRawByKey = new Map();
+      for (const row of Array.isArray(aggRes?.recordset) ? aggRes.recordset : []) {
+        const rawId = row?.employee_id != null ? String(row.employee_id).trim() : '';
+        const key = normalizeEmployeeId(rawId);
+        if (!key) continue;
+        if (!tapRawByKey.has(key)) tapRawByKey.set(key, rawId);
+        const ti = row?.time_in instanceof Date ? row.time_in : (row?.time_in ? new Date(String(row.time_in)) : null);
+        const to = row?.time_out instanceof Date ? row.time_out : (row?.time_out ? new Date(String(row.time_out)) : null);
+        tapMap.set(key, { time_in: toUtc8Iso(ti), time_out: toUtc8Iso(to) });
+      }
 
       const bookingRows = Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset : [];
-      const bookedEmpIds = new Set(
-        bookingRows
-          .map((r) => (r?.employee_id != null ? String(r.employee_id).trim() : ''))
-          .filter((v) => v.length > 0)
-      );
-      const additionalEmpIds = Array.from(tapMap.keys()).filter((k) => k && !bookedEmpIds.has(k)).slice(0, 200);
+      const bookedEmpKeys = new Set(bookingRows.map((r) => normalizeEmployeeId(r?.employee_id)).filter((v) => v.length > 0));
+      const additionalEmpKeys = Array.from(tapMap.keys()).filter((k) => k && !bookedEmpKeys.has(k)).slice(0, 200);
+      const additionalEmpIds = additionalEmpKeys.map((k) => tapRawByKey.get(k) || k);
 
-      const extraInfo = new Map();
+      const extraInfoByKey = new Map();
       if (masterDbSafe && additionalEmpIds.length > 0) {
         try {
           const req3 = pool.request();
@@ -3707,21 +3722,23 @@ router.get('/gym-live-status', async (req, res) => {
           );
           const rows = Array.isArray(extraRes?.recordset) ? extraRes.recordset : [];
           for (const row of rows) {
-            const id = row?.employee_id != null ? String(row.employee_id).trim() : '';
-            if (!id) continue;
+            const rawId = row?.employee_id != null ? String(row.employee_id).trim() : '';
+            const idKey = normalizeEmployeeId(rawId);
+            if (!idKey) continue;
             const name = row?.employee_name != null ? String(row.employee_name).trim() : null;
             const dept = row?.department != null ? String(row.department).trim() : null;
-            extraInfo.set(id, { name, department: dept });
+            extraInfoByKey.set(idKey, { name, department: dept });
           }
         } catch (_) {}
       }
 
-      const accessRequiredByEmpId = new Map();
+      const accessRequiredByKey = new Map();
       for (const r of bookingRows) {
-        const empId = r?.employee_id != null ? String(r.employee_id).trim() : '';
-        if (!empId) continue;
-        if (committeeSet.has(empId)) {
-          accessRequiredByEmpId.set(empId, true);
+        const empIdRaw = trimOrNull(r?.employee_id);
+        const empKey = normalizeEmployeeId(empIdRaw);
+        if (!empKey) continue;
+        if (committeeSet.has(empKey)) {
+          accessRequiredByKey.set(empKey, true);
           continue;
         }
         const ts = r?.time_start != null ? String(r.time_start).trim() : '';
@@ -3729,14 +3746,14 @@ router.get('/gym-live-status', async (req, res) => {
         const start = parseHHMM(ts);
         const end = parseHHMM(te);
         if (!start) {
-          accessRequiredByEmpId.set(empId, false);
+          accessRequiredByKey.set(empKey, false);
           continue;
         }
         const startAtUtcMs = toUtcMsForTodayTzTime(start.hh, start.mm) - graceBeforeMin * 60_000;
         const endAtRawUtcMs = end ? toUtcMsForTodayTzTime(end.hh, end.mm) : startAtUtcMs + graceBeforeMin * 60_000 + 60 * 60_000;
         const endAtUtcMs = endAtRawUtcMs + graceAfterMin * 60_000;
         const inRange = nowUtcMs >= startAtUtcMs && nowUtcMs <= endAtUtcMs;
-        accessRequiredByEmpId.set(empId, Boolean(inRange));
+        accessRequiredByKey.set(empKey, Boolean(inRange));
       }
 
       const toAccessIndicator = (accessGranted) => {
@@ -3744,7 +3761,8 @@ router.get('/gym-live-status', async (req, res) => {
       };
 
       const people = bookingRows.map((r) => {
-        const empId = r?.employee_id != null ? String(r.employee_id).trim() : null;
+        const empId = trimOrNull(r?.employee_id);
+        const empKey = normalizeEmployeeId(empId);
         const name = r?.employee_name != null ? String(r.employee_name).trim() : null;
         const dept = r?.department != null ? String(r.department).trim() : null;
         const sess = r?.session_name != null ? String(r.session_name).trim() : '';
@@ -3753,23 +3771,25 @@ router.get('/gym-live-status', async (req, res) => {
         const sched = sess ? (ts && te ? `${sess} ${ts}-${te}` : sess) : null;
         const bookingStatus = r?.booking_status != null ? String(r.booking_status).trim().toUpperCase() : '';
         const status = bookingStatus === 'CHECKIN' ? 'IN_GYM' : bookingStatus === 'BOOKED' ? 'BOOKED' : 'LEFT';
-        const tap = empId ? tapMap.get(empId) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
-        const access_required = empId ? Boolean(accessRequiredByEmpId.get(empId)) : false;
-        const override_allow = empId ? String(overrideMap.get(empId) || '').trim() === tzAllow : false;
+        const tap = empKey ? tapMap.get(empKey) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
+        const access_required = empKey ? Boolean(accessRequiredByKey.get(empKey)) : false;
+        const override_allow = empKey ? String(overrideMap.get(empKey) || '').trim() === tzAllow : false;
         const access_granted = Boolean(override_allow);
         const access_indicator = toAccessIndicator(access_granted);
         return { name, employee_id: empId, department: dept, schedule: sched, time_in: tap.time_in, time_out: tap.time_out, status, access_required, access_granted, access_indicator };
       });
 
       const extra = additionalEmpIds.map((empId) => {
-        const tap = tapMap.get(empId) || { time_in: null, time_out: null };
-        const info = extraInfo.get(empId) || { name: null, department: null };
+        const rawId = empId != null ? String(empId).trim() : '';
+        const empKey = normalizeEmployeeId(rawId);
+        const tap = empKey ? tapMap.get(empKey) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
+        const info = empKey ? extraInfoByKey.get(empKey) || { name: null, department: null } : { name: null, department: null };
         const fallbackStatus = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'LEFT');
-        const access_required = committeeSet.has(empId);
-        const override_allow = String(overrideMap.get(empId) || '').trim() === tzAllow;
+        const access_required = empKey ? committeeSet.has(empKey) : false;
+        const override_allow = empKey ? String(overrideMap.get(empKey) || '').trim() === tzAllow : false;
         const access_granted = Boolean(override_allow);
         const access_indicator = toAccessIndicator(access_granted);
-        return { name: info.name, employee_id: empId, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: fallbackStatus, access_required, access_granted, access_indicator };
+        return { name: info.name, employee_id: rawId || null, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: fallbackStatus, access_required, access_granted, access_indicator };
       });
 
       const merged = people.concat(extra);

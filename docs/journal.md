@@ -209,6 +209,32 @@ Verification:
 - Ran lint: 0 errors (warnings only).
 - Ran TypeScript integrity check: passed (noEmit).
 
+Sun Jan 25 21:40:53 WITA 2026
+
+Frontend:
+- Added “LIVE” pill with in-gym count on mobile bottom navigation.
+- Tuned live status polling interval for the bottom nav.
+- Updated README with the Live Gym nav indicator note.
+
+Sun Jan 25 22:09:34 WITA 2026
+
+Frontend:
+- Added “Booking” item to mobile bottom navigation for approvals.
+
+Docs:
+- Added mobile enhancement plan in docs/mobile-enhance-plan.md.
+- Detailed Phase 1–3 implementation steps and acceptance criteria.
+
+Sun Jan 25 21:44:52 WITA 2026
+
+Backend:
+- Normalized employee ID matching in live status and manager allow-check.
+- Fixed CardDB del_state filter in booking CardNo backfill.
+
+Verification:
+- Ran lint: 0 errors (warnings only).
+- Ran TypeScript integrity check: passed (noEmit).
+
 2025-12-30 14:26:45 +08:00
 
 Enhancement:

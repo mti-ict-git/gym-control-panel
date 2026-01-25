@@ -68,6 +68,8 @@ This project is built with:
 - Register page lets employees book gym sessions with quota checks.
 - Vault (Gym Booking) page shows today and upcoming bookings with filters.
 - Users with Committee or Super Admin role can delete bookings from the Vault list.
+- Mobile bottom navigation shows a LIVE indicator (with in-gym count) for Live Gym.
+- Mobile bottom navigation includes a Booking shortcut to manage approvals.
 
 ## How can I deploy this project?
 
