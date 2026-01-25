@@ -1,65 +1,21 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Users, Database, Search, Calendar as CalendarIcon } from 'lucide-react';
+import { Calendar as CalendarIcon, Search } from 'lucide-react';
 import { format } from 'date-fns';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { EmptyState } from '@/components/EmptyState';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useGymUsers, GymUser } from '@/hooks/useGymUsers';
-import { useMostRelevantSchedule } from '@/hooks/useGymSchedules';
-import { StatusBadge } from '@/components/StatusBadge';
 import { Input } from '@/components/ui/input';
-import { Pagination, PaginationContent, PaginationItem, PaginationPrevious, PaginationNext, PaginationLink } from '@/components/ui/pagination';
 import { useGymLiveStatus } from '@/hooks/useGymLiveStatus';
 
-function UserRow({ user, index, onClick }: { user: GymUser; index: number; onClick: () => void }) {
-  const { data: schedule } = useMostRelevantSchedule(user.id);
-  
-  return (
-    <TableRow 
-      className="row-interactive"
-      onClick={onClick}
-    >
-      <TableCell className="w-12 text-right">{index}</TableCell>
-      <TableCell className="font-medium">{user.name}</TableCell>
-      <TableCell>{user.employee_id}</TableCell>
-      <TableCell>{user.department || '-'}</TableCell>
-      <TableCell>
-        {schedule ? (
-          format(new Date(schedule.schedule_time), 'MMM d, h:mm a')
-        ) : (
-          <span className="text-muted-foreground">-</span>
-        )}
-      </TableCell>
-      <TableCell>
-        {schedule?.check_in_time ? (
-          format(new Date(schedule.check_in_time), 'h:mm a')
-        ) : '-'}
-      </TableCell>
-      <TableCell>
-        {schedule?.check_out_time ? (
-          format(new Date(schedule.check_out_time), 'h:mm a')
-        ) : '-'}
-      </TableCell>
-      <TableCell>
-        {schedule ? <StatusBadge status={schedule.status} /> : <span className="text-muted-foreground">-</span>}
-      </TableCell>
-    </TableRow>
-  );
-}
+type SessionFilter = 'ALL' | 'COMITTE' | 'Morning' | 'Afternoon' | 'Night - 1' | 'Night - 2' | 'Other';
+type StatusFilter = 'ALL' | 'BOOKED' | 'IN_GYM' | 'LEFT';
+type AccessFilter = 'ALL' | 'GRANTED' | 'NO_ACCESS';
 
 export default function GymUsersPage() {
-  const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
-
-  const { data, isLoading } = useGymUsers(search, page, pageSize);
-  const users = [];
-  const total = 0;
-  const totalPages = 1;
+  const [sessionFilter, setSessionFilter] = useState<SessionFilter>('ALL');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  const [accessFilter, setAccessFilter] = useState<AccessFilter>('ALL');
   const { data: liveStatus, isLoading: isLoadingStatus } = useGymLiveStatus();
 
   const formatTimeUtc8 = (iso: string | null) => {
@@ -157,6 +113,42 @@ export default function GymUsersPage() {
     return counts;
   }, [liveStatus]);
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = Array.isArray(liveStatus) ? liveStatus : [];
+    return list.filter((p) => {
+      const session = normalizeSession(p.schedule);
+      const sessionBucket: SessionFilter =
+        session === ''
+          ? 'COMITTE'
+          : session === 'Morning' || session === 'Afternoon' || session === 'Night - 1' || session === 'Night - 2'
+            ? session
+            : 'Other';
+      if (sessionFilter !== 'ALL' && sessionBucket !== sessionFilter) return false;
+      if (statusFilter !== 'ALL' && p.status !== statusFilter) return false;
+      if (accessFilter === 'GRANTED' && p.access_indicator.color !== 'green') return false;
+      if (accessFilter === 'NO_ACCESS' && p.access_indicator.color !== 'red') return false;
+      if (!q) return true;
+
+      const name = String(p.name ?? '').toLowerCase();
+      const emp = String(p.employee_id ?? '').toLowerCase();
+      const dept = String(p.department ?? '').toLowerCase();
+      const sched = String(p.schedule ?? '').toLowerCase();
+      return name.includes(q) || emp.includes(q) || dept.includes(q) || sched.includes(q);
+    });
+  }, [accessFilter, liveStatus, search, sessionFilter, statusFilter]);
+
+  const accessPill = (color: 'green' | 'red', label: string) => {
+    const cls = color === 'green' ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700';
+    return (
+      <span className={`inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs font-medium ${cls}`}
+      >
+        <span className={`h-2 w-2 rounded-full ${color === 'green' ? 'bg-green-500' : 'bg-red-500'}`} />
+        <span>{label}</span>
+      </span>
+    );
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -165,30 +157,113 @@ export default function GymUsersPage() {
           <p className="text-muted-foreground">Real-time overview of active gym members and access status.</p>
         </div>
 
-        <div className="rounded-lg border bg-card p-4">
-          <div className="flex items-center gap-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-              <CalendarIcon className="h-5 w-5 text-primary" />
+        <div className="grid grid-cols-12 gap-4">
+          <div className="col-span-12 lg:col-span-5 rounded-lg border bg-card p-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <CalendarIcon className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <div className="text-sm text-muted-foreground">Today's Booking Date</div>
+                <div className="text-lg font-semibold">{format(new Date(), 'yyyy-MM-dd')}</div>
+              </div>
             </div>
-            <div>
-              <div className="text-sm text-muted-foreground">Today's Booking Date</div>
-              <div className="text-lg font-semibold">{format(new Date(), 'yyyy-MM-dd')}</div>
+            <div className="mt-3">
+              <div className="text-sm text-muted-foreground mb-2">Session & Count</div>
+              <div className="flex flex-wrap gap-2">
+                {getSessionCountChip('COMITTE', sessionCounts['COMITTE'])}
+                {getSessionCountChip('Morning', sessionCounts['Morning'])}
+                {getSessionCountChip('Afternoon', sessionCounts['Afternoon'])}
+                {getSessionCountChip('Night - 1', sessionCounts['Night - 1'])}
+                {getSessionCountChip('Night - 2', sessionCounts['Night - 2'])}
+                {getSessionCountChip('Other', sessionCounts['Other'])}
+              </div>
             </div>
           </div>
-          <div className="mt-3">
-            <div className="text-sm text-muted-foreground mb-2">Session & Count</div>
+
+          <div className="col-span-12 lg:col-span-7 rounded-lg border bg-card p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+              <div className="relative flex-1">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search name / employee id / department"
+                  className="pl-9"
+                  aria-label="Search live gym monitoring"
+                />
+              </div>
+              <div className="flex items-center gap-2 justify-end">
+                <span className="text-xs text-muted-foreground">Total</span>
+                <span className="text-sm font-semibold">{filtered.length}</span>
+              </div>
+            </div>
+
             <div className="flex flex-wrap gap-2">
-              {getSessionCountChip('COMITTE', sessionCounts['COMITTE'])}
-              {getSessionCountChip('Morning', sessionCounts['Morning'])}
-              {getSessionCountChip('Afternoon', sessionCounts['Afternoon'])}
-              {getSessionCountChip('Night - 1', sessionCounts['Night - 1'])}
-              {getSessionCountChip('Night - 2', sessionCounts['Night - 2'])}
-              {getSessionCountChip('Other', sessionCounts['Other'])}
+              {([
+                'ALL',
+                'COMITTE',
+                'Morning',
+                'Afternoon',
+                'Night - 1',
+                'Night - 2',
+                'Other',
+              ] as SessionFilter[]).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setSessionFilter(v)}
+                  className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
+                    sessionFilter === v ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
+                  }`}
+                  aria-pressed={sessionFilter === v}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {([
+                { label: 'All Status', value: 'ALL' },
+                { label: 'Booked', value: 'BOOKED' },
+                { label: 'In Gym', value: 'IN_GYM' },
+                { label: 'Left', value: 'LEFT' },
+              ] as Array<{ label: string; value: StatusFilter }>).map((x) => (
+                <button
+                  key={x.value}
+                  type="button"
+                  onClick={() => setStatusFilter(x.value)}
+                  className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
+                    statusFilter === x.value ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
+                  }`}
+                  aria-pressed={statusFilter === x.value}
+                >
+                  {x.label}
+                </button>
+              ))}
+              {([
+                { label: 'All Access', value: 'ALL' },
+                { label: 'Granted', value: 'GRANTED' },
+                { label: 'No Access', value: 'NO_ACCESS' },
+              ] as Array<{ label: string; value: AccessFilter }>).map((x) => (
+                <button
+                  key={x.value}
+                  type="button"
+                  onClick={() => setAccessFilter(x.value)}
+                  className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
+                    accessFilter === x.value ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
+                  }`}
+                  aria-pressed={accessFilter === x.value}
+                >
+                  {x.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
 
-        {isLoading || isLoadingStatus ? (
+        {isLoadingStatus ? (
           <div className="space-y-4">
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
@@ -196,7 +271,60 @@ export default function GymUsersPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="rounded-lg border bg-card overflow-hidden">
+            <div className="md:hidden space-y-3">
+              {filtered.length < 1 ? (
+                <div className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">
+                  No results.
+                </div>
+              ) : (
+                filtered.map((p, idx) => {
+                  const key = `${p.employee_id}-${p.time_in}-${idx}`;
+                  const sessionLabel = normalizeSession(p.schedule);
+                  return (
+                    <div key={key} className="rounded-lg border bg-card p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold">{p.name ?? '-'}</div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">
+                            <span>{p.employee_id ?? '-'}</span>
+                            <span className="px-1">•</span>
+                            <span className="truncate">{p.department ?? '-'}</span>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <span className="text-xs font-medium">{p.status}</span>
+                          {accessPill(p.access_indicator.color, p.access_indicator.label)}
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-12 gap-2">
+                        <div className="col-span-12 flex items-center justify-between gap-2">
+                          <span className="text-xs text-muted-foreground">Session</span>
+                          {getSessionChip(sessionLabel)}
+                        </div>
+                        <div className="col-span-12 flex items-center justify-between gap-2">
+                          <span className="text-xs text-muted-foreground">Time Schedule</span>
+                          {getScheduleChip(p.schedule)}
+                        </div>
+
+                        <div className="col-span-6">
+                          <div className="text-xs text-muted-foreground">Date</div>
+                          <div className="text-sm font-medium">{formatDateUtc8(p.time_in, p.time_out)}</div>
+                        </div>
+                        <div className="col-span-6">
+                          <div className="text-xs text-muted-foreground">Time</div>
+                          <div className="text-sm font-medium">
+                            {formatTimeUtc8(p.time_in)} – {formatTimeUtc8(p.time_out)}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="hidden md:block rounded-lg border bg-card overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -214,7 +342,7 @@ export default function GymUsersPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {(liveStatus ?? []).map((p, idx) => (
+                  {filtered.map((p, idx) => (
                     <TableRow key={`${p.employee_id}-${p.time_in}-${idx}`}>
                       <TableCell className="w-12 text-right">{idx + 1}</TableCell>
                       <TableCell className="font-medium">{p.name ?? '-'}</TableCell>
@@ -239,8 +367,6 @@ export default function GymUsersPage() {
                 </TableBody>
               </Table>
             </div>
-
-            
           </div>
         )}
       </div>

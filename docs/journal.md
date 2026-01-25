@@ -887,3 +887,13 @@ Verification:
 
 Backend:
 - Fixed /gym-live-sync auto-sync window to send full ISO timestamp with timezone.
+
+Sun Jan 25 20:13:03 WITA 2026
+
+Frontend:
+- Updated Live Gym Monitoring UI to be mobile-first (cards on mobile, table on desktop).
+- Added filter controls with better spacing for touch.
+
+Verification:
+- Ran lint: 0 errors (warnings only).
+- Ran TypeScript integrity check: passed (noEmit).
