@@ -199,6 +199,16 @@ Verification:
 - Lint: 0 errors.
 - TypeScript check: passed.
 
+Sun Jan 25 10:11:08 WITA 2026
+
+Backend:
+- Fixed 5AM date-boundary mismatches by computing “today” in UTC+8 offset (not server timezone) for /gym-live-status and gym-worker.
+- Added shared env helpers (envInt, startOfDayUtcDateForOffsetMinutes).
+
+Verification:
+- Ran lint: 0 errors (warnings only).
+- Ran TypeScript integrity check: passed (noEmit).
+
 2025-12-30 14:26:45 +08:00
 
 Enhancement:
@@ -858,4 +868,3 @@ Backend:
 Verification:
 - Lint: 0 errors (warnings only).
 - TypeScript integrity check: passed (noEmit).
-

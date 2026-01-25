@@ -7,7 +7,7 @@ import masterRouter from './routes/master.js';
 import gymRouter from './routes/gym.js';
 import authRouter from './routes/auth.js';
 import settingsRouter from './routes/settings.js';
-import { envBool, envTrim } from './lib/env.js';
+import { envBool, envTrim, envInt, startOfDayUtcDateForOffsetMinutes } from './lib/env.js';
 
 dotenv.config();
 
@@ -220,8 +220,14 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     const cfg = gymDbConfig();
     if (!cfg) return { nextIntervalMs: 60000 };
 
-    const now = new Date();
-    const todayStr = toYmd(now);
+    const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
+    const nowUtcMs = Date.now();
+    const nowInTz = new Date(nowUtcMs + tzOffsetMinutes * 60_000);
+    const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
+    const todayStr = `${nowInTz.getUTCFullYear()}-${String(nowInTz.getUTCMonth() + 1).padStart(2, '0')}-${String(nowInTz.getUTCDate()).padStart(2, '0')}`;
+    const toUtcMsForTodayTzTime = (hh, mm) => {
+      return Date.UTC(nowInTz.getUTCFullYear(), nowInTz.getUTCMonth(), nowInTz.getUTCDate(), hh, mm, 0, 0) - tzOffsetMinutes * 60_000;
+    };
 
     const pool = await new sql.ConnectionPool(cfg).connect();
     await pool.request().query(`IF OBJECT_ID('dbo.gym_controller_settings','U') IS NULL BEGIN
@@ -364,10 +370,9 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
             const startDateCol = pickColumn(cols, ['start_date', 'StartDate', 'startdate', 'effective_date', 'EffectiveDate']);
 
             if (empIdCol && roleCol) {
-              const today = new Date(todayStr);
               const reqEmp = masterPool.request();
               if (statusCol) reqEmp.input('active', sql.VarChar(50), 'ACTIVE');
-              reqEmp.input('today', sql.Date, today);
+              reqEmp.input('today', sql.Date, todayDate);
               const whereParts = [];
               if (statusCol) whereParts.push(`UPPER(LTRIM(RTRIM([${statusCol}]))) = UPPER(@active)`);
               if (endDateCol) whereParts.push(`([${endDateCol}] IS NULL OR [${endDateCol}] >= @today)`);
@@ -403,7 +408,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     const bookingMap = new Map();
     if (enabled) {
       const reqBookings = pool.request();
-      reqBookings.input('today', sql.Date, new Date(todayStr));
+      reqBookings.input('today', sql.Date, todayDate);
       const bookingsRes = await reqBookings.query(
         `SELECT
           gb.EmployeeID AS employee_id,
@@ -426,15 +431,12 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         if (!start) continue;
         const end = parseHHMM(row.time_end);
 
-        const startAtRaw = new Date(now.getFullYear(), now.getMonth(), now.getDate(), start.hh, start.mm, 0, 0);
-        const endAtRaw = end
-          ? new Date(now.getFullYear(), now.getMonth(), now.getDate(), end.hh, end.mm, 0, 0)
-          : new Date(startAtRaw.getTime() + 60 * 60 * 1000);
+        const startAtRawUtcMs = toUtcMsForTodayTzTime(start.hh, start.mm);
+        const endAtRawUtcMs = end ? toUtcMsForTodayTzTime(end.hh, end.mm) : startAtRawUtcMs + 60 * 60_000;
+        const startAtUtcMs = startAtRawUtcMs - graceBeforeMin * 60_000;
+        const endAtUtcMs = endAtRawUtcMs + graceAfterMin * 60_000;
 
-        const startAt = new Date(startAtRaw.getTime() - graceBeforeMin * 60 * 1000);
-        const endAt = new Date(endAtRaw.getTime() + graceAfterMin * 60 * 1000);
-
-        const inRange = now.getTime() >= startAt.getTime() && now.getTime() <= endAt.getTime();
+        const inRange = nowUtcMs >= startAtUtcMs && nowUtcMs <= endAtUtcMs;
         const prev = bookingMap.get(employeeId) || { inRange: false, card_no: null };
         bookingMap.set(employeeId, {
           inRange: Boolean(prev.inRange || inRange),

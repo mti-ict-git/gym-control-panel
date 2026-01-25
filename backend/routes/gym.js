@@ -1,7 +1,7 @@
 import express from 'express';
 import sql from 'mssql';
 import bcrypt from 'bcryptjs';
-import { envTrim, envBool } from '../lib/env.js';
+import { envTrim, envBool, envInt, startOfDayUtcDateForOffsetMinutes } from '../lib/env.js';
 
 const router = express.Router();
 
@@ -3515,7 +3515,13 @@ router.get('/gym-live-status', async (req, res) => {
     let pool = null;
     try {
       pool = await new sql.ConnectionPool(config).connect();
-      const today = new Date();
+      const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
+      const nowUtcMs = Date.now();
+      const nowInTz = new Date(nowUtcMs + tzOffsetMinutes * 60_000);
+      const todayDate = new Date(Date.UTC(nowInTz.getUTCFullYear(), nowInTz.getUTCMonth(), nowInTz.getUTCDate()));
+      const toUtcMsForTodayTzTime = (hh, mm) => {
+        return Date.UTC(nowInTz.getUTCFullYear(), nowInTz.getUTCMonth(), nowInTz.getUTCDate(), hh, mm, 0, 0) - tzOffsetMinutes * 60_000;
+      };
 
       const tzAllow = envTrim(process.env.GYM_ACCESS_TZ_ALLOW) || '01';
       const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
@@ -3609,7 +3615,7 @@ router.get('/gym-live-status', async (req, res) => {
         : '';
 
       const req1 = pool.request();
-      req1.input('today', sql.Date, today);
+      req1.input('today', sql.Date, todayDate);
       const bookingsRes = await req1.query(
         `SELECT ${selectName}
           gb.EmployeeID AS employee_id,
@@ -3628,7 +3634,7 @@ router.get('/gym-live-status', async (req, res) => {
       const unitRaw = envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '';
       const units = unitRaw ? unitRaw.split(',').map((s) => s.trim()).filter((v) => v.length > 0) : [];
       const req2 = pool.request();
-      req2.input('today', sql.Date, today);
+      req2.input('today', sql.Date, todayDate);
       const safeUnits = units.filter((u) => /^[A-Za-z0-9_-]+$/.test(u)).slice(0, 50);
       safeUnits.forEach((u, idx) => req2.input(`u${idx}`, sql.VarChar(50), u));
       const inList = safeUnits.map((_, idx) => `@u${idx}`).join(',');
@@ -3726,13 +3732,10 @@ router.get('/gym-live-status', async (req, res) => {
           accessRequiredByEmpId.set(empId, false);
           continue;
         }
-        const startAtRaw = new Date(today.getFullYear(), today.getMonth(), today.getDate(), start.hh, start.mm, 0, 0);
-        const endAtRaw = end
-          ? new Date(today.getFullYear(), today.getMonth(), today.getDate(), end.hh, end.mm, 0, 0)
-          : new Date(startAtRaw.getTime() + 60 * 60 * 1000);
-        const startAt = new Date(startAtRaw.getTime() - graceBeforeMin * 60 * 1000);
-        const endAt = new Date(endAtRaw.getTime() + graceAfterMin * 60 * 1000);
-        const inRange = today.getTime() >= startAt.getTime() && today.getTime() <= endAt.getTime();
+        const startAtUtcMs = toUtcMsForTodayTzTime(start.hh, start.mm) - graceBeforeMin * 60_000;
+        const endAtRawUtcMs = end ? toUtcMsForTodayTzTime(end.hh, end.mm) : startAtUtcMs + graceBeforeMin * 60_000 + 60 * 60_000;
+        const endAtUtcMs = endAtRawUtcMs + graceAfterMin * 60_000;
+        const inRange = nowUtcMs >= startAtUtcMs && nowUtcMs <= endAtUtcMs;
         accessRequiredByEmpId.set(empId, Boolean(inRange));
       }
 
@@ -3792,15 +3795,16 @@ router.get('/gym-live-status-range', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', taps: [] });
   }
 
+  const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
   const fromStr = String(req.query.from || '').trim();
   const toStr = String(req.query.to || '').trim();
-  const now = new Date();
-  const fromDate = fromStr ? new Date(fromStr) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const toDate = toStr ? new Date(toStr) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const defaultDay = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
+  const fromDate = fromStr ? new Date(fromStr) : defaultDay;
+  const toDate = toStr ? new Date(toStr) : defaultDay;
   const fromOk = fromDate instanceof Date && !isNaN(fromDate.getTime());
   const toOk = toDate instanceof Date && !isNaN(toDate.getTime());
-  const fromSafe = fromOk ? fromDate : new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const toSafe = toOk ? toDate : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const fromSafe = fromOk ? fromDate : defaultDay;
+  const toSafe = toOk ? toDate : defaultDay;
 
   const config = {
     server,
@@ -3817,9 +3821,9 @@ router.get('/gym-live-status-range', async (req, res) => {
     try {
       pool = await new sql.ConnectionPool(config).connect();
       const padKeyDate = (d) => {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
+        const y = d.getUTCFullYear();
+        const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(d.getUTCDate()).padStart(2, '0');
         return `${y}-${m}-${day}`;
       };
       const key = `${padKeyDate(fromSafe)}|${padKeyDate(toSafe)}`;
