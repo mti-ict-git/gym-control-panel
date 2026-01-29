@@ -85,24 +85,20 @@ export function AppSidebar() {
 
   return (
     <Sidebar className="border-r border-sidebar-border">
-      <SidebarHeader className="p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary">
-              <Dumbbell className="h-5 w-5 text-primary-foreground" />
-            </div>
-            <div>
-              <h2 className="font-semibold text-sidebar-foreground">Super Gym</h2>
-              <p className="text-xs text-muted-foreground">Control Panel</p>
-            </div>
+      <SidebarHeader className="h-14 flex-row items-center justify-between gap-3 border-b border-sidebar-border px-6 py-0">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary">
+            <Dumbbell className="h-4 w-4 text-primary-foreground" />
           </div>
-          <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
-            {isDark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-          </Button>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold leading-none text-sidebar-foreground">Super Gym</h2>
+            <p className="truncate text-[11px] leading-none text-muted-foreground">Control Panel</p>
+          </div>
         </div>
+        <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="Toggle theme">
+          {isDark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+        </Button>
       </SidebarHeader>
-
-      <Separator />
 
       <SidebarContent className="p-2">
         <SidebarGroup>

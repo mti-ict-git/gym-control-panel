@@ -32,7 +32,7 @@ export function AppLayout({ children }: AppLayoutProps) {
         
         <main className="flex-1 flex flex-col min-h-screen">
           {/* Desktop header with sidebar trigger */}
-          <header className="sticky top-0 z-40 hidden md:flex h-14 items-center gap-4 border-b border-border bg-card px-4">
+          <header className="sticky top-0 z-40 hidden md:flex h-14 items-center gap-4 border-b border-border bg-card px-6">
             <SidebarTrigger />
           </header>
           

@@ -326,22 +326,21 @@ export default function VaultPage() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Database className="h-6 w-6" />
-            Gym Booking
-          </h1>
-          <p className="text-muted-foreground">
-            Booking list created from the Register page.
-          </p>
-          <Card className="mt-3">
-            <CardHeader>
-              <div className="flex items-center gap-2">
-                <Filter className="h-5 w-5 text-muted-foreground" />
-                <CardTitle className="text-lg">Search & Filters</CardTitle>
-              </div>
-            </CardHeader>
-            <CardContent>
+        <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
+          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
+          <CardHeader>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Database className="h-6 w-6" />
+              Gym Booking
+            </h1>
+            <p className="text-muted-foreground">Booking list created from the Register page.</p>
+          </CardHeader>
+          <CardContent className="flex-1">
+            <div className="flex items-center gap-2">
+              <Filter className="h-5 w-5 text-muted-foreground" />
+              <div className="text-lg font-semibold">Search & Filters</div>
+            </div>
+            <div className="h-4" />
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div>
                   <div className="text-sm text-muted-foreground mb-1">Search</div>
@@ -563,9 +562,8 @@ export default function VaultPage() {
                     </div>
                   </div>
 
-                  <div className="hidden md:block">
-                    <div className="rounded-lg border bg-card overflow-hidden">
-                      <Table>
+				  <div className="hidden md:block -mx-6 border-t">
+					  <Table>
                         <TableHeader>
                           <TableRow>
                             <TableHead className="w-12 text-right">No</TableHead>
@@ -698,9 +696,8 @@ export default function VaultPage() {
                             </TableRow>
                           ))}
                         </TableBody>
-                      </Table>
-                    </div>
-                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3">
+																</Table>
+															  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-y px-6 py-3">
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-muted-foreground">Rows per page</span>
                         <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
@@ -734,8 +731,8 @@ export default function VaultPage() {
                   </Alert>
                 </div>
               )}
-            </CardContent>
-          </Card>
+          </CardContent>
+        </Card>
         </div>
         <AlertDialog
           open={deleteBookingId != null}
