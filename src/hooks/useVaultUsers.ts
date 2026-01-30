@@ -139,6 +139,9 @@ export function useVaultUsersPaged(params: {
   q: string;
   page: number;
   pageSize: number;
+  date?: string;
+  sessionName?: string;
+  timeStart?: string;
   status?: 'BOOKED' | 'CHECKIN' | 'COMPLETED';
   approvalStatus?: 'PENDING' | 'APPROVED' | 'REJECTED';
   sortBy?:
@@ -158,13 +161,16 @@ export function useVaultUsersPaged(params: {
   const q = params.q;
   const page = params.page;
   const pageSize = params.pageSize;
+  const date = params.date;
+  const sessionName = params.sessionName;
+  const timeStart = params.timeStart;
   const status = params.status;
   const approvalStatus = params.approvalStatus;
   const sortBy = params.sortBy;
   const sortDir = params.sortDir || 'desc';
 
   return useQuery<VaultUsersPagedResult, Error, VaultUsersPagedResult>({
-    queryKey: ['vault-users-paged', q, page, pageSize, status || '', approvalStatus || '', sortBy || '', sortDir],
+    queryKey: ['vault-users-paged', q, page, pageSize, date || '', sessionName || '', timeStart || '', status || '', approvalStatus || '', sortBy || '', sortDir],
     queryFn: async (): Promise<VaultUsersPagedResult> => {
       const todayJakarta = startOfTodayJakartaUtcDate();
       const dayAfter = new Date(todayJakarta.getTime() + 2 * 24 * 60 * 60_000);
@@ -176,8 +182,9 @@ export function useVaultUsersPaged(params: {
         return `${y}-${m}-${dd}`;
       };
 
-      const from = toYmd(todayJakarta);
-      const to = toYmd(dayAfter);
+      const isValidDate = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date);
+      const from = isValidDate ? date : toYmd(todayJakarta);
+      const to = isValidDate ? date : toYmd(dayAfter);
 
       const urlParams = new URLSearchParams();
       urlParams.set('from', from);
@@ -185,6 +192,8 @@ export function useVaultUsersPaged(params: {
       urlParams.set('page', String(page));
       urlParams.set('limit', String(pageSize));
       if (q) urlParams.set('q', q);
+      if (sessionName) urlParams.set('session_name', sessionName);
+      if (timeStart) urlParams.set('time_start', timeStart);
       if (status) urlParams.set('status', status);
       if (approvalStatus) urlParams.set('approval_status', approvalStatus);
       if (sortBy) urlParams.set('sort_by', sortBy);

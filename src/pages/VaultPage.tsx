@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useUserRole } from '@/hooks/useUserRole';
+import { useGymDbSessions } from '@/hooks/useGymDbSessions';
 
 const UTC8_OFFSET_MINUTES = 8 * 60;
 
@@ -99,22 +100,6 @@ export default function VaultPage() {
   >('booking_date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const {
-    data: bookingPaged = { rows: [], total: 0 },
-    isLoading: isLoadingVault,
-    error: vaultError,
-  } = useVaultUsersPaged({
-    q: '',
-    page,
-    pageSize,
-    sortBy,
-    sortDir,
-  });
-
-  const vaultUsers = bookingPaged.rows;
-  const totalCount = bookingPaged.total;
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-
   const toggleAccessMutation = useMutation({
     mutationFn: async ({ employee_id, grant_access }: { employee_id: string; grant_access: boolean }) => {
       const tryPost = async (url: string) => {
@@ -175,8 +160,6 @@ export default function VaultPage() {
     },
   });
 
-  const isLoading = isLoadingVault;
-
   const toggleSort = (key: typeof sortBy) => {
     setPage(1);
     if (sortBy === key) {
@@ -193,10 +176,33 @@ export default function VaultPage() {
   };
 
   const [search, setSearch] = useState('');
+
+  const jakartaTodayYmd = (): string => {
+    const now = new Date();
+    const jakartaNow = new Date(now.getTime() + UTC8_OFFSET_MINUTES * 60_000);
+    const y = jakartaNow.getUTCFullYear();
+    const m = String(jakartaNow.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(jakartaNow.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const [dateFilter, setDateFilter] = useState<string>(() => jakartaTodayYmd());
+  const [sessionFilter, setSessionFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'BOOKED' | 'IN_GYM' | 'OUT'>('ALL');
   const [approvalFilter, setApprovalFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
   const [deleteBookingId, setDeleteBookingId] = useState<number | null>(null);
   const { isCommittee, isSuperAdmin } = useUserRole();
+
+  const { data: gymDbSessions = [] } = useGymDbSessions();
+
+  const sessionOptions = useMemo(() => {
+    const set = new Set<string>();
+    gymDbSessions.forEach((s) => {
+      const name = String((s as { session_name?: unknown }).session_name ?? '').trim();
+      if (name) set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [gymDbSessions]);
 
   const apiStatus = (s: typeof statusFilter): 'BOOKED' | 'CHECKIN' | 'COMPLETED' | undefined => {
     if (s === 'BOOKED') return 'BOOKED';
@@ -213,6 +219,8 @@ export default function VaultPage() {
     q: search,
     page,
     pageSize,
+    date: dateFilter,
+    sessionName: sessionFilter === 'ALL' ? undefined : sessionFilter,
     status: apiStatus(statusFilter),
     approvalStatus: approvalFilter === 'ALL' ? undefined : approvalFilter,
     sortBy,
@@ -222,6 +230,9 @@ export default function VaultPage() {
   const vaultUsersFiltered = pagedData.rows;
   const totalCountFiltered = pagedData.total;
   const totalPagesFiltered = Math.max(1, Math.ceil(totalCountFiltered / pageSize));
+
+  const isLoading = isLoadingWithFilters;
+  const vaultError = vaultErrorWithFilters;
 
   const normalizeSession = (s: string | null): string => {
     const v = String(s || '').trim().toLowerCase();
@@ -341,18 +352,60 @@ export default function VaultPage() {
               <div className="text-lg font-semibold">Search & Filters</div>
             </div>
             <div className="h-4" />
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                 <div>
                   <div className="text-sm text-muted-foreground mb-1">Search</div>
                   <Input
                     placeholder="Search name, employee ID, or card"
                     value={search}
-                    onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setPage(1);
+                    }}
                   />
                 </div>
                 <div>
+                  <div className="text-sm text-muted-foreground mb-1">Date</div>
+                  <Input
+                    type="date"
+                    value={dateFilter}
+                    onChange={(e) => {
+                      setDateFilter(e.target.value);
+                      setPage(1);
+                    }}
+                  />
+                </div>
+                <div>
+                  <div className="text-sm text-muted-foreground mb-1">Session</div>
+                  <Select
+                    value={sessionFilter}
+                    onValueChange={(v) => {
+                      setSessionFilter(v as typeof sessionFilter);
+                      setPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">All</SelectItem>
+                      {sessionOptions.map((name) => (
+                        <SelectItem key={name} value={name}>
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
                   <div className="text-sm text-muted-foreground mb-1">Status</div>
-                  <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v as typeof statusFilter); setPage(1); }}>
+                  <Select
+                    value={statusFilter}
+                    onValueChange={(v) => {
+                      setStatusFilter(v as typeof statusFilter);
+                      setPage(1);
+                    }}
+                  >
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
@@ -366,7 +419,13 @@ export default function VaultPage() {
                 </div>
                 <div>
                   <div className="text-sm text-muted-foreground mb-1">Approval Status</div>
-                  <Select value={approvalFilter} onValueChange={(v) => { setApprovalFilter(v as typeof approvalFilter); setPage(1); }}>
+                  <Select
+                    value={approvalFilter}
+                    onValueChange={(v) => {
+                      setApprovalFilter(v as typeof approvalFilter);
+                      setPage(1);
+                    }}
+                  >
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>

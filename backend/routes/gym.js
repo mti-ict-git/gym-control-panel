@@ -661,6 +661,25 @@ router.get('/gym-bookings', async (req, res) => {
   const qRaw = String(req.query.q || '').trim();
   const statusRaw = String(req.query.status || '').trim().toUpperCase();
   const approvalRaw = String(req.query.approval_status || '').trim().toUpperCase();
+  const sessionNameRaw = String(req.query.session_name || req.query.session || '').trim();
+  const sessionNameNorm = sessionNameRaw
+    ? sessionNameRaw
+        .toUpperCase()
+        .replace(/[\s\-_]/g, '')
+        .slice(0, 100)
+    : '';
+  const sessionKey = sessionNameRaw.toLowerCase();
+  const rangeForSession = (key) => {
+    const k = String(key || '').toLowerCase();
+    if (!k) return null;
+    if (k.startsWith('morning')) return { start: '05:00', end: '12:00' };
+    if (k.startsWith('afternoon')) return { start: '12:00', end: '18:00' };
+    if (k.startsWith('night - 1') || k.startsWith('night-1') || k.startsWith('night 1') || k.startsWith('night1')) return { start: '18:00', end: '21:00' };
+    if (k.startsWith('night - 2') || k.startsWith('night-2') || k.startsWith('night 2') || k.startsWith('night2')) return { start: '21:00', end: '23:59' };
+    return null;
+  };
+  const sessionRange = rangeForSession(sessionKey);
+  const timeStartRaw = String(req.query.time_start || '').trim();
   const sortKeyRaw = String(req.query.sort_by || '').trim().toLowerCase();
   const sortDirRaw = String(req.query.sort_dir || '').trim().toLowerCase();
   const hasPageParam = req.query.page != null && String(req.query.page).trim() !== '';
@@ -724,6 +743,21 @@ router.get('/gym-bookings', async (req, res) => {
       }
     }
 
+  if (sessionNameNorm) {
+    const normalizedExpr = "REPLACE(REPLACE(REPLACE(UPPER(LTRIM(RTRIM(COALESCE(s.Session, gb.SessionName, '')))), ' ', ''), '-', ''), '_', '') = @session_name_norm";
+    if (sessionRange) {
+      whereParts.push(
+        `(${normalizedExpr} OR (s.StartTime IS NOT NULL AND s.StartTime >= CAST(@session_range_start AS time(0)) AND s.StartTime < CAST(@session_range_end AS time(0))))`
+      );
+    } else {
+      whereParts.push(normalizedExpr);
+    }
+  }
+
+    if (timeStartRaw && /^\d{2}:\d{2}$/.test(timeStartRaw)) {
+      whereParts.push('CONVERT(varchar(5), s.StartTime, 108) = @time_start');
+    }
+
     if (qRaw) {
       whereParts.push(
         `(
@@ -732,7 +766,7 @@ router.get('/gym-bookings', async (req, res) => {
           OR COALESCE(cd.CardNo, gb.CardNo, '') LIKE @q
           OR COALESCE(ec.name, '') LIKE @q
           OR COALESCE(ee.department, gb.Department, cd.Department, '') LIKE @q
-          OR COALESCE(gb.SessionName, '') LIKE @q
+          OR COALESCE(s.Session, gb.SessionName, '') LIKE @q
           OR CONVERT(varchar(10), gb.BookingDate, 23) LIKE @q
           OR COALESCE(gb.Status, '') LIKE @q
           OR COALESCE(gb.ApprovalStatus, '') LIKE @q
@@ -751,7 +785,7 @@ router.get('/gym-bookings', async (req, res) => {
       name: 'ec.name',
       employee_id: 'gb.EmployeeID',
       department: 'COALESCE(ee.department, gb.Department, cd.Department)',
-      session: 'gb.SessionName',
+      session: 'COALESCE(s.Session, gb.SessionName)',
       status: 'gb.Status',
       approval_status: 'gb.ApprovalStatus',
     };
@@ -783,6 +817,22 @@ router.get('/gym-bookings', async (req, res) => {
       reqData.input('approval_status', sql.VarChar(20), approvalRaw);
     }
 
+  if (sessionNameNorm) {
+    reqCount.input('session_name_norm', sql.VarChar(100), sessionNameNorm);
+    reqData.input('session_name_norm', sql.VarChar(100), sessionNameNorm);
+    if (sessionRange) {
+      reqCount.input('session_range_start', sql.VarChar(5), sessionRange.start);
+      reqCount.input('session_range_end', sql.VarChar(5), sessionRange.end);
+      reqData.input('session_range_start', sql.VarChar(5), sessionRange.start);
+      reqData.input('session_range_end', sql.VarChar(5), sessionRange.end);
+    }
+  }
+
+    if (timeStartRaw && /^\d{2}:\d{2}$/.test(timeStartRaw)) {
+      reqCount.input('time_start', sql.VarChar(5), timeStartRaw);
+      reqData.input('time_start', sql.VarChar(5), timeStartRaw);
+    }
+
     if (qRaw) {
       reqCount.input('q', sql.VarChar(200), `%${qRaw}%`);
       reqData.input('q', sql.VarChar(200), `%${qRaw}%`);
@@ -801,7 +851,7 @@ router.get('/gym-bookings', async (req, res) => {
         ec.name AS employee_name,
         COALESCE(ee.department, gb.Department, cd.Department) AS department,
         ec.gender AS gender,
-        gb.SessionName AS session_name,
+        COALESCE(s.Session, gb.SessionName) AS session_name,
         gb.ScheduleID AS schedule_id,
         CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date,
         gb.Status AS status,
