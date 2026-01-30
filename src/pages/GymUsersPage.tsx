@@ -157,7 +157,8 @@ export default function GymUsersPage() {
           <p className="text-muted-foreground">Real-time overview of active gym members and access status.</p>
         </div>
 
-        <div className="grid grid-cols-12 gap-4">
+        <div className="rounded-lg border bg-card p-4">
+          <div className="grid grid-cols-12 gap-4">
           <div className="col-span-12 lg:col-span-5 rounded-lg border bg-card p-4">
             <div className="flex items-center gap-4">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
@@ -260,6 +261,7 @@ export default function GymUsersPage() {
                 </button>
               ))}
             </div>
+          </div>
           </div>
         </div>
 

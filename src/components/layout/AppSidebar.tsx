@@ -150,6 +150,9 @@ export function AppSidebar() {
           <LogOut className="h-4 w-4 mr-2" />
           Logout
         </Button>
+        <div className="mt-3 text-xs text-muted-foreground text-center">
+          Copyright © 2026, Develop by Merdeka Tsingshan Indonesia v1.0.0
+        </div>
       </SidebarFooter>
     </Sidebar>
   );
