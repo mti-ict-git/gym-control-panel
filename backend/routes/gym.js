@@ -3810,7 +3810,7 @@ router.get('/gym-live-status', async (req, res) => {
       req2.input('exitPat', sql.VarChar(120), `%${exitPattern}%`);
       const aggRes = await req2.query(
         `SELECT EmployeeID AS employee_id,
-           MIN(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat THEN TxnTime END) AS time_in,
+           MAX(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @entryPat THEN TxnTime END) AS time_in,
            MAX(CASE WHEN UPPER(CAST([Transaction] AS varchar(100))) LIKE @exitPat THEN TxnTime END) AS time_out
          FROM dbo.gym_live_taps
          WHERE EmployeeID IS NOT NULL AND LTRIM(RTRIM(EmployeeID)) <> ''
@@ -3921,16 +3921,10 @@ router.get('/gym-live-status', async (req, res) => {
         const sched = sess ? (ts && te ? `${sess} ${ts}-${te}` : sess) : null;
         const bookingStatus = r?.booking_status != null ? String(r.booking_status).trim().toUpperCase() : '';
         const tap = empKey ? tapMap.get(empKey) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
-        let status = 'LEFT';
-        if (bookingStatus === 'CHECKIN') {
-          status = 'IN_GYM';
-        } else if (bookingStatus === 'COMPLETED') {
-          status = 'LEFT';
-        } else if (bookingStatus === 'BOOKED') {
-          status = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'BOOKED');
-        } else {
-          status = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'LEFT');
-        }
+        const tiMs = tap.time_in ? new Date(tap.time_in).getTime() : null;
+        const toMs = tap.time_out ? new Date(tap.time_out).getTime() : null;
+        const tapState = tiMs && (!toMs || (tiMs > toMs)) ? 'IN_GYM' : (toMs ? 'LEFT' : undefined);
+        let status = tapState || (bookingStatus === 'CHECKIN' ? 'IN_GYM' : bookingStatus === 'BOOKED' ? 'BOOKED' : 'LEFT');
         const access_required = empKey ? Boolean(accessRequiredByKey.get(empKey)) : false;
         const override_allow = empKey ? String(overrideMap.get(empKey) || '').trim() === tzAllow : false;
         const access_granted = Boolean(override_allow || access_required);
@@ -3943,7 +3937,9 @@ router.get('/gym-live-status', async (req, res) => {
         const empKey = normalizeEmployeeId(rawId);
         const tap = empKey ? tapMap.get(empKey) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
         const info = empKey ? extraInfoByKey.get(empKey) || { name: null, department: null } : { name: null, department: null };
-        const fallbackStatus = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'LEFT');
+        const tiMs = tap.time_in ? new Date(tap.time_in).getTime() : null;
+        const toMs = tap.time_out ? new Date(tap.time_out).getTime() : null;
+        const fallbackStatus = tiMs && (!toMs || (tiMs > toMs)) ? 'IN_GYM' : (toMs ? 'LEFT' : 'LEFT');
         const access_required = empKey ? committeeSet.has(empKey) : false;
         const override_allow = empKey ? String(overrideMap.get(empKey) || '').trim() === tzAllow : false;
         const access_granted = Boolean(override_allow);

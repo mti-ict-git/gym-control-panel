@@ -85,6 +85,17 @@ export default function GymUsersPage() {
     return <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${color}`}>{text}</span>;
   };
 
+  const statusPill = (status: 'BOOKED' | 'IN_GYM' | 'LEFT') => {
+    const cls =
+      status === 'IN_GYM'
+        ? 'border-green-200 bg-green-50 text-green-700'
+        : status === 'LEFT'
+        ? 'border-slate-200 bg-slate-50 text-slate-700'
+        : 'border-yellow-200 bg-yellow-50 text-yellow-700';
+    const label = status === 'IN_GYM' ? 'Inside' : status === 'LEFT' ? 'Outside' : 'Booked';
+    return <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${cls}`}>{label}</span>;
+  };
+
   const getSessionCountChip = (name: string, count: number) => {
     const lower = name.toLowerCase();
     const color = lower.startsWith('morning')
@@ -226,10 +237,10 @@ export default function GymUsersPage() {
 
             <div className="flex flex-wrap gap-2">
               {([
-                { label: 'All Status', value: 'ALL' },
+                { label: 'All', value: 'ALL' },
                 { label: 'Booked', value: 'BOOKED' },
-                { label: 'In Gym', value: 'IN_GYM' },
-                { label: 'Left', value: 'LEFT' },
+                { label: 'Inside', value: 'IN_GYM' },
+                { label: 'Outside', value: 'LEFT' },
               ] as Array<{ label: string; value: StatusFilter }>).map((x) => (
                 <button
                   key={x.value}
@@ -294,7 +305,7 @@ export default function GymUsersPage() {
                           </div>
                         </div>
                         <div className="flex flex-col items-end gap-2">
-                          <span className="text-xs font-medium">{p.status}</span>
+                          {statusPill(p.status)}
                           {accessPill(p.access_indicator.color, p.access_indicator.label)}
                         </div>
                       </div>
@@ -355,7 +366,7 @@ export default function GymUsersPage() {
                       <TableCell>{formatDateUtc8(p.time_in, p.time_out)}</TableCell>
                       <TableCell>{formatTimeUtc8(p.time_in)}</TableCell>
                       <TableCell>{formatTimeUtc8(p.time_out)}</TableCell>
-                      <TableCell>{p.status}</TableCell>
+                      <TableCell>{statusPill(p.status)}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <span
