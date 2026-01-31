@@ -6,7 +6,7 @@ import { useGymLiveStatus } from '@/hooks/useGymLiveStatus';
 
 const navItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
-  { title: 'Live', url: '/users', icon: Users, live: true },
+  { title: 'Live', url: '/live_gym', icon: Users, live: true },
   { title: 'Booking', url: '/gym_booking', icon: Database },
   { title: 'Schedules', url: '/schedules', icon: Calendar },
   { title: 'Settings', url: '/settings', icon: Settings },

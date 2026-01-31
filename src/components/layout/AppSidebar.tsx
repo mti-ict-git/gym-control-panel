@@ -29,7 +29,7 @@ import { Separator } from '@/components/ui/separator';
 
 const menuItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
-  { title: 'Live Gym', url: '/users', icon: Users },
+  { title: 'Live Gym', url: '/live_gym', icon: Users },
   { title: 'Gym Booking', url: '/gym_booking', icon: Database },
   { title: 'Schedules', url: '/schedules', icon: Calendar },
   { title: 'Reports', url: '/reports', icon: FileText },

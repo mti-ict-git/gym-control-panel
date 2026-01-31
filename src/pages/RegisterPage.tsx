@@ -40,6 +40,7 @@ import { useGymDbSessions, GymDbSession } from '@/hooks/useGymDbSessions';
 
 const formSchema = z.object({
   employeeId: z.string().trim().min(1, 'Employee ID is required').max(50, 'Employee ID is too long'),
+  employeeType: z.enum(['MTI', 'MMS', 'VISITOR']),
   sessionId: z.string().min(1, 'Please select a session'),
   date: z.date({ required_error: 'Please select a date' }),
 });
@@ -192,6 +193,7 @@ export default function RegisterPage() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       employeeId: '',
+      employeeType: 'MTI',
       sessionId: '',
     },
   });
@@ -453,6 +455,7 @@ export default function RegisterPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             employee_id: data.employeeId,
+            employee_type: data.employeeType,
             session_id: data.sessionId,
             booking_date: format(data.date, 'yyyy-MM-dd'),
           }),
@@ -660,6 +663,29 @@ export default function RegisterPage() {
 
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="space-y-5">
+              <FormField
+                control={form.control}
+                name="employeeType"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-slate-800">Employee Type</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger className="h-12 rounded-xl focus:ring-0 focus:ring-offset-0">
+                          <SelectValue placeholder="Select" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent className="z-[9999] bg-white">
+                        <SelectItem value="MTI">MTI</SelectItem>
+                        <SelectItem value="MMS">MMS</SelectItem>
+                        <SelectItem value="VISITOR">Visitor</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className="text-xs text-slate-500 mt-1">Non‑MTI bookings require admin approval.</div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name="employeeId"

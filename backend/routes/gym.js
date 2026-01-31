@@ -661,21 +661,22 @@ router.get('/gym-bookings', async (req, res) => {
   const qRaw = String(req.query.q || '').trim();
   const statusRaw = String(req.query.status || '').trim().toUpperCase();
   const approvalRaw = String(req.query.approval_status || '').trim().toUpperCase();
-  const sessionNameRaw = String(req.query.session_name || req.query.session || '').trim();
+  const sessionNameRaw = String(req.query.session_name || req.query.session || '').replace(/\+/g, ' ').trim();
   const sessionNameNorm = sessionNameRaw
     ? sessionNameRaw
         .toUpperCase()
-        .replace(/[\s\-_]/g, '')
+        .replace(/[\s\-_\+]/g, '')
         .slice(0, 100)
     : '';
   const sessionKey = sessionNameRaw.toLowerCase();
   const rangeForSession = (key) => {
     const k = String(key || '').toLowerCase();
+    const k2 = k.replace(/[\s\-_\+]/g, '');
     if (!k) return null;
     if (k.startsWith('morning')) return { start: '05:00', end: '12:00' };
     if (k.startsWith('afternoon')) return { start: '12:00', end: '18:00' };
-    if (k.startsWith('night - 1') || k.startsWith('night-1') || k.startsWith('night 1') || k.startsWith('night1')) return { start: '18:00', end: '21:00' };
-    if (k.startsWith('night - 2') || k.startsWith('night-2') || k.startsWith('night 2') || k.startsWith('night2')) return { start: '21:00', end: '23:59' };
+    if (k.startsWith('night - 1') || k.startsWith('night-1') || k.startsWith('night 1') || k.startsWith('night1') || k.startsWith('night + 1') || k.startsWith('night+1') || k2.startsWith('night1')) return { start: '18:00', end: '21:00' };
+    if (k.startsWith('night - 2') || k.startsWith('night-2') || k.startsWith('night 2') || k.startsWith('night2') || k.startsWith('night + 2') || k.startsWith('night+2') || k2.startsWith('night2')) return { start: '21:00', end: '23:59' };
     return null;
   };
   const sessionRange = rangeForSession(sessionKey);
@@ -782,7 +783,7 @@ router.get('/gym-bookings', async (req, res) => {
       created_at: 'gb.CreatedAt',
       time_start: 's.StartTime',
       time_end: 's.EndTime',
-      name: 'ec.name',
+      name: 'COALESCE(ec.name, gb.EmployeeName)',
       employee_id: 'gb.EmployeeID',
       department: 'COALESCE(ee.department, gb.Department, cd.Department)',
       session: 'COALESCE(s.Session, gb.SessionName)',
@@ -848,9 +849,9 @@ router.get('/gym-bookings', async (req, res) => {
         gb.BookingID AS booking_id,
         gb.EmployeeID AS employee_id,
         COALESCE(cd.CardNo, gb.CardNo) AS card_no,
-        ec.name AS employee_name,
+        COALESCE(ec.name, gb.EmployeeName) AS employee_name,
         COALESCE(ee.department, gb.Department, cd.Department) AS department,
-        ec.gender AS gender,
+        COALESCE(ec.gender, gb.Gender) AS gender,
         COALESCE(s.Session, gb.SessionName) AS session_name,
         gb.ScheduleID AS schedule_id,
         CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date,
@@ -1139,6 +1140,81 @@ router.post('/gym-controller-access', async (req, res) => {
     }
 
     if (!cardNo) {
+      const pool3 = await new sql.ConnectionPool(config).connect();
+      try {
+        const req = pool3.request();
+        req.input('emp', sql.VarChar(50), employeeId);
+        const r3 = await req.query(
+          `SELECT TOP 1 CardNo FROM DataDBEnt.dbo.CardDB WHERE StaffNo = @emp AND Status = 1 AND (Block IS NULL OR Block = 0) AND (del_state = 0 OR del_state IS NULL)`
+        );
+        const c3 = r3?.recordset?.[0]?.CardNo != null ? String(r3.recordset[0].CardNo).trim() : '';
+        if (c3) {
+          cardNo = c3;
+          cardNoSource = 'carddb_cross';
+        }
+      } finally {
+        await pool3.close();
+      }
+    }
+
+    if (!cardNo) {
+      const cardTxServer = envTrim(process.env.CARD_DB_SERVER) || envTrim(process.env.CARDDB_SERVER);
+      const cardTxDatabase = envTrim(process.env.CARD_DB_DATABASE) || envTrim(process.env.CARDDB_NAME);
+      const cardTxUser = envTrim(process.env.CARD_DB_USER) || envTrim(process.env.CARDDB_USER);
+      const cardTxPassword = envTrim(process.env.CARD_DB_PASSWORD) || envTrim(process.env.CARDDB_PASSWORD);
+      const cardTxTable = envTrim(process.env.CARD_DB_TX_TABLE) || 'tblTransaction';
+      const cardTxSchema = envTrim(process.env.CARD_DB_TX_SCHEMA) || 'dbo';
+      if (cardTxServer && cardTxDatabase && cardTxUser && cardTxPassword && /^[A-Za-z0-9_]+$/.test(cardTxTable) && /^[A-Za-z0-9_]+$/.test(cardTxSchema)) {
+        const cardTxConfig = {
+          server: cardTxServer,
+          port: Number(process.env.CARD_DB_PORT || process.env.CARDDB_PORT || 1433),
+          database: cardTxDatabase,
+          user: cardTxUser,
+          password: cardTxPassword,
+          options: {
+            encrypt: envBool(process.env.CARD_DB_ENCRYPT, false) || envBool(process.env.CARDDB_ENCRYPT, false),
+            trustServerCertificate: envBool(process.env.CARD_DB_TRUST_SERVER_CERTIFICATE, true) || envBool(process.env.CARDDB_TRUST_SERVER_CERTIFICATE, true),
+          },
+          pool: { max: 1, min: 0, idleTimeoutMillis: 5000 },
+        };
+        let txPool;
+        try {
+          txPool = await new sql.ConnectionPool(cardTxConfig).connect();
+          const colsRes = await txPool.request().query(
+            `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='${cardTxSchema.replace(/'/g, "''")}' AND TABLE_NAME='${cardTxTable.replace(/'/g, "''")}'`
+          );
+          const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+          const pickColumn = (columns, candidates) => {
+            const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
+            for (const cand of candidates) {
+              const hit = map.get(String(cand).toLowerCase());
+              if (hit) return hit;
+            }
+            return null;
+          };
+          const timeCol = pickColumn(cols, ['TxnTime', 'TrTime', 'Time', 'DateTime', 'Datetime', 'LogTime', 'TrDateTime']);
+          const staffCol = pickColumn(cols, ['EmployeeID', 'employee_id', 'StaffNo', 'staff_no', 'Staff', 'Employee', 'UserID', 'UserId', 'PersonID']);
+          const cardCol = pickColumn(cols, ['CardNo', 'card_no', 'Card', 'CardNumber', 'CardID', 'CardId', 'IDCard']);
+          if (staffCol && cardCol) {
+            const order = timeCol ? `ORDER BY [${timeCol}] DESC` : '';
+            const q = `SELECT TOP 1 [${cardCol}] AS CardNo FROM [${cardTxSchema}].[${cardTxTable}] WHERE [${staffCol}] = @emp AND [${cardCol}] IS NOT NULL ${order}`;
+            const r = await txPool.request().input('emp', sql.NVarChar(50), employeeId).query(q);
+            const c = r?.recordset?.[0]?.CardNo != null ? String(r.recordset[0].CardNo).trim() : '';
+            if (c) {
+              cardNo = c;
+              cardNoSource = 'cardtx';
+            }
+          }
+          await txPool.close();
+        } catch (_) {
+          try {
+            if (txPool) await txPool.close();
+          } catch (_) {}
+        }
+      }
+    }
+
+    if (!cardNo) {
       log('cardNo_not_found');
       return res
         .status(200)
@@ -1317,11 +1393,18 @@ router.post('/gym-booking-create', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Master DB env is not configured' });
   }
 
-  const { employee_id, session_id, booking_date } = req.body || {};
+  const { employee_id, session_id, booking_date, employee_type: employeeTypeRaw } = req.body || {};
   const employeeIdHeader = envTrim(req.headers['x-employee-id'] || req.headers['x-employee_id']);
   const employeeId = String(employee_id || employeeIdHeader || '').trim();
   const sessionId = String(session_id || '').trim();
   const bookingDateStr = String(booking_date || '').trim();
+  const employeeTypeGuess = (() => {
+    const v = String(employeeTypeRaw || '').trim().toUpperCase();
+    if (v === 'MTI' || v === 'MMS' || v === 'VISITOR') return v;
+    if (/^MTI/i.test(employeeId)) return 'MTI';
+    if (/^MMS/i.test(employeeId)) return 'MMS';
+    return 'VISITOR';
+  })();
 
   if (!employeeId || !sessionId || !bookingDateStr) {
     return res.status(400).json({ ok: false, error: 'employee_id (body or x-employee-id header), session_id, booking_date are required' });
@@ -1550,8 +1633,11 @@ router.post('/gym-booking-create', async (req, res) => {
     }
 
     if (!empRow) {
-      await masterPool.close();
-      return res.status(200).json({ ok: false, error: 'Employee not found' });
+      if (employeeTypeGuess === 'MTI') {
+        await masterPool.close();
+        return res.status(200).json({ ok: false, error: 'Employee not found' });
+      }
+      empRow = { employee_id: employeeId, name: employeeId, department: employeeTypeGuess === 'MMS' ? 'MMS' : 'VISITOR', card_no: null, staff_no: employeeId, gender: null };
     }
 
     let department = empRow.department != null ? String(empRow.department).trim() : '';
@@ -1585,7 +1671,7 @@ router.post('/gym-booking-create', async (req, res) => {
 
     await masterPool.close();
 
-    const employeeName = String(empRow.name ?? '').trim();
+    const employeeName = String(empRow.name ?? '').trim() || employeeId;
     const cardNoMaster = empRow.card_no != null ? String(empRow.card_no).trim() : null;
     const staffIdForCard = empRow.staff_no != null && String(empRow.staff_no).trim().length > 0
       ? String(empRow.staff_no).trim()

@@ -49,7 +49,7 @@ const App = () => (
               }
             />
             <Route
-              path="/users"
+              path="/live_gym"
               element={
                 <ProtectedRoute>
                   <GymUsersPage />
@@ -57,7 +57,7 @@ const App = () => (
               }
             />
             <Route
-              path="/users/:userId"
+              path="/live_gym/:userId"
               element={
                 <ProtectedRoute>
                   <UserDetailPage />

@@ -59,7 +59,7 @@ export default function DashboardPage() {
                 title="Total Gym Users"
                 value={users?.length || 0}
                 icon={Users}
-                onClick={() => navigate('/users')}
+                onClick={() => navigate('/live_gym')}
               />
               <StatCard
                 title="Today's Schedules"

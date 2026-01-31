@@ -60,7 +60,7 @@ export default function UserDetailPage() {
           title="User not found"
           description="The user you're looking for doesn't exist."
           action={
-            <Button onClick={() => navigate('/users')}>
+            <Button onClick={() => navigate('/live_gym')}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to Users
             </Button>
@@ -135,7 +135,7 @@ export default function UserDetailPage() {
       <div className="space-y-6">
         <Button 
           variant="ghost" 
-          onClick={() => navigate('/users')}
+          onClick={() => navigate('/live_gym')}
           className="mb-4"
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
