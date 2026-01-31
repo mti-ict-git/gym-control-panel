@@ -665,18 +665,38 @@ router.get('/gym-bookings', async (req, res) => {
   const sessionNameNorm = sessionNameRaw
     ? sessionNameRaw
         .toUpperCase()
-        .replace(/[\s\-_\+]/g, '')
+        .replace(/[\s\-_\+:\.]/g, '')
         .slice(0, 100)
     : '';
   const sessionKey = sessionNameRaw.toLowerCase();
   const rangeForSession = (key) => {
     const k = String(key || '').toLowerCase();
-    const k2 = k.replace(/[\s\-_\+]/g, '');
+    const k2 = k.replace(/[\s\-_\+:\.]/g, '');
     if (!k) return null;
     if (k.startsWith('morning')) return { start: '05:00', end: '12:00' };
     if (k.startsWith('afternoon')) return { start: '12:00', end: '18:00' };
-    if (k.startsWith('night - 1') || k.startsWith('night-1') || k.startsWith('night 1') || k.startsWith('night1') || k.startsWith('night + 1') || k.startsWith('night+1') || k2.startsWith('night1')) return { start: '18:00', end: '21:00' };
-    if (k.startsWith('night - 2') || k.startsWith('night-2') || k.startsWith('night 2') || k.startsWith('night2') || k.startsWith('night + 2') || k.startsWith('night+2') || k2.startsWith('night2')) return { start: '21:00', end: '23:59' };
+    if (
+      k.startsWith('night - 1') ||
+      k.startsWith('night-1') ||
+      k.startsWith('night 1') ||
+      k.startsWith('night1') ||
+      k.startsWith('night : 1') ||
+      k.startsWith('night:1') ||
+      k.startsWith('night + 1') ||
+      k.startsWith('night+1') ||
+      k2.startsWith('night1')
+    ) return { start: '18:00', end: '21:00' };
+    if (
+      k.startsWith('night - 2') ||
+      k.startsWith('night-2') ||
+      k.startsWith('night 2') ||
+      k.startsWith('night2') ||
+      k.startsWith('night : 2') ||
+      k.startsWith('night:2') ||
+      k.startsWith('night + 2') ||
+      k.startsWith('night+2') ||
+      k2.startsWith('night2')
+    ) return { start: '21:00', end: '23:59' };
     return null;
   };
   const sessionRange = rangeForSession(sessionKey);
@@ -745,14 +765,8 @@ router.get('/gym-bookings', async (req, res) => {
     }
 
   if (sessionNameNorm) {
-    const normalizedExpr = "REPLACE(REPLACE(REPLACE(UPPER(LTRIM(RTRIM(COALESCE(s.Session, gb.SessionName, '')))), ' ', ''), '-', ''), '_', '') = @session_name_norm";
-    if (sessionRange) {
-      whereParts.push(
-        `(${normalizedExpr} OR (s.StartTime IS NOT NULL AND s.StartTime >= CAST(@session_range_start AS time(0)) AND s.StartTime < CAST(@session_range_end AS time(0))))`
-      );
-    } else {
-      whereParts.push(normalizedExpr);
-    }
+    const normalizedExpr = "REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(LTRIM(RTRIM(COALESCE(s.Session, gb.SessionName, '')))), ' ', ''), '-', ''), '_', ''), ':', ''), '+', '') = @session_name_norm";
+    whereParts.push(normalizedExpr);
   }
 
     if (timeStartRaw && /^\d{2}:\d{2}$/.test(timeStartRaw)) {
@@ -3906,11 +3920,20 @@ router.get('/gym-live-status', async (req, res) => {
         const te = r?.time_end != null ? String(r.time_end).trim() : null;
         const sched = sess ? (ts && te ? `${sess} ${ts}-${te}` : sess) : null;
         const bookingStatus = r?.booking_status != null ? String(r.booking_status).trim().toUpperCase() : '';
-        const status = bookingStatus === 'CHECKIN' ? 'IN_GYM' : bookingStatus === 'BOOKED' ? 'BOOKED' : 'LEFT';
         const tap = empKey ? tapMap.get(empKey) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
+        let status = 'LEFT';
+        if (bookingStatus === 'CHECKIN') {
+          status = 'IN_GYM';
+        } else if (bookingStatus === 'COMPLETED') {
+          status = 'LEFT';
+        } else if (bookingStatus === 'BOOKED') {
+          status = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'BOOKED');
+        } else {
+          status = tap.time_out ? 'LEFT' : (tap.time_in ? 'IN_GYM' : 'LEFT');
+        }
         const access_required = empKey ? Boolean(accessRequiredByKey.get(empKey)) : false;
         const override_allow = empKey ? String(overrideMap.get(empKey) || '').trim() === tzAllow : false;
-        const access_granted = Boolean(override_allow);
+        const access_granted = Boolean(override_allow || access_required);
         const access_indicator = toAccessIndicator(access_granted);
         return { name, employee_id: empId, department: dept, schedule: sched, time_in: tap.time_in, time_out: tap.time_out, status, access_required, access_granted, access_indicator };
       });

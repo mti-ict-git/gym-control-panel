@@ -239,8 +239,22 @@ export default function VaultPage() {
     if (!v || v === '-') return '';
     if (v.startsWith('morning')) return 'Morning';
     if (v.startsWith('afternoon')) return 'Afternoon';
-    if (v.startsWith('night - 1') || v.startsWith('night-1') || v.startsWith('night 1') || v.startsWith('night1')) return 'Night - 1';
-    if (v.startsWith('night - 2') || v.startsWith('night-2') || v.startsWith('night 2') || v.startsWith('night2')) return 'Night - 2';
+    if (
+      v.startsWith('night - 1') ||
+      v.startsWith('night-1') ||
+      v.startsWith('night 1') ||
+      v.startsWith('night1') ||
+      v.startsWith('night : 1') ||
+      v.startsWith('night:1')
+    ) return 'Night - 1';
+    if (
+      v.startsWith('night - 2') ||
+      v.startsWith('night-2') ||
+      v.startsWith('night 2') ||
+      v.startsWith('night2') ||
+      v.startsWith('night : 2') ||
+      v.startsWith('night:2')
+    ) return 'Night - 2';
     return (s || '').split(/\s+\d/)[0]?.trim() || (s || '');
   };
 
