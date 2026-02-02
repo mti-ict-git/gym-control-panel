@@ -2003,7 +2003,7 @@ router.post('/gym-booking-create', async (req, res) => {
     insertReq.input('booking_date', sql.Date, bookingDate);
 
     const insertResult = await insertReq.query(
-      'INSERT INTO dbo.gym_booking (EmployeeID, CardNo, EmployeeName, Department, Gender, SessionName, ScheduleID, BookingDate, Status) OUTPUT INSERTED.BookingID AS booking_id VALUES (@employee_id, @card_no, @employee_name, @department, @gender, @session_name, @schedule_id, @booking_date, \'BOOKED\')'
+      'INSERT INTO dbo.gym_booking (EmployeeID, CardNo, EmployeeName, Department, Gender, SessionName, ScheduleID, BookingDate, Status, ApprovalStatus) OUTPUT INSERTED.BookingID AS booking_id VALUES (@employee_id, @card_no, @employee_name, @department, @gender, @session_name, @schedule_id, @booking_date, \'BOOKED\', \'APPROVED\')'
     );
 
     await gymPool2.close();
@@ -4683,6 +4683,13 @@ router.get('/gym-reports', async (req, res) => {
     reqData.input('limit', sql.Int, limit);
 
     const countSql = `SELECT COUNT(1) AS total FROM dbo.gym_reports ${whereClause}`;
+    const aggSql = `SELECT
+        COUNT(1) AS total,
+        SUM(CASE WHEN [TimeIn] IS NOT NULL THEN 1 ELSE 0 END) AS time_in_total,
+        SUM(CASE WHEN [TimeOut] IS NOT NULL THEN 1 ELSE 0 END) AS time_out_total,
+        SUM(CASE WHEN UPPER(CAST([Gender] AS varchar(50))) IN ('M','MALE') THEN 1 ELSE 0 END) AS male_total,
+        SUM(CASE WHEN UPPER(CAST([Gender] AS varchar(50))) IN ('F','FEMALE') THEN 1 ELSE 0 END) AS female_total
+      FROM dbo.gym_reports ${whereClause}`;
     const sortMap = {
       department: '[Department]',
       employee_id: '[EmployeeID]',
@@ -4701,12 +4708,18 @@ router.get('/gym-reports', async (req, res) => {
     const dataSql = `SELECT ${selectCols.join(', ')} FROM dbo.gym_reports ${whereClause} ORDER BY ${orderSql} OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
 
     const countRes = await reqCount.query(countSql);
+    const aggRes = await reqCount.query(aggSql);
     const dataRes = await reqData.query(dataSql);
 
     await pool.close();
     const total = Number(countRes?.recordset?.[0]?.total || 0);
+    const aggRow = Array.isArray(aggRes?.recordset) ? aggRes.recordset[0] : {};
+    const timeInTotal = Number(aggRow?.time_in_total || 0);
+    const timeOutTotal = Number(aggRow?.time_out_total || 0);
+    const maleTotal = Number(aggRow?.male_total || 0);
+    const femaleTotal = Number(aggRow?.female_total || 0);
     const reports = Array.isArray(dataRes?.recordset) ? dataRes.recordset : [];
-    return res.json({ ok: true, total, reports });
+    return res.json({ ok: true, total, time_in_total: timeInTotal, time_out_total: timeOutTotal, male_total: maleTotal, female_total: femaleTotal, reports });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, reports: [] });

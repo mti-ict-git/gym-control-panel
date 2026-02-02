@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subDays, addDays } from 'date-fns';
-import { FileText, Download, Calendar, Users, Clock, TrendingUp, Filter, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { FileText, Download, Calendar, Users, Clock, Filter, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -48,6 +48,10 @@ interface LiveTapRange {
 interface ReportQueryResult {
   rows: BookingRecord[];
   total: number;
+  time_in_total?: number;
+  time_out_total?: number;
+  male_total?: number;
+  female_total?: number;
 }
 
 function formatBookingId(n: number | null | undefined): string {
@@ -282,7 +286,14 @@ export default function ReportsPage() {
             status: null,
           } as BookingRecord;
         }) as BookingRecord[];
-        return { rows: mapped, total: Number(json.total || 0) } as ReportQueryResult;
+        return {
+          rows: mapped,
+          total: Number(json.total || 0),
+          time_in_total: Number(json.time_in_total || 0),
+          time_out_total: Number(json.time_out_total || 0),
+          male_total: Number(json.male_total || 0),
+          female_total: Number(json.female_total || 0),
+        } as ReportQueryResult;
       };
       try {
         const data = await tryFetch('/api');
@@ -457,10 +468,10 @@ export default function ReportsPage() {
   // Calculate statistics
   const stats = {
     totalBookings: totalCount,
-    checkedIn: bookingData.filter(r => (r.status || '').toUpperCase() === 'CHECKIN').length,
-    completed: bookingData.filter(r => (r.status || '').toUpperCase() === 'COMPLETED').length,
-    noShow: bookingData.filter(r => (r.status || '').toUpperCase() === 'NO_SHOW').length,
-    uniqueUsers: new Set(bookingData.map(r => r.employee_id)).size,
+    timeIn: Number(bookingDataRes.time_in_total || 0),
+    timeOut: Number(bookingDataRes.time_out_total || 0),
+    male: Number(bookingDataRes.male_total || 0),
+    female: Number(bookingDataRes.female_total || 0),
   };
 
   const handleExportCSV = () => {
@@ -678,22 +689,8 @@ export default function ReportsPage() {
                   <Clock className="h-5 w-5 text-blue-500" />
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Checked In</p>
-                  <p className="text-2xl font-bold">{stats.checkedIn}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-green-500/10 p-2">
-                  <TrendingUp className="h-5 w-5 text-green-500" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Completed</p>
-                  <p className="text-2xl font-bold">{stats.completed}</p>
+                  <p className="text-sm text-muted-foreground">Time In</p>
+                  <p className="text-2xl font-bold">{stats.timeIn}</p>
                 </div>
               </div>
             </CardContent>
@@ -706,8 +703,8 @@ export default function ReportsPage() {
                   <Users className="h-5 w-5 text-red-500" />
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">No Show</p>
-                  <p className="text-2xl font-bold">{stats.noShow}</p>
+                  <p className="text-sm text-muted-foreground">Time Out</p>
+                  <p className="text-2xl font-bold">{stats.timeOut}</p>
                 </div>
               </div>
             </CardContent>
@@ -716,12 +713,26 @@ export default function ReportsPage() {
           <Card>
             <CardContent className="pt-6">
               <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-purple-500/10 p-2">
-                  <Users className="h-5 w-5 text-purple-500" />
+                <div className="rounded-lg bg-blue-500/10 p-2">
+                  <Users className="h-5 w-5 text-blue-500" />
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Unique Users</p>
-                  <p className="text-2xl font-bold">{stats.uniqueUsers}</p>
+                  <p className="text-sm text-muted-foreground">Male</p>
+                  <p className="text-2xl font-bold">{stats.male}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-pink-500/10 p-2">
+                  <Users className="h-5 w-5 text-pink-500" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Female</p>
+                  <p className="text-2xl font-bold">{stats.female}</p>
                 </div>
               </div>
             </CardContent>

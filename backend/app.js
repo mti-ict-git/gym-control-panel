@@ -413,12 +413,21 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         `SELECT
           gb.EmployeeID AS employee_id,
           gb.CardNo AS card_no,
+          gb.Department AS department,
+          gb.ApprovalStatus AS approval_status,
           CONVERT(varchar(5), s.StartTime, 108) AS time_start,
           CONVERT(varchar(5), s.EndTime, 108) AS time_end
         FROM dbo.gym_booking gb
         LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
         WHERE CONVERT(varchar(10), gb.BookingDate, 23) = @todayStr
-          AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')`
+          AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+          AND (
+            (
+              UPPER(LTRIM(RTRIM(gb.Department))) IN ('MMS','VISITOR')
+              AND UPPER(LTRIM(RTRIM(gb.ApprovalStatus))) = 'APPROVED'
+            )
+            OR UPPER(LTRIM(RTRIM(gb.Department))) NOT IN ('MMS','VISITOR')
+          )`
       );
 
       const rows = Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset : [];

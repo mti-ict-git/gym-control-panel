@@ -192,6 +192,7 @@ export default function VaultPage() {
   const [approvalFilter, setApprovalFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
   const [deleteBookingId, setDeleteBookingId] = useState<number | null>(null);
   const { isCommittee, isSuperAdmin } = useUserRole();
+  const canModerate = !isCommittee;
 
   const { data: gymDbSessions = [] } = useGymDbSessions();
 
@@ -576,60 +577,70 @@ export default function VaultPage() {
                               </AccordionItem>
                             </Accordion>
                           </CardContent>
-                          <CardFooter className="p-3 pt-1 flex items-center justify-end gap-2">
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
-                              onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'APPROVED' })}
-                              disabled={updateStatusMutation.isPending || user.approval_status === 'APPROVED'}
-                              aria-label={`Approve booking for ${user.name || user.employee_id}`}
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'REJECTED' })}
-                              disabled={updateStatusMutation.isPending || user.approval_status === 'REJECTED'}
-                              aria-label={`Reject booking for ${user.name || user.employee_id}`}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                              onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: true })}
-                              disabled={toggleAccessMutation.isPending}
-                              aria-label={`Give gym access for ${user.name || user.employee_id}`}
-                            >
-                              <Unlock className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="outline"
-                              className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                              onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: false })}
-                              disabled={toggleAccessMutation.isPending}
-                              aria-label={`Disable gym access for ${user.name || user.employee_id}`}
-                            >
-                              <Lock className="h-4 w-4" />
-                            </Button>
-                            {canDeleteBooking && (
-                              <Button
-                                size="icon"
-                                variant="outline"
-                                className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                onClick={() => setDeleteBookingId(user.booking_id)}
-                                disabled={deleteBookingMutation.isPending}
-                                aria-label={`Delete booking for ${user.name || user.employee_id}`}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </CardFooter>
+                          {(canModerate || canDeleteBooking) && (
+                            <CardFooter className="p-3 pt-1 flex items-center justify-end gap-2">
+                              {canModerate && (
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                  onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'APPROVED' })}
+                                  disabled={updateStatusMutation.isPending || user.approval_status === 'APPROVED'}
+                                  aria-label={`Approve booking for ${user.name || user.employee_id}`}
+                                >
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {canModerate && (
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'REJECTED' })}
+                                  disabled={updateStatusMutation.isPending || user.approval_status === 'REJECTED'}
+                                  aria-label={`Reject booking for ${user.name || user.employee_id}`}
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {canModerate && (
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                  onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: true })}
+                                  disabled={toggleAccessMutation.isPending}
+                                  aria-label={`Give gym access for ${user.name || user.employee_id}`}
+                                >
+                                  <Unlock className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {canModerate && (
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                  onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: false })}
+                                  disabled={toggleAccessMutation.isPending}
+                                  aria-label={`Disable gym access for ${user.name || user.employee_id}`}
+                                >
+                                  <Lock className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {canDeleteBooking && (
+                                <Button
+                                  size="icon"
+                                  variant="outline"
+                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  onClick={() => setDeleteBookingId(user.booking_id)}
+                                  disabled={deleteBookingMutation.isPending}
+                                  aria-label={`Delete booking for ${user.name || user.employee_id}`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </CardFooter>
+                          )}
                         </Card>
                       ))}
                     </div>
@@ -712,46 +723,54 @@ export default function VaultPage() {
                               </TableCell>
                               <TableCell className="text-center">
                                 <div className="flex justify-center gap-2">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
-                                    onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'APPROVED' })}
-                                    disabled={updateStatusMutation.isPending || user.approval_status === 'APPROVED'}
-                                    title="Approve"
-                                  >
-                                    <Check className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                    onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'REJECTED' })}
-                                    disabled={updateStatusMutation.isPending || user.approval_status === 'REJECTED'}
-                                    title="Reject"
-                                  >
-                                    <X className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                    onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: true })}
-                                    disabled={toggleAccessMutation.isPending}
-                                    title="Give Access"
-                                  >
-                                    <Unlock className="h-4 w-4" />
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-8 w-8 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
-                                    onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: false })}
-                                    disabled={toggleAccessMutation.isPending}
-                                    title="Disable Access"
-                                  >
-                                    <Lock className="h-4 w-4" />
-                                  </Button>
+                                  {canModerate && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
+                                      onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'APPROVED' })}
+                                      disabled={updateStatusMutation.isPending || user.approval_status === 'APPROVED'}
+                                      title="Approve"
+                                    >
+                                      <Check className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                  {canModerate && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                      onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'REJECTED' })}
+                                      disabled={updateStatusMutation.isPending || user.approval_status === 'REJECTED'}
+                                      title="Reject"
+                                    >
+                                      <X className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                  {canModerate && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                      onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: true })}
+                                      disabled={toggleAccessMutation.isPending}
+                                      title="Give Access"
+                                    >
+                                      <Unlock className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                  {canModerate && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-8 w-8 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                                      onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: false })}
+                                      disabled={toggleAccessMutation.isPending}
+                                      title="Disable Access"
+                                    >
+                                      <Lock className="h-4 w-4" />
+                                    </Button>
+                                  )}
                                   {canDeleteBooking && (
                                     <Button
                                       size="sm"
