@@ -15,6 +15,9 @@ import { Input } from '@/components/ui/input';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { useUserRole } from '@/hooks/useUserRole';
 import { useGymDbSessions } from '@/hooks/useGymDbSessions';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { format } from 'date-fns';
 
 const UTC8_OFFSET_MINUTES = 8 * 60;
 
@@ -193,6 +196,7 @@ export default function VaultPage() {
   const [deleteBookingId, setDeleteBookingId] = useState<number | null>(null);
   const { isCommittee, isSuperAdmin } = useUserRole();
   const canModerate = !isCommittee;
+  const [datePopoverOpen, setDatePopoverOpen] = useState(false);
 
   const { data: gymDbSessions = [] } = useGymDbSessions();
 
@@ -381,14 +385,31 @@ export default function VaultPage() {
                 </div>
                 <div>
                   <div className="text-sm text-muted-foreground mb-1">Date</div>
-                  <Input
-                    type="date"
-                    value={dateFilter}
-                    onChange={(e) => {
-                      setDateFilter(e.target.value);
-                      setPage(1);
-                    }}
-                  />
+                  <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="h-10 w-full justify-start text-left font-normal"
+                      >
+                        {dateFilter ? format(new Date(dateFilter), 'PPP') : <span>Pick a date</span>}
+                        <CalendarDays className="ml-auto h-4 w-4 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={new Date(dateFilter)}
+                        onSelect={(d) => {
+                          if (d) {
+                            setDateFilter(format(d, 'yyyy-MM-dd'));
+                            setPage(1);
+                            setDatePopoverOpen(false);
+                          }
+                        }}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
                 </div>
                 <div>
                   <div className="text-sm text-muted-foreground mb-1">Session</div>

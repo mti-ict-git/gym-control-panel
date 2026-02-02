@@ -28,6 +28,9 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { format } from 'date-fns';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
 
 export default function SchedulesPage() {
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
@@ -52,6 +55,11 @@ export default function SchedulesPage() {
 
   const [rosterDate, setRosterDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [selectedAssign, setSelectedAssign] = useState<Map<number, string>>(new Map());
+  const [rosterDatePopoverOpen, setRosterDatePopoverOpen] = useState(false);
+  const rosterDateObj = useMemo(() => {
+    const d = new Date(rosterDate);
+    return isNaN(d.getTime()) ? new Date() : d;
+  }, [rosterDate]);
 
   const committeeQuery = useQuery({
     queryKey: ['gym-access-committee'],
@@ -515,7 +523,34 @@ export default function SchedulesPage() {
                   <div className="flex flex-col md:flex-row md:items-end gap-3">
                     <div className="w-full md:w-64">
                       <div className="text-sm text-muted-foreground mb-1">Tanggal</div>
-                      <Input type="date" value={rosterDate} onChange={(e) => setRosterDate(e.target.value)} />
+                      <Popover open={rosterDatePopoverOpen} onOpenChange={setRosterDatePopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              'w-full justify-start text-left font-normal touch-target',
+                              !rosterDate && 'text-muted-foreground'
+                            )}
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4 opacity-60" />
+                            {rosterDateObj ? format(rosterDateObj, 'PPP') : 'Pick a date'}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={rosterDateObj}
+                            onSelect={(d) => {
+                              if (d) {
+                                setRosterDate(format(d, 'yyyy-MM-dd'));
+                                setRosterDatePopoverOpen(false);
+                              }
+                            }}
+                            initialFocus
+                            className="pointer-events-auto"
+                          />
+                        </PopoverContent>
+                      </Popover>
                     </div>
                     <div className="w-full md:flex-1"></div>
                   </div>

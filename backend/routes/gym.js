@@ -813,7 +813,7 @@ router.get('/gym-bookings', async (req, res) => {
       time_end: 's.EndTime',
       name: 'COALESCE(ec.name, gb.EmployeeName)',
       employee_id: 'gb.EmployeeID',
-      department: 'COALESCE(ee.department, gb.Department, cd.Department)',
+      department: 'COALESCE(ee.department, ec.department, gb.Department, cd.Department)',
       session: 'COALESCE(s.Session, gb.SessionName)',
       status: 'gb.Status',
       approval_status: 'gb.ApprovalStatus',
@@ -878,7 +878,7 @@ router.get('/gym-bookings', async (req, res) => {
         gb.EmployeeID AS employee_id,
         COALESCE(cd.CardNo, gb.CardNo) AS card_no,
         COALESCE(ec.name, gb.EmployeeName) AS employee_name,
-        COALESCE(ee.department, gb.Department, cd.Department) AS department,
+        COALESCE(ee.department, ec.department, gb.Department, cd.Department) AS department,
         COALESCE(ec.gender, gb.Gender) AS gender,
         COALESCE(s.Session, gb.SessionName) AS session_name,
         gb.ScheduleID AS schedule_id,
@@ -2869,24 +2869,32 @@ router.get('/gym-bookings-by-employee', async (req, res) => {
         gb.BookingID AS booking_id,
         gb.EmployeeID AS employee_id,
         COALESCE(cd.CardNo, gb.CardNo) AS card_no,
-        gb.EmployeeName AS employee_name,
-        gb.Department AS department,
-        gb.Gender AS gender,
-        gb.SessionName AS session_name,
+        COALESCE(ec.name, gb.EmployeeName) AS employee_name,
+        COALESCE(ee.department, gb.Department, cd.Department) AS department,
+        COALESCE(ec.gender, gb.Gender) AS gender,
+        COALESCE(s.Session, gb.SessionName) AS session_name,
         gb.ScheduleID AS schedule_id,
         CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date,
         gb.Status AS status,
         gb.ApprovalStatus AS approval_status,
-        s.StartTime AS time_start_raw,
-        s.EndTime AS time_end_raw,
         CONVERT(varchar(5), s.StartTime, 108) AS time_start,
         CONVERT(varchar(5), s.EndTime, 108) AS time_end
       FROM dbo.gym_booking gb
       LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
+      LEFT JOIN MTIMasterEmployeeDB.dbo.employee_core ec ON gb.EmployeeID = ec.employee_id
+      LEFT JOIN MTIMasterEmployeeDB.dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE'
       OUTER APPLY (
-        SELECT TOP 1 c.CardNo FROM dbo.gym_card_registry c WHERE c.EmployeeID = gb.EmployeeID ORDER BY c.UpdatedAt DESC
+        SELECT TOP 1 c.*
+        FROM DataDBEnt.dbo.CardDB c
+        WHERE c.StaffNo = gb.EmployeeID
+          AND c.Status = 1
+          AND (c.Block IS NULL OR c.Block = 0)
+          AND c.del_state = 0
       ) cd
-      WHERE gb.EmployeeID = @employeeId AND gb.BookingDate >= @fromDate AND gb.BookingDate <= @toDate AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+      WHERE gb.EmployeeID = @employeeId
+        AND gb.BookingDate >= @fromDate
+        AND gb.BookingDate <= @toDate
+        AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
       ORDER BY gb.BookingDate DESC, time_start DESC, gb.CreatedAt DESC`
     );
     await pool.close();
@@ -2895,10 +2903,10 @@ router.get('/gym-bookings-by-employee', async (req, res) => {
       booking_id: Number(r.booking_id),
       employee_id: String(r.employee_id ?? '').trim(),
       card_no: r.card_no != null ? String(r.card_no).trim() : null,
-      employee_name: String(r.employee_name ?? '').trim(),
+      employee_name: r.employee_name != null ? String(r.employee_name).trim() : '',
       department: r.department != null ? String(r.department).trim() : null,
       gender: r.gender != null ? String(r.gender).trim() : null,
-      session_name: String(r.session_name ?? '').trim(),
+      session_name: r.session_name != null ? String(r.session_name).trim() : '',
       schedule_id: Number(r.schedule_id),
       booking_date: String(r.booking_date ?? '').trim(),
       status: String(r.status ?? '').trim(),
