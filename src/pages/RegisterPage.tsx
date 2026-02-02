@@ -201,6 +201,7 @@ export default function RegisterPage() {
   const selectedDate = form.watch('date');
   const selectedSessionId = form.watch('sessionId');
   const employeeIdInput = form.watch('employeeId');
+  const employeeType = form.watch('employeeType');
   const { data: gymDbSessions, isLoading: gymDbSessionsLoading } = useGymDbSessions();
 
   const controllerSettingsQuery = useQuery({
@@ -331,44 +332,47 @@ export default function RegisterPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Employee ID suggestions from Master Employee DB via local tester service
   useEffect(() => {
-
     const q = (employeeIdInput || '').trim();
     if (q.length === 0) {
       setEmpSuggestions([]);
       return;
     }
-
     setEmpLoading(true);
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       try {
-        const url = `/api/employees?q=${encodeURIComponent(q)}`;
-        const resp = await fetch(url, { signal: ctrl.signal });
-        if (resp.ok) {
-          const json = await resp.json();
-          if (json?.success) {
-            setEmpSuggestions(Array.isArray(json.employees) ? json.employees : []);
-            setShowEmpDropdown(true);
-          } else {
-            setEmpSuggestions([]);
-          }
-        } else {
-          setEmpSuggestions([]);
+        const base = '/api';
+        const path = employeeType === 'MTI' ? '/employees' : '/carddb-staff';
+        const build = (b: string) => `${b}${path}?q=${encodeURIComponent(q)}${employeeType !== 'MTI' ? `&type=${encodeURIComponent(employeeType)}` : ''}`;
+        const tryFetch = async (u: string) => {
+          const resp = await fetch(u, { signal: ctrl.signal });
+          if (!resp.ok) return null;
+          return await resp.json();
+        };
+        const json = (await tryFetch(build(base))) || (await tryFetch(build('')));
+        const success = json && (json.success === true || json.ok === true);
+        let list = Array.isArray(json?.employees)
+          ? json.employees
+          : Array.isArray(json?.rows)
+          ? json.rows
+          : [];
+        if (employeeType !== 'MTI') {
+          list = list.filter((v: unknown) => typeof v === 'string' ? !/^\s*MTI/i.test(v) : true);
         }
+        setEmpSuggestions(success ? list : []);
+        setShowEmpDropdown(success && list.length > 0);
       } catch (_) {
         setEmpSuggestions([]);
       } finally {
         setEmpLoading(false);
       }
     }, 250);
-
     return () => {
       clearTimeout(t);
       ctrl.abort();
     };
-  }, [employeeIdInput]);
+  }, [employeeIdInput, employeeType]);
 
   const fetchAvailability = useCallback(async (dateStr: string) => {
     if (!dateStr) {

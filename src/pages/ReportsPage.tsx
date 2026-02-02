@@ -19,7 +19,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 
-type DateRange = 'today' | 'next2days' | 'yesterday' | 'week' | 'month' | 'year' | 'custom' | 'all';
+type DateRange = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'custom' | 'all';
 
 interface BookingRecord {
   booking_id: number;
@@ -61,8 +61,6 @@ function getDateRange(range: DateRange, customStart?: Date, customEnd?: Date): {
     switch (range) {
       case 'today':
         return { start: startOfDay(now), end: endOfDay(now) };
-      case 'next2days':
-        return { start: startOfDay(now), end: endOfDay(addDays(now, 2)) };
       case 'all':
         return { start: new Date('1970-01-01'), end: new Date('2100-01-01') };
     case 'yesterday': {
@@ -157,18 +155,27 @@ function getSessionChip(session: string | null) {
 
 function getScheduleChip(session: string | null, text: string) {
   const label = String(session || '').trim().toLowerCase();
-  const content = String(text || '').trim() || 'COMITTE';
-  const color = label.startsWith('morning')
-    ? 'bg-green-100 text-green-700 border-green-200'
+  const fallback = label.startsWith('morning')
+    ? '05:00 - 12:00'
     : label.startsWith('afternoon')
-    ? 'bg-blue-100 text-blue-700 border-blue-200'
+    ? '12:00 - 18:00'
     : label.includes('night') && label.includes('1')
-    ? 'bg-purple-100 text-purple-700 border-purple-200'
+    ? '18:00 - 21:00'
     : label.includes('night') && label.includes('2')
-    ? 'bg-amber-100 text-amber-700 border-amber-200'
-    : 'bg-slate-100 text-slate-700 border-slate-200';
+    ? '21:00 - 23:59'
+    : '-';
+  const content = String(text || '').trim() || fallback;
+  const color = label.startsWith('morning')
+    ? 'bg-green-100 text-green-700 border border-green-200'
+    : label.startsWith('afternoon')
+    ? 'bg-blue-100 text-blue-700 border border-blue-200'
+    : label.includes('night') && label.includes('1')
+    ? 'bg-purple-100 text-purple-700 border border-purple-200'
+    : label.includes('night') && label.includes('2')
+    ? 'bg-amber-100 text-amber-700 border border-amber-200'
+    : 'bg-slate-100 text-slate-700 border border-slate-200';
   return (
-    <span className={`inline-flex items-center rounded-md bg-slate-100 border px-2 py-1 text-xs font-medium ${color}`}>
+    <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${color}`}>
       {content}
     </span>
   );
@@ -222,15 +229,16 @@ export default function ReportsPage() {
   const isLoading = false;
 
   const { data: bookingDataRes = { rows: [], total: 0 } as ReportQueryResult, isLoading: bookingsLoading } = useQuery<ReportQueryResult>({
-    queryKey: ['gym-reports', dateRange, customStartDate, customEndDate, page, pageSize, sortBy, sortDir],
+    queryKey: ['gym-reports', dateRange, customStartDate, customEndDate, page, pageSize, sortBy, sortDir, filterEmpId, filterDept, filterGender, filterSession],
     queryFn: async () => {
       const fromStr = format(start, 'yyyy-MM-dd');
       const toStr = format(end, 'yyyy-MM-dd');
+      const empQ = String(filterEmpId || '').trim();
+      const deptQ = filterDept !== 'all' ? filterDept : '';
+      const genderQ = filterGender === 'Male' ? 'M' : (filterGender === 'Female' ? 'F' : '');
+      const sessionQ = filterSession !== 'all' ? filterSession : '';
       const tryFetch = async (base: string) => {
-        try {
-          await fetch(`${base}/gym-reports-backfill?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`, { method: 'POST' });
-        } catch (_) { void 0; }
-        const resp = await fetch(`${base}/gym-reports?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(pageSize))}&sort_by=${encodeURIComponent(String(sortBy || ''))}&sort_dir=${encodeURIComponent(String(sortDir))}`);
+        const resp = await fetch(`${base}/gym-reports?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(pageSize))}&sort_by=${encodeURIComponent(String(sortBy || ''))}&sort_dir=${encodeURIComponent(String(sortDir))}&employee_id=${encodeURIComponent(empQ)}&department=${encodeURIComponent(deptQ)}&gender=${encodeURIComponent(genderQ)}&session=${encodeURIComponent(sessionQ)}`);
         const json = await resp.json();
         if (!json || !json.ok) return { rows: [], total: 0 } as ReportQueryResult;
         const rows = Array.isArray(json.reports) ? json.reports : [];
@@ -284,22 +292,34 @@ export default function ReportsPage() {
         return await tryFetch('');
       }
     },
+    staleTime: 60000,
+    refetchOnWindowFocus: false,
+    placeholderData: (prev) => prev,
   });
 
-  const { data: bookingSchedulesMap = new Map<number, { time_start: string | null; time_end: string | null }>() } = useQuery({
-    queryKey: ['gym-bookings-schedule-map', dateRange, customStartDate, customEndDate],
+  const pageBookingIds = (Array.isArray(bookingDataRes?.rows) ? bookingDataRes.rows : []).map((r) => Number(r.booking_id || 0)).filter((n) => Number.isFinite(n) && n > 0);
+  const idsKey = pageBookingIds.join('-');
+
+  const { data: bookingOverlayMap = new Map<number, { card_no: string | null; employee_id: string; employee_name: string | null; department: string | null; gender: string | null; session_name: string; time_start: string | null; time_end: string | null }>() } = useQuery({
+    queryKey: ['gym-bookings-overlay-map-by-ids', idsKey],
     queryFn: async () => {
-      const fromStr = format(start, 'yyyy-MM-dd');
-      const toStr = format(end, 'yyyy-MM-dd');
+      if (pageBookingIds.length === 0) return new Map<number, { card_no: string | null; employee_id: string; employee_name: string | null; department: string | null; gender: string | null; session_name: string; time_start: string | null; time_end: string | null }>();
+      const idsParam = pageBookingIds.join(',');
       const tryFetch = async (base: string) => {
-        const resp = await fetch(`${base}/gym-bookings?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
+        const resp = await fetch(`${base}/gym-bookings-by-ids?ids=${encodeURIComponent(idsParam)}`);
         const json = await resp.json();
-        if (!json || !json.ok) return [] as Array<{ booking_id: number; time_start: string | null; time_end: string | null }>;
+        if (!json || !json.ok) return [] as Array<{ booking_id: number; card_no: string | null; employee_id: string; employee_name: string | null; department: string | null; gender: string | null; session_name: string; time_start: string | null; time_end: string | null }>;
         const rows = Array.isArray(json.bookings) ? json.bookings : [];
         return rows.map((r: unknown) => {
-          const obj = r as { booking_id?: number; time_start?: string | null; time_end?: string | null };
+          const obj = r as { booking_id?: number; card_no?: string | null; employee_id?: string; employee_name?: string | null; department?: string | null; gender?: string | null; session_name?: string; time_start?: string | null; time_end?: string | null };
           return {
             booking_id: Number(obj.booking_id || 0),
+            card_no: obj.card_no != null ? String(obj.card_no) : null,
+            employee_id: String(obj.employee_id ?? ''),
+            employee_name: obj.employee_name != null ? String(obj.employee_name) : null,
+            department: obj.department != null ? String(obj.department) : null,
+            gender: obj.gender != null ? String(obj.gender) : null,
+            session_name: obj.session_name != null ? String(obj.session_name) : '',
             time_start: obj.time_start != null ? String(obj.time_start) : null,
             time_end: obj.time_end != null ? String(obj.time_end) : null,
           };
@@ -307,18 +327,21 @@ export default function ReportsPage() {
       };
       try {
         const rows = await tryFetch('/api');
-        const map = new Map<number, { time_start: string | null; time_end: string | null }>();
-        rows.forEach((r) => { if (Number.isFinite(r.booking_id) && r.booking_id > 0) map.set(r.booking_id, { time_start: r.time_start, time_end: r.time_end }); });
+        const map = new Map<number, { card_no: string | null; employee_id: string; employee_name: string | null; department: string | null; gender: string | null; session_name: string; time_start: string | null; time_end: string | null }>();
+        rows.forEach((r) => { if (Number.isFinite(r.booking_id) && r.booking_id > 0) map.set(r.booking_id, { card_no: r.card_no, employee_id: r.employee_id, employee_name: r.employee_name, department: r.department, gender: r.gender, session_name: r.session_name, time_start: r.time_start, time_end: r.time_end }); });
         return map;
       } catch (_) {
         const rows = await tryFetch('');
-        const map = new Map<number, { time_start: string | null; time_end: string | null }>();
-        rows.forEach((r) => { if (Number.isFinite(r.booking_id) && r.booking_id > 0) map.set(r.booking_id, { time_start: r.time_start, time_end: r.time_end }); });
+        const map = new Map<number, { card_no: string | null; employee_id: string; employee_name: string | null; department: string | null; gender: string | null; session_name: string; time_start: string | null; time_end: string | null }>();
+        rows.forEach((r) => { if (Number.isFinite(r.booking_id) && r.booking_id > 0) map.set(r.booking_id, { card_no: r.card_no, employee_id: r.employee_id, employee_name: r.employee_name, department: r.department, gender: r.gender, session_name: r.session_name, time_start: r.time_start, time_end: r.time_end }); });
         return map;
       }
     },
+    enabled: pageBookingIds.length > 0,
     staleTime: 60000,
   });
+
+  
 
   const bookingData = bookingDataRes.rows;
   const totalCount = bookingDataRes.total;
@@ -326,6 +349,12 @@ export default function ReportsPage() {
   useEffect(() => {
     setPage(1);
   }, [dateRange, customStartDate, customEndDate, sortBy, sortDir]);
+
+  useEffect(() => {
+    const fromStr = format(start, 'yyyy-MM-dd');
+    const toStr = format(end, 'yyyy-MM-dd');
+    fetch(`/api/gym-reports-backfill?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`, { method: 'POST' }).catch(() => {});
+  }, [dateRange, customStartDate, customEndDate, start, end]);
 
   const toggleSort = (key: 'department' | 'employee_id' | 'name' | 'gender' | 'session' | 'booking_id') => {
     setPage(1);
@@ -369,44 +398,100 @@ export default function ReportsPage() {
     new Set((bookingData || []).map((r) => normalizeSession(r.session_name)).filter((n): n is string => Boolean(n && n.trim())))
   ).sort((a, b) => a.localeCompare(b));
 
-  const filteredData = (bookingData || []).filter((r) => {
-    const empIdOk = filterEmpId.trim() === '' || String(r.employee_id || '').toLowerCase().includes(filterEmpId.trim().toLowerCase());
-    const deptOk = filterDept === 'all' || String(r.department || '') === filterDept;
-    const genderLabel = getGenderLabel(r.gender);
-    const genderOk = filterGender === 'all' || genderLabel === filterGender;
-    const sessionLabel = normalizeSession(r.session_name);
-    const sessionOk = filterSession === 'all' || sessionLabel === filterSession;
-    return empIdOk && deptOk && genderOk && sessionOk;
+  const filteredData = bookingData;
+
+  const pageDateRange = (() => {
+    const dates = bookingData.map((r) => {
+      const s = String(r.booking_date || '').slice(0, 10);
+      const d = s ? new Date(s) : null;
+      return d && !isNaN(d.getTime()) ? d : null;
+    }).filter((d): d is Date => !!d);
+    if (dates.length === 0) return { from: start, to: end };
+    const min = new Date(Math.min(...dates.map((d) => d.getTime())));
+    const max = new Date(Math.max(...dates.map((d) => d.getTime())));
+    return { from: min, to: max };
+  })();
+
+  useEffect(() => {
+    const fromStr = format(start, 'yyyy-MM-dd');
+    const toStr = format(end, 'yyyy-MM-dd');
+    fetch(`/api/gym-live-sync?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`).catch(() => {});
+  }, [dateRange, customStartDate, customEndDate, start, end]);
+
+  const { data: liveTapMap = new Map<string, { time_in: string | null; time_out: string | null }>() } = useQuery({
+    queryKey: ['gym-live-status-range', format(pageDateRange.from, 'yyyy-MM-dd'), format(pageDateRange.to, 'yyyy-MM-dd')],
+    queryFn: async () => {
+      const fromStr = format(pageDateRange.from, 'yyyy-MM-dd');
+      const toStr = format(pageDateRange.to, 'yyyy-MM-dd');
+      const tryFetch = async (base: string) => {
+        const resp = await fetch(`${base}/gym-live-status-range?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
+        const json = await resp.json();
+        if (!json || !json.ok) return [] as Array<{ employee_id: string; date: string; time_in: string | null; time_out: string | null }>;
+        const rows = Array.isArray(json.taps) ? json.taps : [];
+        return rows.map((r: unknown) => {
+          const obj = r as { employee_id?: string; date?: string; time_in?: string | null; time_out?: string | null };
+          return {
+            employee_id: String(obj.employee_id ?? '').trim(),
+            date: String(obj.date ?? ''),
+            time_in: obj.time_in != null ? String(obj.time_in) : null,
+            time_out: obj.time_out != null ? String(obj.time_out) : null,
+          };
+        });
+      };
+      try {
+        const rows = await tryFetch('/api');
+        const map = new Map<string, { time_in: string | null; time_out: string | null }>();
+        rows.forEach((r) => { const key = `${r.employee_id}__${r.date}`; if (r.employee_id && r.date) map.set(key, { time_in: r.time_in, time_out: r.time_out }); });
+        return map;
+      } catch (_) {
+        const rows = await tryFetch('');
+        const map = new Map<string, { time_in: string | null; time_out: string | null }>();
+        rows.forEach((r) => { const key = `${r.employee_id}__${r.date}`; if (r.employee_id && r.date) map.set(key, { time_in: r.time_in, time_out: r.time_out }); });
+        return map;
+      }
+    },
+    enabled: bookingData.length > 0,
+    staleTime: 60000,
   });
 
   // Calculate statistics
   const stats = {
-    totalBookings: filteredData.length,
-    checkedIn: filteredData.filter(r => (r.status || '').toUpperCase() === 'CHECKIN').length,
-    completed: filteredData.filter(r => (r.status || '').toUpperCase() === 'COMPLETED').length,
-    noShow: filteredData.filter(r => (r.status || '').toUpperCase() === 'NO_SHOW').length,
-    uniqueUsers: new Set(filteredData.map(r => r.employee_id)).size,
+    totalBookings: totalCount,
+    checkedIn: bookingData.filter(r => (r.status || '').toUpperCase() === 'CHECKIN').length,
+    completed: bookingData.filter(r => (r.status || '').toUpperCase() === 'COMPLETED').length,
+    noShow: bookingData.filter(r => (r.status || '').toUpperCase() === 'NO_SHOW').length,
+    uniqueUsers: new Set(bookingData.map(r => r.employee_id)).size,
   };
 
   const handleExportCSV = () => {
-    const headers = ['No', 'Booking ID', 'Card No', 'Name', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
-    const rows = filteredData.map((record, idx) => [
+    const headers = ['No', 'Booking ID', 'ID Card', 'Name', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
+      const rows = bookingData.map((record, idx) => [
       String(idx + 1),
       formatBookingId(record.booking_id),
-      String(record.card_no ?? ''),
-      String((record.name ?? record.employee_name) ?? ''),
-      String(record.employee_id ?? ''),
-      String(record.department ?? ''),
-      getGenderLabel(record.gender),
-      formatTimeOnly(record.time_in),
-      formatTimeOnly(record.time_out),
+        String((bookingOverlayMap.get(record.booking_id)?.card_no ?? record.card_no) ?? ''),
+        String(((bookingOverlayMap.get(record.booking_id)?.employee_name) ?? (record.name ?? record.employee_name)) ?? ''),
+        String((bookingOverlayMap.get(record.booking_id)?.employee_id ?? record.employee_id) ?? ''),
+        String((bookingOverlayMap.get(record.booking_id)?.department ?? record.department) ?? ''),
+        getGenderLabel(bookingOverlayMap.get(record.booking_id)?.gender ?? record.gender),
+      formatTimeOnly(liveTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_in ?? record.time_in),
+      formatTimeOnly(liveTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_out ?? record.time_out),
       (() => {
-        const s = bookingSchedulesMap.get(record.booking_id);
-        const start = record.time_start ?? s?.time_start ?? null;
-        const end = record.time_end ?? s?.time_end ?? null;
-        return start && end ? `${start} - ${end}` : String(start ?? '');
+        const s = bookingOverlayMap.get(record.booking_id);
+        const start = s?.time_start ?? record.time_start ?? null;
+        const end = s?.time_end ?? record.time_end ?? null;
+        if (start && end) return `${start} - ${end}`;
+        const sl = String((bookingOverlayMap.get(record.booking_id)?.session_name ?? record.session_name) || '').trim().toLowerCase();
+        return sl.startsWith('morning')
+          ? '05:00 - 12:00'
+          : sl.startsWith('afternoon')
+          ? '12:00 - 18:00'
+          : sl.includes('night') && sl.includes('1')
+          ? '18:00 - 21:00'
+          : sl.includes('night') && sl.includes('2')
+          ? '21:00 - 23:59'
+          : '-';
       })(),
-      String(record.session_name ?? ''),
+        String((bookingOverlayMap.get(record.booking_id)?.session_name ?? record.session_name) ?? ''),
     ]);
 
     const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
@@ -418,8 +503,6 @@ export default function ReportsPage() {
       switch (dateRange) {
         case 'all':
           return 'gym-attendance-all.csv';
-        case 'next2days':
-          return 'gym-attendance-next-2-days.csv';
         case 'today':
           return 'gym-attendance-today.csv';
         case 'yesterday':
@@ -475,7 +558,6 @@ export default function ReportsPage() {
                   <SelectContent>
                     <SelectItem value="all">All</SelectItem>
                     <SelectItem value="today">Today</SelectItem>
-                    <SelectItem value="next2days">Next 2 Days</SelectItem>
                     <SelectItem value="yesterday">Yesterday</SelectItem>
                     <SelectItem value="week">This Week</SelectItem>
                     <SelectItem value="month">This Month</SelectItem>
@@ -682,7 +764,7 @@ export default function ReportsPage() {
                           <SortIndicator active={sortBy === 'booking_id'} dir={sortDir} />
                         </button>
                       </TableHead>
-                      <TableHead>Card No</TableHead>
+                      <TableHead>ID Card</TableHead>
                       <TableHead>
                         <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('name')}>
                           Name
@@ -723,24 +805,24 @@ export default function ReportsPage() {
                       <TableRow key={`${record.booking_id}-${idx}`}>
                         <TableCell className="font-mono text-sm">{idx + 1}</TableCell>
                         <TableCell className="font-mono text-sm">{formatBookingId(record.booking_id)}</TableCell>
-                        <TableCell className="font-mono text-sm">{record.card_no || '-'}</TableCell>
-                        <TableCell className="text-sm">{(record.name ?? record.employee_name) || '-'}</TableCell>
-                        <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
-                        <TableCell>{record.department || '-'}</TableCell>
-                        <TableCell className="font-medium">{getGenderChip(record.gender)}</TableCell>
+                        <TableCell className="font-mono text-sm">{(bookingOverlayMap.get(record.booking_id)?.card_no ?? record.card_no) || '-'}</TableCell>
+                        <TableCell className="text-sm">{(bookingOverlayMap.get(record.booking_id)?.employee_name ?? (record.name ?? record.employee_name)) || '-'}</TableCell>
+                        <TableCell className="font-mono text-sm">{(bookingOverlayMap.get(record.booking_id)?.employee_id ?? record.employee_id) || '-'}</TableCell>
+                        <TableCell>{(bookingOverlayMap.get(record.booking_id)?.department ?? record.department) || '-'}</TableCell>
+                        <TableCell className="font-medium">{getGenderChip(bookingOverlayMap.get(record.booking_id)?.gender ?? record.gender)}</TableCell>
                         <TableCell className="font-mono text-sm">
-                          {formatTimeOnly(record.time_in)}
+                          {formatTimeOnly(liveTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_in ?? record.time_in)}
                         </TableCell>
                         <TableCell className="font-mono text-sm">
-                          {formatTimeOnly(record.time_out)}
+                          {formatTimeOnly(liveTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_out ?? record.time_out)}
                         </TableCell>
                         <TableCell className="font-medium">
                           {(() => {
-                            const s = bookingSchedulesMap.get(record.booking_id);
-                            const start = record.time_start ?? s?.time_start ?? null;
-                            const end = record.time_end ?? s?.time_end ?? null;
+                            const s = bookingOverlayMap.get(record.booking_id);
+                            const start = s?.time_start ?? record.time_start ?? null;
+                            const end = s?.time_end ?? record.time_end ?? null;
                             const text = start && end ? `${start} - ${end}` : start || '';
-                            return getScheduleChip(record.session_name, text);
+                            return getScheduleChip(bookingOverlayMap.get(record.booking_id)?.session_name ?? record.session_name, text);
                           })()}
                         </TableCell>
                         <TableCell className="font-medium">{getSessionChip(record.session_name)}</TableCell>
@@ -757,7 +839,7 @@ export default function ReportsPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="6">6</SelectItem>
+                    <SelectItem value="6">6</SelectItem>
                       <SelectItem value="10">10</SelectItem>
                       <SelectItem value="20">20</SelectItem>
                       <SelectItem value="50">50</SelectItem>

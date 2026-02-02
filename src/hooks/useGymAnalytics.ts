@@ -78,8 +78,9 @@ export function useOccupancyPatternData() {
       const r = await fetch(`/api/gym-bookings?from=${from}&to=${to}`).catch(() => fetch(`/gym-bookings?from=${from}&to=${to}`));
       const j: { ok: boolean; bookings?: Array<{ booking_date: string; time_start: string | null; status: string }>; error?: string } = await r.json();
       if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
-      const hourOccupancy: Record<number, number[]> = {};
-      for (let i = 6; i <= 22; i++) hourOccupancy[i] = [];
+      const hourActual: Record<number, number[]> = {};
+      const hourBooked: Record<number, number[]> = {};
+      for (let i = 6; i <= 22; i++) { hourActual[i] = []; hourBooked[i] = []; }
       const dayGroups: Record<string, Array<{ hour: number; status: string }>> = {};
       (j.bookings || []).forEach((b) => {
         const dayKey = b.booking_date;
@@ -90,11 +91,15 @@ export function useOccupancyPatternData() {
       });
       Object.values(dayGroups).forEach((dayBookings) => {
         for (let hour = 6; hour <= 22; hour++) {
-          const count = dayBookings.filter((b) => b.hour === hour && (b.status === 'CHECKIN' || b.status === 'COMPLETED' || b.status === 'OUT')).length;
-          hourOccupancy[hour].push(count);
+          const countActual = dayBookings.filter((b) => b.hour === hour && (b.status === 'CHECKIN' || b.status === 'COMPLETED')).length;
+          const countBooked = dayBookings.filter((b) => b.hour === hour && b.status === 'BOOKED').length;
+          hourActual[hour].push(countActual);
+          hourBooked[hour].push(countBooked);
         }
       });
-      return Object.entries(hourOccupancy).map(([hour, counts]) => ({
+      const actualSum = Object.values(hourActual).reduce((acc, arr) => acc + arr.reduce((a, b) => a + b, 0), 0);
+      const source = actualSum > 0 ? hourActual : hourBooked;
+      return Object.entries(source).map(([hour, counts]) => ({
         time: `${hour}:00`,
         avgOccupancy: counts.length > 0 ? Math.round((counts.reduce((a, b) => a + b, 0) / counts.length) * 10) / 10 : 0,
       })) as OccupancyPattern[];

@@ -481,3 +481,90 @@ export function useUpdateSchedule() {
     },
   });
 }
+
+export interface DashboardBooking {
+  id: string;
+  employee_id: string;
+  employee_name: string | null;
+  booking_date: string;
+  time_start: string | null;
+  status: ScheduleStatus;
+  session_name?: string | null;
+}
+
+export function useTodayBookingStats() {
+  return useQuery({
+    queryKey: ['today-booking-stats'],
+    queryFn: async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const r = await fetch(`/api/gym-bookings?from=${today}&to=${today}`).catch(() => fetch(`/gym-bookings?from=${today}&to=${today}`));
+      const j: { ok: boolean; bookings?: Array<{ status: string; approval_status?: string | null }>; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
+      const rows = j.bookings || [];
+      const norm = (s: string | null | undefined) => String(s || '').toUpperCase();
+      const stats = {
+        booked: rows.filter((b) => norm(b.status) === 'BOOKED').length,
+        checkin: rows.filter((b) => norm(b.status) === 'CHECKIN').length,
+        completed: rows.filter((b) => norm(b.status) === 'COMPLETED').length,
+        approved: rows.filter((b) => norm(b.approval_status) === 'APPROVED').length,
+        rejected: rows.filter((b) => norm(b.approval_status) === 'REJECTED').length,
+        pending: rows.filter((b) => norm(b.approval_status) === 'PENDING' || !norm(b.approval_status)).length,
+      };
+      return stats;
+    },
+    staleTime: 30000,
+  });
+}
+
+export function usePendingApprovalsList(limit: number = 5) {
+  return useQuery({
+    queryKey: ['pending-approvals', limit],
+    queryFn: async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const r = await fetch(`/api/gym-bookings?from=${today}&to=${today}&approval_status=PENDING`).catch(() => fetch(`/gym-bookings?from=${today}&to=${today}&approval_status=PENDING`));
+      const j: { ok: boolean; bookings?: Array<{ booking_id: number; employee_id: string; employee_name?: string; booking_date: string; time_start: string | null; status: string; session_name?: string }>; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load approvals');
+      const rows = (j.bookings || []).slice(0, limit);
+      const mapStatus: Record<string, ScheduleStatus> = { BOOKED: 'BOOKED', CHECKIN: 'IN_GYM', COMPLETED: 'OUT' };
+      const data: DashboardBooking[] = rows.map((b) => ({
+        id: String(b.booking_id),
+        employee_id: String(b.employee_id || ''),
+        employee_name: b.employee_name || null,
+        booking_date: String(b.booking_date),
+        time_start: b.time_start || null,
+        status: mapStatus[String(b.status).toUpperCase()] || 'BOOKED',
+        session_name: b.session_name || null,
+      }));
+      return data;
+    },
+    staleTime: 10000,
+  });
+}
+
+export function useTodayBookingsSimple(limit: number = 8) {
+  return useQuery({
+    queryKey: ['today-bookings-simple', limit],
+    queryFn: async () => {
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const r = await fetch(`/api/gym-bookings?from=${today}&to=${today}`).catch(() => fetch(`/gym-bookings?from=${today}&to=${today}`));
+      const j: { ok: boolean; bookings?: Array<{ booking_id: number; employee_id: string; employee_name?: string; booking_date: string; time_start: string | null; status: string; session_name?: string }>; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load today bookings');
+      const rows = (j.bookings || []).sort((a, b) => {
+        const ta = (a.time_start || '00:00');
+        const tb = (b.time_start || '00:00');
+        return ta.localeCompare(tb);
+      }).slice(0, limit);
+      const mapStatus: Record<string, ScheduleStatus> = { BOOKED: 'BOOKED', CHECKIN: 'IN_GYM', COMPLETED: 'OUT' };
+      const data: DashboardBooking[] = rows.map((b) => ({
+        id: String(b.booking_id),
+        employee_id: String(b.employee_id || ''),
+        employee_name: b.employee_name || null,
+        booking_date: String(b.booking_date),
+        time_start: b.time_start || null,
+        status: mapStatus[String(b.status).toUpperCase()] || 'BOOKED',
+        session_name: b.session_name || null,
+      }));
+      return data;
+    },
+  });
+}
