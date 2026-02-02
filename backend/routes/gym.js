@@ -794,7 +794,7 @@ router.get('/gym-bookings', async (req, res) => {
           OR gb.EmployeeID LIKE @q
           OR COALESCE(cd.CardNo, gb.CardNo, '') LIKE @q
           OR COALESCE(ec.name, '') LIKE @q
-          OR COALESCE(ee.department, gb.Department, cd.Department, '') LIKE @q
+          OR COALESCE(gb.Department, cd.Department, '') LIKE @q
           OR COALESCE(s.Session, gb.SessionName, '') LIKE @q
           OR CONVERT(varchar(10), gb.BookingDate, 23) LIKE @q
           OR COALESCE(gb.Status, '') LIKE @q
@@ -813,7 +813,7 @@ router.get('/gym-bookings', async (req, res) => {
       time_end: 's.EndTime',
       name: 'COALESCE(ec.name, gb.EmployeeName)',
       employee_id: 'gb.EmployeeID',
-      department: 'COALESCE(ee.department, ec.department, gb.Department, cd.Department)',
+      department: 'COALESCE(gb.Department, cd.Department)',
       session: 'COALESCE(s.Session, gb.SessionName)',
       status: 'gb.Status',
       approval_status: 'gb.ApprovalStatus',
@@ -878,7 +878,7 @@ router.get('/gym-bookings', async (req, res) => {
         gb.EmployeeID AS employee_id,
         COALESCE(cd.CardNo, gb.CardNo) AS card_no,
         COALESCE(ec.name, gb.EmployeeName) AS employee_name,
-        COALESCE(ee.department, ec.department, gb.Department, cd.Department) AS department,
+        COALESCE(gb.Department, cd.Department) AS department,
         COALESCE(ec.gender, gb.Gender) AS gender,
         COALESCE(s.Session, gb.SessionName) AS session_name,
         gb.ScheduleID AS schedule_id,
@@ -965,7 +965,7 @@ router.get('/gym-bookings-by-ids', async (req, res) => {
         gb.EmployeeID AS employee_id,
         COALESCE(cd.CardNo, gb.CardNo) AS card_no,
         COALESCE(ec.name, gb.EmployeeName) AS employee_name,
-        COALESCE(ee.department, gb.Department, cd.Department) AS department,
+        COALESCE(gb.Department, cd.Department) AS department,
         COALESCE(ec.gender, gb.Gender) AS gender,
         COALESCE(s.Session, gb.SessionName) AS session_name,
         CONVERT(varchar(5), s.StartTime, 108) AS time_start,
@@ -2870,7 +2870,7 @@ router.get('/gym-bookings-by-employee', async (req, res) => {
         gb.EmployeeID AS employee_id,
         COALESCE(cd.CardNo, gb.CardNo) AS card_no,
         COALESCE(ec.name, gb.EmployeeName) AS employee_name,
-        COALESCE(ee.department, gb.Department, cd.Department) AS department,
+        COALESCE(gb.Department, cd.Department) AS department,
         COALESCE(ec.gender, gb.Gender) AS gender,
         COALESCE(s.Session, gb.SessionName) AS session_name,
         gb.ScheduleID AS schedule_id,
@@ -4644,7 +4644,7 @@ router.post('/gym-reports-sync', async (req, res) => {
   const masterDbRaw = envTrim(process.env.MASTER_DB_DATABASE);
   const masterDbSafe = masterDbRaw && /^[A-Za-z0-9_]+$/.test(masterDbRaw) ? masterDbRaw : '';
   const selectName = masterDbSafe ? 'COALESCE(ec.name, gb.EmployeeName) AS employee_name,' : 'gb.EmployeeName AS employee_name,';
-  const selectDept = masterDbSafe ? 'COALESCE(ee.department, gb.Department) AS department,' : 'gb.Department AS department,';
+  const selectDept = 'gb.Department AS department,';
   const joinMaster = masterDbSafe
     ? `LEFT JOIN [${masterDbSafe}].dbo.employee_core ec ON gb.EmployeeID = ec.employee_id
        LEFT JOIN [${masterDbSafe}].dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE'`

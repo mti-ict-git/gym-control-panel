@@ -47,7 +47,7 @@ export function OccupancyCard({ currentOccupancy, maxCapacity = 15, isLoading = 
         'card-interactive border-2 transition-all',
         getColorClass()
       )}
-      onClick={() => navigate('/schedules?filter=IN_GYM')}
+      onClick={() => navigate('/live_gym')}
     >
       <CardHeader className="pb-2">
         <CardTitle className="text-lg font-medium">Gym Occupancy</CardTitle>
