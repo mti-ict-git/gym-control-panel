@@ -131,7 +131,7 @@ export function useTodaySchedulesCount() {
   });
 }
 
-export function useGymOccupancy() {
+export function useGymOccupancy(options?: { refetchInterval?: number; staleTime?: number; enabled?: boolean }) {
   return useQuery({
     queryKey: ['gym-occupancy'],
     queryFn: async () => {
@@ -143,7 +143,9 @@ export function useGymOccupancy() {
       const cnt = (j.bookings || []).filter((b) => String(b.status).toUpperCase() === 'CHECKIN').length;
       return cnt;
     },
-    refetchInterval: 5000,
+    refetchInterval: options?.refetchInterval ?? 30000,
+    staleTime: options?.staleTime ?? 30000,
+    enabled: options?.enabled ?? true,
   });
 }
 
@@ -492,7 +494,7 @@ export interface DashboardBooking {
   session_name?: string | null;
 }
 
-export function useTodayBookingStats() {
+export function useTodayBookingStats(options?: { staleTime?: number; refetchInterval?: number; enabled?: boolean }) {
   return useQuery({
     queryKey: ['today-booking-stats'],
     queryFn: async () => {
@@ -509,10 +511,13 @@ export function useTodayBookingStats() {
         approved: rows.filter((b) => norm(b.approval_status) === 'APPROVED').length,
         rejected: rows.filter((b) => norm(b.approval_status) === 'REJECTED').length,
         pending: rows.filter((b) => norm(b.approval_status) === 'PENDING' || !norm(b.approval_status)).length,
+        noShow: rows.filter((b) => ['EXPIRED','CANCELLED'].includes(norm(b.status))).length,
       };
       return stats;
     },
-    staleTime: 30000,
+    staleTime: options?.staleTime ?? 30000,
+    refetchInterval: options?.refetchInterval,
+    enabled: options?.enabled ?? true,
   });
 }
 

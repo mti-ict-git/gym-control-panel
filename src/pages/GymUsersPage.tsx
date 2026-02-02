@@ -1,23 +1,31 @@
 import { useMemo, useState } from 'react';
-import { Calendar as CalendarIcon, Search } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Calendar as CalendarIcon, Search, Activity, Download, ArrowUpDown, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
-import { useGymLiveStatus } from '@/hooks/useGymLiveStatus';
+import { useGymLiveStatus, type LivePersonStatus } from '@/hooks/useGymLiveStatus';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 
 type SessionFilter = 'ALL' | 'COMITTE' | 'Morning' | 'Afternoon' | 'Night - 1' | 'Night - 2' | 'Other';
 type StatusFilter = 'ALL' | 'BOOKED' | 'IN_GYM' | 'LEFT';
 type AccessFilter = 'ALL' | 'GRANTED' | 'NO_ACCESS';
 
 export default function GymUsersPage() {
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [sessionFilter, setSessionFilter] = useState<SessionFilter>('ALL');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [accessFilter, setAccessFilter] = useState<AccessFilter>('ALL');
-  const { data: liveStatus, isLoading: isLoadingStatus } = useGymLiveStatus();
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const { data: liveStatus, isLoading: isLoadingStatus, isFetching, dataUpdatedAt } = useGymLiveStatus({ enabled: autoRefresh, refetchInterval: 2000 });
+  const [sortBy, setSortBy] = useState<'name' | 'employee_id' | 'department' | 'status' | 'time_in' | 'time_out'>('status');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const formatTimeUtc8 = (iso: string | null) => {
     if (!iso) return '-';
@@ -125,9 +133,9 @@ export default function GymUsersPage() {
     return counts;
   }, [liveStatus]);
 
-  const filtered = useMemo(() => {
+  const filtered = useMemo((): LivePersonStatus[] => {
     const q = search.trim().toLowerCase();
-    const list = Array.isArray(liveStatus) ? liveStatus : [];
+    const list: LivePersonStatus[] = Array.isArray(liveStatus) ? liveStatus : [];
     return list.filter((p) => {
       const session = normalizeSession(p.schedule);
       const sessionBucket: SessionFilter =
@@ -150,6 +158,72 @@ export default function GymUsersPage() {
     });
   }, [accessFilter, liveStatus, search, sessionFilter, statusFilter]);
 
+  const sorted = useMemo(() => {
+    const arr: LivePersonStatus[] = [...filtered];
+    const key = sortBy;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    arr.sort((a, b) => {
+      const ak = a[key as keyof LivePersonStatus];
+      const bk = b[key as keyof LivePersonStatus];
+      const av = String(ak ?? '').toLowerCase();
+      const bv = String(bk ?? '').toLowerCase();
+      if (key === 'time_in' || key === 'time_out') {
+        const ad = typeof ak === 'string' && ak ? new Date(ak).getTime() : 0;
+        const bd = typeof bk === 'string' && bk ? new Date(bk).getTime() : 0;
+        return (ad - bd) * dir;
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+    return arr;
+  }, [filtered, sortBy, sortDir]);
+
+  const sessionCountButton = (name: string, count: number, selected: boolean, onClick: () => void) => {
+    const lower = name.toLowerCase();
+    const base = lower.startsWith('morning')
+      ? 'border-green-200 bg-green-50 text-green-700'
+      : lower.startsWith('afternoon')
+      ? 'border-blue-200 bg-blue-50 text-blue-700'
+      : lower.includes('night') && lower.includes('1')
+      ? 'border-purple-200 bg-purple-50 text-purple-700'
+      : lower.includes('night') && lower.includes('2')
+      ? 'border-amber-200 bg-amber-50 text-amber-700'
+      : 'border-slate-200 bg-slate-50 text-slate-700';
+    const active = selected ? 'ring-2 ring-primary' : '';
+    return (
+      <button type="button" onClick={onClick} className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${base} ${active}`}>
+        <span className="mr-1">{name}:</span>
+        <span className="font-semibold">{count}</span>
+      </button>
+    );
+  };
+
+  const exportCsv = () => {
+    const headers = ['Name','Employee ID','Department','Session','Schedule','Date','Time In','Time Out','Status','Access'];
+    const rows = sorted.map((p) => [
+      String(p.name ?? ''),
+      String(p.employee_id ?? ''),
+      String(p.department ?? ''),
+      String(normalizeSession(p.schedule)),
+      String(getTimeSchedule(p.schedule)),
+      String(formatDateUtc8(p.time_in, p.time_out)),
+      String(formatTimeUtc8(p.time_in)),
+      String(formatTimeUtc8(p.time_out)),
+      String(p.status),
+      String(p.access_indicator.label),
+    ]);
+    const escapeCell = (s: string) => '"' + s.replace(/"/g, '""') + '"';
+    const csv = [headers.join(','), ...rows.map((r) => r.map(escapeCell).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `live_gym_${format(new Date(), 'yyyyMMdd_HHmmss')}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const accessPill = (color: 'green' | 'red', label: string) => {
     const cls = color === 'green' ? 'border-green-200 bg-green-50 text-green-700' : 'border-red-200 bg-red-50 text-red-700';
     return (
@@ -167,8 +241,24 @@ export default function GymUsersPage() {
         <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
           <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
             <CardHeader>
-              <CardTitle className="text-2xl">Live Gym Monitoring</CardTitle>
-              <CardDescription>Real-time overview of active gym members and access status.</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-2xl">Live Gym Monitoring</CardTitle>
+                  <CardDescription>Real-time overview of active gym members and access status.</CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="inline-flex items-center gap-1">
+                    <Activity className="h-3 w-3 text-green-600" />
+                    Live
+                  </Badge>
+                  {isFetching ? <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" aria-label="Fetching" /> : null}
+                  <span className="text-xs text-muted-foreground">Updated {format(new Date(dataUpdatedAt || Date.now()), 'HH:mm:ss')}</span>
+                  <div className="flex items-center gap-2 pl-2">
+                    <span className="text-xs text-muted-foreground">Auto</span>
+                    <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} aria-label="Toggle auto refresh" />
+                  </div>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-12 gap-4">
@@ -185,12 +275,12 @@ export default function GymUsersPage() {
                   <div className="mt-3">
                     <div className="text-sm text-muted-foreground mb-2">Session & Count</div>
                     <div className="flex flex-wrap gap-2">
-                      {getSessionCountChip('COMITTE', sessionCounts['COMITTE'])}
-                      {getSessionCountChip('Morning', sessionCounts['Morning'])}
-                      {getSessionCountChip('Afternoon', sessionCounts['Afternoon'])}
-                      {getSessionCountChip('Night - 1', sessionCounts['Night - 1'])}
-                      {getSessionCountChip('Night - 2', sessionCounts['Night - 2'])}
-                      {getSessionCountChip('Other', sessionCounts['Other'])}
+                      {sessionCountButton('COMITTE', sessionCounts['COMITTE'], sessionFilter === 'COMITTE', () => setSessionFilter('COMITTE'))}
+                      {sessionCountButton('Morning', sessionCounts['Morning'], sessionFilter === 'Morning', () => setSessionFilter('Morning'))}
+                      {sessionCountButton('Afternoon', sessionCounts['Afternoon'], sessionFilter === 'Afternoon', () => setSessionFilter('Afternoon'))}
+                      {sessionCountButton('Night - 1', sessionCounts['Night - 1'], sessionFilter === 'Night - 1', () => setSessionFilter('Night - 1'))}
+                      {sessionCountButton('Night - 2', sessionCounts['Night - 2'], sessionFilter === 'Night - 2', () => setSessionFilter('Night - 2'))}
+                      {sessionCountButton('Other', sessionCounts['Other'], sessionFilter === 'Other', () => setSessionFilter('Other'))}
                     </div>
                   </div>
                 </div>
@@ -209,7 +299,13 @@ export default function GymUsersPage() {
                     </div>
                     <div className="flex items-center gap-2 justify-end">
                       <span className="text-xs text-muted-foreground">Total</span>
-                      <span className="text-sm font-semibold">{filtered.length}</span>
+                      <span className="text-sm font-semibold">{sorted.length}</span>
+                      <Button variant="outline" size="sm" onClick={exportCsv} className="ml-2">
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
 
@@ -273,6 +369,29 @@ export default function GymUsersPage() {
                         {x.label}
                       </button>
                     ))}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Sort by</span>
+                      {([
+                        { key: 'status', label: 'Status' },
+                        { key: 'name', label: 'Name' },
+                        { key: 'employee_id', label: 'Employee ID' },
+                        { key: 'department', label: 'Department' },
+                        { key: 'time_in', label: 'Time In' },
+                        { key: 'time_out', label: 'Time Out' },
+                      ] as Array<{ key: typeof sortBy; label: string }>).map((opt) => (
+                        <Button
+                          key={opt.key}
+                          variant={sortBy === opt.key ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setSortBy(opt.key)}
+                        >
+                          {opt.label}
+                        </Button>
+                      ))}
+                      <Button variant="outline" size="sm" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
+                        <ArrowUpDown className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -287,16 +406,20 @@ export default function GymUsersPage() {
                 ) : (
                   <div className="space-y-4">
                     <div className="md:hidden space-y-3">
-                      {filtered.length < 1 ? (
+                      {sorted.length < 1 ? (
                         <div className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">
                           No results.
                         </div>
                       ) : (
-                        filtered.map((p, idx) => {
+                        sorted.map((p, idx) => {
                           const key = `${p.employee_id}-${p.time_in}-${idx}`;
                           const sessionLabel = normalizeSession(p.schedule);
                           return (
-                            <div key={key} className="rounded-lg border bg-card p-4">
+                            <div
+                              key={key}
+                              className="rounded-lg border bg-card p-4 cursor-pointer"
+                              onClick={() => p.employee_id && navigate(`/live_gym/${encodeURIComponent(String(p.employee_id))}`)}
+                            >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                   <div className="truncate font-semibold">{p.name ?? '-'}</div>
@@ -357,8 +480,12 @@ export default function GymUsersPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {filtered.map((p, idx) => (
-                            <TableRow key={`${p.employee_id}-${p.time_in}-${idx}`}>
+                        {sorted.map((p, idx) => (
+                          <TableRow
+                            key={`${p.employee_id}-${p.time_in}-${idx}`}
+                            className={p.status === 'IN_GYM' ? 'bg-green-50' : p.status === 'BOOKED' ? 'bg-yellow-50' : ''}
+                            onClick={() => p.employee_id && navigate(`/live_gym/${encodeURIComponent(String(p.employee_id))}`)}
+                          >
                               <TableCell className="w-12 text-right">{idx + 1}</TableCell>
                               <TableCell className="font-medium">{p.name ?? '-'}</TableCell>
                               <TableCell>{p.employee_id ?? '-'}</TableCell>

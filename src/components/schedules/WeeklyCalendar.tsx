@@ -5,6 +5,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { cn } from '@/lib/utils';
 import { GymSession, formatTime } from '@/hooks/useGymSessions';
 import { useQuery } from '@tanstack/react-query';
@@ -17,6 +18,7 @@ import {
 interface WeeklyCalendarProps {
   sessions: GymSession[];
   onCreateSession?: () => void;
+  onSelectSession?: (session: GymSession) => void;
 }
 
 const START_HOUR = 5;
@@ -35,9 +37,10 @@ const SESSION_COLORS = [
   'bg-cyan-100 border-l-4 border-cyan-500 text-cyan-800',
 ];
 
-export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProps) {
+export function WeeklyCalendar({ sessions, onCreateSession, onSelectSession }: WeeklyCalendarProps) {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+  const [visibleIds, setVisibleIds] = useState<string[]>(sessions.map((s) => s.id));
 
   const weekStart = startOfWeek(currentDate, { weekStartsOn: 1 }); // Monday
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
@@ -150,6 +153,11 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
     return map;
   }, [sessions]);
 
+  const visibleSessions = useMemo(() => {
+    const set = new Set(visibleIds);
+    return sessions.filter((s) => set.has(s.id));
+  }, [sessions, visibleIds]);
+
   return (
     <div className="flex gap-6">
       {/* Left sidebar with mini calendar */}
@@ -180,6 +188,18 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
                   <span className="text-muted-foreground text-xs">
                     {formatTime(session.time_start)}
                   </span>
+                  <Checkbox
+                    checked={visibleIds.includes(session.id)}
+                    onCheckedChange={(checked) => {
+                      setVisibleIds((prev) => {
+                        const next = new Set(prev);
+                        if (checked) next.add(session.id);
+                        else next.delete(session.id);
+                        return Array.from(next);
+                      });
+                    }}
+                    aria-label={`Toggle ${session.session_name}`}
+                  />
                 </div>
               ))}
             </div>
@@ -284,8 +304,8 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
                     <div key={index} className="h-16 border-b" />
                   ))}
 
-                  {/* Sessions - displayed on all days for now */}
-                  {sessions.map((session) => {
+                  {/* Sessions */}
+                  {visibleSessions.map((session) => {
                     const { top, height } = getSessionPosition(session);
                     const colorClass = sessionColorMap.get(session.id) || SESSION_COLORS[0];
                     const dayKey = format(day, 'yyyy-MM-dd');
@@ -304,6 +324,7 @@ export function WeeklyCalendar({ sessions, onCreateSession }: WeeklyCalendarProp
                               colorClass
                             )}
                             style={{ top: `${top}px`, height: `${height}px` }}
+                            onDoubleClick={() => onSelectSession?.(session)}
                           >
                             <div className="text-xs font-medium truncate">
                               {session.session_name}

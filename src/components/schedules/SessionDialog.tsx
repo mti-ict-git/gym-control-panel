@@ -11,9 +11,10 @@ interface SessionDialogProps {
   onSubmit: (data: GymSessionInsert) => void;
   session?: GymSession | null;
   isLoading?: boolean;
+  mode?: 'create' | 'edit';
 }
 
-export function SessionDialog({ open, onOpenChange, onSubmit, session, isLoading }: SessionDialogProps) {
+export function SessionDialog({ open, onOpenChange, onSubmit, session, isLoading, mode }: SessionDialogProps) {
   const [sessionName, setSessionName] = useState('');
   const [timeStart, setTimeStart] = useState('');
   const [timeEnd, setTimeEnd] = useState('');
@@ -45,7 +46,7 @@ export function SessionDialog({ open, onOpenChange, onSubmit, session, isLoading
     });
   };
 
-  const isEdit = !!session;
+  const isEdit = mode ? mode === 'edit' : !!session;
   const isValid = sessionName && timeStart && timeEnd && quota >= 1;
 
   return (

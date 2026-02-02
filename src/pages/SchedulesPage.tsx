@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Calendar as CalendarIcon, List, Pencil, Plus, Trash2, Search, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
+import { Calendar as CalendarIcon, List, Pencil, Plus, Trash2, Search, ArrowUpDown, ChevronUp, ChevronDown, Copy, Download } from 'lucide-react';
 import { useGymDbSessions, useGymDbSessionsPaged, GymDbSession } from '@/hooks/useGymDbSessions';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
@@ -13,6 +13,8 @@ import { WeeklyCalendar } from '@/components/schedules/WeeklyCalendar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SessionDialog } from '@/components/schedules/SessionDialog';
 import { toast } from 'sonner';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { GYM_SESSIONS } from '@/lib/gymSessions';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,6 +28,7 @@ import {
 
 export default function SchedulesPage() {
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
+  const [presetSession, setPresetSession] = useState<GymSession | null>(null);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<GymDbSession | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -82,6 +85,32 @@ export default function SchedulesPage() {
       updated_at: '',
     };
   });
+
+  const openWithPreset = (name: string, start: string, end: string, quota: number = 15) => {
+    setPresetSession({
+      id: `preset-${name}-${start}`,
+      session_name: name,
+      time_start: start,
+      time_end: end,
+      quota,
+      created_at: '',
+      updated_at: '',
+    });
+    setSessionDialogOpen(true);
+  };
+
+  const exportCsv = () => {
+    const header = ['Session', 'Time Start', 'Time End', 'Quota'];
+    const rows = sessions.map((s) => [s.session_name, s.time_start, s.time_end || '', String(s.quota)]);
+    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'gym-sessions.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const SessionBadge = ({ name }: { name: string }) => {
     const key = name.toLowerCase();
@@ -148,10 +177,46 @@ export default function SchedulesPage() {
                         className="pl-9"
                       />
                     </div>
-                    <Button onClick={() => setSessionDialogOpen(true)}>
-                      <Plus className="h-4 w-4 mr-2" />
-                      Create Session
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button onClick={() => { setPresetSession(null); setSessionDialogOpen(true); }}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        Create Session
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline">
+                            Preset
+                            <ChevronDown className="h-4 w-4 ml-2" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {GYM_SESSIONS.map((s) => (
+                            <DropdownMenuItem key={s.id} onClick={() => openWithPreset(s.name, s.startTime, s.endTime)}>
+                              {s.name} ({s.startTime}-{s.endTime})
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                      <Button variant="outline" onClick={exportCsv}>
+                        <Download className="h-4 w-4 mr-2" />
+                        Export
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {['ALL','Morning','Afternoon','Night 1','Night 2'].map((label) => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => setSearch(label === 'ALL' ? '' : label)}
+                        className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
+                          (search || '') === (label === 'ALL' ? '' : label) ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
+                        }`}
+                        aria-pressed={(search || '') === (label === 'ALL' ? '' : label)}
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
                   {isLoading ? (
                     <div className="space-y-4">
@@ -217,6 +282,17 @@ export default function SchedulesPage() {
                                     <Button
                                       variant="ghost"
                                       size="icon"
+                                      onClick={() => {
+                                        setPresetSession(toDialogSession(session));
+                                        setSessionDialogOpen(true);
+                                      }}
+                                      title="Duplicate"
+                                    >
+                                      <Copy className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
                                       className="text-destructive hover:text-destructive"
                                       onClick={() => {
                                         setDeletingSession(session);
@@ -274,6 +350,8 @@ export default function SchedulesPage() {
                 <TabsContent value="calendar" className="mt-4">
                   <WeeklyCalendar 
                     sessions={calendarSessions} 
+                    onCreateSession={() => setSessionDialogOpen(true)}
+                    onSelectSession={(session) => { setPresetSession(session); setSessionDialogOpen(true); }}
                   />
                 </TabsContent>
               </Tabs>
@@ -285,7 +363,7 @@ export default function SchedulesPage() {
 
       <SessionDialog
         open={sessionDialogOpen}
-        onOpenChange={setSessionDialogOpen}
+        onOpenChange={(open) => { setSessionDialogOpen(open); if (!open) setPresetSession(null); }}
         onSubmit={async (data) => {
           try {
             const tryPost = async (url: string) => {
@@ -318,6 +396,8 @@ export default function SchedulesPage() {
           }
         }}
         isLoading={false}
+        session={presetSession}
+        mode="create"
       />
 
       <SessionDialog

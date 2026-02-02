@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { startOfDay, endOfDay, startOfWeek, endOfWeek, subDays, format, getHours } from 'date-fns';
+import { startOfDay, endOfDay, startOfWeek, endOfWeek, subDays, format } from 'date-fns';
 
 export interface HourlyData {
   hour: string;
@@ -16,6 +16,12 @@ export interface DailyData {
 export interface OccupancyPattern {
   time: string;
   avgOccupancy: number;
+}
+
+export interface HeatmapCell {
+  day: string;
+  hour: string;
+  count: number;
 }
 
 export function usePeakHoursData() {
@@ -49,21 +55,24 @@ export function useWeeklyTrendsData() {
       const from = format(weekStart, 'yyyy-MM-dd');
       const to = format(weekEnd, 'yyyy-MM-dd');
       const r = await fetch(`/api/gym-bookings?from=${from}&to=${to}`).catch(() => fetch(`/gym-bookings?from=${from}&to=${to}`));
-      const j: { ok: boolean; bookings?: Array<{ booking_date: string; status: string }>; error?: string } = await r.json();
+      const j: { ok: boolean; bookings?: Array<{ booking_date: string; status: string; approval_status?: string | null }>; error?: string } = await r.json();
       if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
-      const dayData: Record<string, { total: number; completed: number; noShow: number }> = {};
+      const dayData: Record<string, { total: number; completed: number; noShow: number; approved: number; rejected: number }> = {};
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      days.forEach((day) => { dayData[day] = { total: 0, completed: 0, noShow: 0 }; });
+      days.forEach((day) => { dayData[day] = { total: 0, completed: 0, noShow: 0, approved: 0, rejected: 0 }; });
       (j.bookings || []).forEach((b) => {
         const day = format(new Date(b.booking_date), 'EEE');
         const status = String(b.status).toUpperCase();
+        const appr = String(b.approval_status || '').toUpperCase();
         if (dayData[day]) {
           dayData[day].total++;
           if (status === 'COMPLETED' || status === 'OUT') dayData[day].completed++;
           if (status === 'EXPIRED' || status === 'CANCELLED') dayData[day].noShow++;
+          if (appr === 'APPROVED') dayData[day].approved++;
+          if (appr === 'REJECTED') dayData[day].rejected++;
         }
       });
-      return days.map((day) => ({ day, ...dayData[day] })) as DailyData[];
+      return days.map((day) => ({ day, ...dayData[day] })) as Array<DailyData & { approved: number; rejected: number }>;
     },
   });
 }
@@ -104,6 +113,40 @@ export function useOccupancyPatternData() {
         avgOccupancy: counts.length > 0 ? Math.round((counts.reduce((a, b) => a + b, 0) / counts.length) * 10) / 10 : 0,
       })) as OccupancyPattern[];
     },
+  });
+}
+
+export function usePeakHoursHeatmapData() {
+  return useQuery({
+    queryKey: ['analytics-peak-heatmap'],
+    queryFn: async () => {
+      const today = new Date();
+      const from = format(startOfWeek(today, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+      const to = format(endOfWeek(today, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+      const r = await fetch(`/api/gym-bookings?from=${from}&to=${to}`).catch(() => fetch(`/gym-bookings?from=${from}&to=${to}`));
+      const j: { ok: boolean; bookings?: Array<{ booking_date: string; time_start: string | null; status: string }>; error?: string } = await r.json();
+      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const hours: string[] = Array.from({ length: 17 }, (_, i) => `${i + 6}:00`);
+      const grid: Record<string, Record<string, number>> = {};
+      days.forEach((d) => { grid[d] = {}; hours.forEach((h) => { grid[d][h] = 0; }); });
+      (j.bookings || []).forEach((b) => {
+        const day = format(new Date(b.booking_date), 'EEE');
+        const hh = Number((b.time_start || '00:00').split(':')[0] || '0');
+        if (hh >= 6 && hh <= 22) {
+          const hour = `${hh}:00`;
+          grid[day][hour] += 1;
+        }
+      });
+      const cells: HeatmapCell[] = [];
+      days.forEach((d) => {
+        hours.forEach((h) => {
+          cells.push({ day: d, hour: h, count: grid[d][h] });
+        });
+      });
+      return { days, hours, cells } as { days: string[]; hours: string[]; cells: HeatmapCell[] };
+    },
+    staleTime: 300000,
   });
 }
 
