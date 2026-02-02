@@ -127,13 +127,15 @@ export function usePeakHoursHeatmapData() {
       const j: { ok: boolean; bookings?: Array<{ booking_date: string; time_start: string | null; status: string }>; error?: string } = await r.json();
       if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const hours: string[] = Array.from({ length: 17 }, (_, i) => `${i + 6}:00`);
+      const START_HOUR = 5;
+      const END_HOUR = 22;
+      const hours: string[] = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => `${i + START_HOUR}:00`);
       const grid: Record<string, Record<string, number>> = {};
       days.forEach((d) => { grid[d] = {}; hours.forEach((h) => { grid[d][h] = 0; }); });
       (j.bookings || []).forEach((b) => {
         const day = format(new Date(b.booking_date), 'EEE');
         const hh = Number((b.time_start || '00:00').split(':')[0] || '0');
-        if (hh >= 6 && hh <= 22) {
+        if (hh >= START_HOUR && hh <= END_HOUR) {
           const hour = `${hh}:00`;
           grid[day][hour] += 1;
         }

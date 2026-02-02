@@ -135,12 +135,23 @@ export function useGymOccupancy(options?: { refetchInterval?: number; staleTime?
   return useQuery({
     queryKey: ['gym-occupancy'],
     queryFn: async () => {
-      const today = new Date();
-      const dateStr = format(today, 'yyyy-MM-dd');
-      const r = await fetch(`/api/gym-bookings?from=${dateStr}&to=${dateStr}`).catch(() => fetch(`/gym-bookings?from=${dateStr}&to=${dateStr}`));
-      const j: { ok: boolean; bookings?: Array<{ status: string }>; error?: string } = await r.json();
-      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
-      const cnt = (j.bookings || []).filter((b) => String(b.status).toUpperCase() === 'CHECKIN').length;
+      const tryFetch = async (url: string): Promise<{ ok: boolean; people?: Array<{ status: string; access_required: boolean; schedule?: string | null }>; error?: string } | null> => {
+        const r = await fetch(url);
+        const j = await r.json();
+        if (r.status >= 500) throw new Error(j?.error || 'Server error');
+        return j;
+      };
+      const candidates = ['/api/gym-live-status', '/gym-live-status'];
+      let json: { ok: boolean; people?: Array<{ status: string; access_required: boolean; schedule?: string | null }>; error?: string } | null = null;
+      for (const url of candidates) {
+        try {
+          json = await tryFetch(url);
+          break;
+        } catch (_) { continue; }
+      }
+      if (!json || !json.ok) throw new Error(json?.error || 'Failed to load live status');
+      const people = Array.isArray(json.people) ? json.people : [];
+      const cnt = people.filter((p) => String(p.status).toUpperCase() === 'IN_GYM' && p.access_required === true && !!p.schedule).length;
       return cnt;
     },
     refetchInterval: options?.refetchInterval ?? 30000,
