@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { useGymLiveStatus } from '@/hooks/useGymLiveStatus';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 type SessionFilter = 'ALL' | 'COMITTE' | 'Morning' | 'Afternoon' | 'Night - 1' | 'Night - 2' | 'Other';
 type StatusFilter = 'ALL' | 'BOOKED' | 'IN_GYM' | 'LEFT';
@@ -163,225 +164,230 @@ export default function GymUsersPage() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Live Gym Monitoring</h1>
-          <p className="text-muted-foreground">Real-time overview of active gym members and access status.</p>
-        </div>
-
-        <div className="rounded-lg border bg-card p-4">
-          <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-12 lg:col-span-5 rounded-lg border bg-card p-4">
-            <div className="flex items-center gap-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <CalendarIcon className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <div className="text-sm text-muted-foreground">Today's Booking Date</div>
-                <div className="text-lg font-semibold">{format(new Date(), 'yyyy-MM-dd')}</div>
-              </div>
-            </div>
-            <div className="mt-3">
-              <div className="text-sm text-muted-foreground mb-2">Session & Count</div>
-              <div className="flex flex-wrap gap-2">
-                {getSessionCountChip('COMITTE', sessionCounts['COMITTE'])}
-                {getSessionCountChip('Morning', sessionCounts['Morning'])}
-                {getSessionCountChip('Afternoon', sessionCounts['Afternoon'])}
-                {getSessionCountChip('Night - 1', sessionCounts['Night - 1'])}
-                {getSessionCountChip('Night - 2', sessionCounts['Night - 2'])}
-                {getSessionCountChip('Other', sessionCounts['Other'])}
-              </div>
-            </div>
-          </div>
-
-          <div className="col-span-12 lg:col-span-7 rounded-lg border bg-card p-4 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search name / employee id / department"
-                  className="pl-9"
-                  aria-label="Search live gym monitoring"
-                />
-              </div>
-              <div className="flex items-center gap-2 justify-end">
-                <span className="text-xs text-muted-foreground">Total</span>
-                <span className="text-sm font-semibold">{filtered.length}</span>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {([
-                'ALL',
-                'COMITTE',
-                'Morning',
-                'Afternoon',
-                'Night - 1',
-                'Night - 2',
-                'Other',
-              ] as SessionFilter[]).map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setSessionFilter(v)}
-                  className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
-                    sessionFilter === v ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
-                  }`}
-                  aria-pressed={sessionFilter === v}
-                >
-                  {v}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {([
-                { label: 'All', value: 'ALL' },
-                { label: 'Booked', value: 'BOOKED' },
-                { label: 'Inside', value: 'IN_GYM' },
-                { label: 'Outside', value: 'LEFT' },
-              ] as Array<{ label: string; value: StatusFilter }>).map((x) => (
-                <button
-                  key={x.value}
-                  type="button"
-                  onClick={() => setStatusFilter(x.value)}
-                  className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
-                    statusFilter === x.value ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
-                  }`}
-                  aria-pressed={statusFilter === x.value}
-                >
-                  {x.label}
-                </button>
-              ))}
-              {([
-                { label: 'All Access', value: 'ALL' },
-                { label: 'Granted', value: 'GRANTED' },
-                { label: 'No Access', value: 'NO_ACCESS' },
-              ] as Array<{ label: string; value: AccessFilter }>).map((x) => (
-                <button
-                  key={x.value}
-                  type="button"
-                  onClick={() => setAccessFilter(x.value)}
-                  className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
-                    accessFilter === x.value ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
-                  }`}
-                  aria-pressed={accessFilter === x.value}
-                >
-                  {x.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          </div>
-        </div>
-
-        {isLoadingStatus ? (
-          <div className="space-y-4">
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="md:hidden space-y-3">
-              {filtered.length < 1 ? (
-                <div className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">
-                  No results.
-                </div>
-              ) : (
-                filtered.map((p, idx) => {
-                  const key = `${p.employee_id}-${p.time_in}-${idx}`;
-                  const sessionLabel = normalizeSession(p.schedule);
-                  return (
-                    <div key={key} className="rounded-lg border bg-card p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate font-semibold">{p.name ?? '-'}</div>
-                          <div className="mt-0.5 text-xs text-muted-foreground">
-                            <span>{p.employee_id ?? '-'}</span>
-                            <span className="px-1">•</span>
-                            <span className="truncate">{p.department ?? '-'}</span>
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end gap-2">
-                          {statusPill(p.status)}
-                          {accessPill(p.access_indicator.color, p.access_indicator.label)}
-                        </div>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-12 gap-2">
-                        <div className="col-span-12 flex items-center justify-between gap-2">
-                          <span className="text-xs text-muted-foreground">Session</span>
-                          {getSessionChip(sessionLabel)}
-                        </div>
-                        <div className="col-span-12 flex items-center justify-between gap-2">
-                          <span className="text-xs text-muted-foreground">Time Schedule</span>
-                          {getScheduleChip(p.schedule)}
-                        </div>
-
-                        <div className="col-span-6">
-                          <div className="text-xs text-muted-foreground">Date</div>
-                          <div className="text-sm font-medium">{formatDateUtc8(p.time_in, p.time_out)}</div>
-                        </div>
-                        <div className="col-span-6">
-                          <div className="text-xs text-muted-foreground">Time</div>
-                          <div className="text-sm font-medium">
-                            {formatTimeUtc8(p.time_in)} – {formatTimeUtc8(p.time_out)}
-                          </div>
-                        </div>
-                      </div>
+        <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
+          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
+            <CardHeader>
+              <CardTitle className="text-2xl">Live Gym Monitoring</CardTitle>
+              <CardDescription>Real-time overview of active gym members and access status.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-12 gap-4">
+                <div className="col-span-12 lg:col-span-5">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                      <CalendarIcon className="h-5 w-5 text-primary" />
                     </div>
-                  );
-                })
-              )}
-            </div>
+                    <div>
+                      <div className="text-sm text-muted-foreground">Today's Booking Date</div>
+                      <div className="text-lg font-semibold">{format(new Date(), 'yyyy-MM-dd')}</div>
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <div className="text-sm text-muted-foreground mb-2">Session & Count</div>
+                    <div className="flex flex-wrap gap-2">
+                      {getSessionCountChip('COMITTE', sessionCounts['COMITTE'])}
+                      {getSessionCountChip('Morning', sessionCounts['Morning'])}
+                      {getSessionCountChip('Afternoon', sessionCounts['Afternoon'])}
+                      {getSessionCountChip('Night - 1', sessionCounts['Night - 1'])}
+                      {getSessionCountChip('Night - 2', sessionCounts['Night - 2'])}
+                      {getSessionCountChip('Other', sessionCounts['Other'])}
+                    </div>
+                  </div>
+                </div>
 
-            <div className="hidden md:block rounded-lg border bg-card overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12 text-right">No</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>ID Employee</TableHead>
-                    <TableHead>Department</TableHead>
-                    <TableHead>Session</TableHead>
-                    <TableHead>Time Schedule</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Time In</TableHead>
-                    <TableHead>Time Out</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Access</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((p, idx) => (
-                    <TableRow key={`${p.employee_id}-${p.time_in}-${idx}`}>
-                      <TableCell className="w-12 text-right">{idx + 1}</TableCell>
-                      <TableCell className="font-medium">{p.name ?? '-'}</TableCell>
-                      <TableCell>{p.employee_id ?? '-'}</TableCell>
-                      <TableCell>{p.department ?? '-'}</TableCell>
-                      <TableCell>{getSessionChip(normalizeSession(p.schedule))}</TableCell>
-                      <TableCell>{getScheduleChip(p.schedule)}</TableCell>
-                      <TableCell>{formatDateUtc8(p.time_in, p.time_out)}</TableCell>
-                      <TableCell>{formatTimeUtc8(p.time_in)}</TableCell>
-                      <TableCell>{formatTimeUtc8(p.time_out)}</TableCell>
-                      <TableCell>{statusPill(p.status)}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`h-2.5 w-2.5 rounded-full ${p.access_indicator.color === 'green' ? 'bg-green-500' : 'bg-red-500'}`}
-                          />
-                          <span>{p.access_indicator.label}</span>
+                <div className="col-span-12 lg:col-span-7 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                    <div className="relative flex-1">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Search name / employee id / department"
+                        className="pl-9"
+                        aria-label="Search live gym monitoring"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 justify-end">
+                      <span className="text-xs text-muted-foreground">Total</span>
+                      <span className="text-sm font-semibold">{filtered.length}</span>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      'ALL',
+                      'COMITTE',
+                      'Morning',
+                      'Afternoon',
+                      'Night - 1',
+                      'Night - 2',
+                      'Other',
+                    ] as SessionFilter[]).map((v) => (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setSessionFilter(v)}
+                        className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
+                          sessionFilter === v ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
+                        }`}
+                        aria-pressed={sessionFilter === v}
+                      >
+                        {v}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      { label: 'All', value: 'ALL' },
+                      { label: 'Booked', value: 'BOOKED' },
+                      { label: 'Inside', value: 'IN_GYM' },
+                      { label: 'Outside', value: 'LEFT' },
+                    ] as Array<{ label: string; value: StatusFilter }>).map((x) => (
+                      <button
+                        key={x.value}
+                        type="button"
+                        onClick={() => setStatusFilter(x.value)}
+                        className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
+                          statusFilter === x.value ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
+                        }`}
+                        aria-pressed={statusFilter === x.value}
+                      >
+                        {x.label}
+                      </button>
+                    ))}
+                    {([
+                      { label: 'All Access', value: 'ALL' },
+                      { label: 'Granted', value: 'GRANTED' },
+                      { label: 'No Access', value: 'NO_ACCESS' },
+                    ] as Array<{ label: string; value: AccessFilter }>).map((x) => (
+                      <button
+                        key={x.value}
+                        type="button"
+                        onClick={() => setAccessFilter(x.value)}
+                        className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
+                          accessFilter === x.value ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
+                        }`}
+                        aria-pressed={accessFilter === x.value}
+                      >
+                        {x.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4">
+                {isLoadingStatus ? (
+                  <div className="space-y-4">
+                    <Skeleton className="h-12 w-full" />
+                    <Skeleton className="h-12 w-full" />
+                    <Skeleton className="h-12 w-full" />
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="md:hidden space-y-3">
+                      {filtered.length < 1 ? (
+                        <div className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">
+                          No results.
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
-        )}
+                      ) : (
+                        filtered.map((p, idx) => {
+                          const key = `${p.employee_id}-${p.time_in}-${idx}`;
+                          const sessionLabel = normalizeSession(p.schedule);
+                          return (
+                            <div key={key} className="rounded-lg border bg-card p-4">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="truncate font-semibold">{p.name ?? '-'}</div>
+                                  <div className="mt-0.5 text-xs text-muted-foreground">
+                                    <span>{p.employee_id ?? '-'}</span>
+                                    <span className="px-1">•</span>
+                                    <span className="truncate">{p.department ?? '-'}</span>
+                                  </div>
+                                </div>
+                                <div className="flex flex-col items-end gap-2">
+                                  {statusPill(p.status)}
+                                  {accessPill(p.access_indicator.color, p.access_indicator.label)}
+                                </div>
+                              </div>
+
+                              <div className="mt-3 grid grid-cols-12 gap-2">
+                                <div className="col-span-12 flex items-center justify-between gap-2">
+                                  <span className="text-xs text-muted-foreground">Session</span>
+                                  {getSessionChip(sessionLabel)}
+                                </div>
+                                <div className="col-span-12 flex items-center justify-between gap-2">
+                                  <span className="text-xs text-muted-foreground">Time Schedule</span>
+                                  {getScheduleChip(p.schedule)}
+                                </div>
+
+                                <div className="col-span-6">
+                                  <div className="text-xs text-muted-foreground">Date</div>
+                                  <div className="text-sm font-medium">{formatDateUtc8(p.time_in, p.time_out)}</div>
+                                </div>
+                                <div className="col-span-6">
+                                  <div className="text-xs text-muted-foreground">Time</div>
+                                  <div className="text-sm font-medium">
+                                    {formatTimeUtc8(p.time_in)} – {formatTimeUtc8(p.time_out)}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="hidden md:block rounded-lg border bg-card overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-12 text-right">No</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead>ID Employee</TableHead>
+                            <TableHead>Department</TableHead>
+                            <TableHead>Session</TableHead>
+                            <TableHead>Time Schedule</TableHead>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Time In</TableHead>
+                            <TableHead>Time Out</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Access</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filtered.map((p, idx) => (
+                            <TableRow key={`${p.employee_id}-${p.time_in}-${idx}`}>
+                              <TableCell className="w-12 text-right">{idx + 1}</TableCell>
+                              <TableCell className="font-medium">{p.name ?? '-'}</TableCell>
+                              <TableCell>{p.employee_id ?? '-'}</TableCell>
+                              <TableCell>{p.department ?? '-'}</TableCell>
+                              <TableCell>{getSessionChip(normalizeSession(p.schedule))}</TableCell>
+                              <TableCell>{getScheduleChip(p.schedule)}</TableCell>
+                              <TableCell>{formatDateUtc8(p.time_in, p.time_out)}</TableCell>
+                              <TableCell>{formatTimeUtc8(p.time_in)}</TableCell>
+                              <TableCell>{formatTimeUtc8(p.time_out)}</TableCell>
+                              <TableCell>{statusPill(p.status)}</TableCell>
+                              <TableCell>
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`h-2.5 w-2.5 rounded-full ${p.access_indicator.color === 'green' ? 'bg-green-500' : 'bg-red-500'}`}
+                                  />
+                                  <span>{p.access_indicator.label}</span>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </AppLayout>
   );

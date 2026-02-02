@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ElementType } from 'react';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subDays, addDays } from 'date-fns';
 import { FileText, Download, Calendar, Users, Clock, Filter, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -306,51 +307,10 @@ export default function ReportsPage() {
     staleTime: 60000,
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
+    retry: 1,
   });
 
-  const pageBookingIds = (Array.isArray(bookingDataRes?.rows) ? bookingDataRes.rows : []).map((r) => Number(r.booking_id || 0)).filter((n) => Number.isFinite(n) && n > 0);
-  const idsKey = pageBookingIds.join('-');
-
-  const { data: bookingOverlayMap = new Map<number, { card_no: string | null; employee_id: string; employee_name: string | null; department: string | null; gender: string | null; session_name: string; time_start: string | null; time_end: string | null }>() } = useQuery({
-    queryKey: ['gym-bookings-overlay-map-by-ids', idsKey],
-    queryFn: async () => {
-      if (pageBookingIds.length === 0) return new Map<number, { card_no: string | null; employee_id: string; employee_name: string | null; department: string | null; gender: string | null; session_name: string; time_start: string | null; time_end: string | null }>();
-      const idsParam = pageBookingIds.join(',');
-      const tryFetch = async (base: string) => {
-        const resp = await fetch(`${base}/gym-bookings-by-ids?ids=${encodeURIComponent(idsParam)}`);
-        const json = await resp.json();
-        if (!json || !json.ok) return [] as Array<{ booking_id: number; card_no: string | null; employee_id: string; employee_name: string | null; department: string | null; gender: string | null; session_name: string; time_start: string | null; time_end: string | null }>;
-        const rows = Array.isArray(json.bookings) ? json.bookings : [];
-        return rows.map((r: unknown) => {
-          const obj = r as { booking_id?: number; card_no?: string | null; employee_id?: string; employee_name?: string | null; department?: string | null; gender?: string | null; session_name?: string; time_start?: string | null; time_end?: string | null };
-          return {
-            booking_id: Number(obj.booking_id || 0),
-            card_no: obj.card_no != null ? String(obj.card_no) : null,
-            employee_id: String(obj.employee_id ?? ''),
-            employee_name: obj.employee_name != null ? String(obj.employee_name) : null,
-            department: obj.department != null ? String(obj.department) : null,
-            gender: obj.gender != null ? String(obj.gender) : null,
-            session_name: obj.session_name != null ? String(obj.session_name) : '',
-            time_start: obj.time_start != null ? String(obj.time_start) : null,
-            time_end: obj.time_end != null ? String(obj.time_end) : null,
-          };
-        });
-      };
-      try {
-        const rows = await tryFetch('/api');
-        const map = new Map<number, { card_no: string | null; employee_id: string; employee_name: string | null; department: string | null; gender: string | null; session_name: string; time_start: string | null; time_end: string | null }>();
-        rows.forEach((r) => { if (Number.isFinite(r.booking_id) && r.booking_id > 0) map.set(r.booking_id, { card_no: r.card_no, employee_id: r.employee_id, employee_name: r.employee_name, department: r.department, gender: r.gender, session_name: r.session_name, time_start: r.time_start, time_end: r.time_end }); });
-        return map;
-      } catch (_) {
-        const rows = await tryFetch('');
-        const map = new Map<number, { card_no: string | null; employee_id: string; employee_name: string | null; department: string | null; gender: string | null; session_name: string; time_start: string | null; time_end: string | null }>();
-        rows.forEach((r) => { if (Number.isFinite(r.booking_id) && r.booking_id > 0) map.set(r.booking_id, { card_no: r.card_no, employee_id: r.employee_id, employee_name: r.employee_name, department: r.department, gender: r.gender, session_name: r.session_name, time_start: r.time_start, time_end: r.time_end }); });
-        return map;
-      }
-    },
-    enabled: pageBookingIds.length > 0,
-    staleTime: 60000,
-  });
+  
 
   
 
@@ -429,7 +389,7 @@ export default function ReportsPage() {
     fetch(`/api/gym-live-sync?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`).catch(() => {});
   }, [dateRange, customStartDate, customEndDate, start, end]);
 
-  const { data: liveTapMap = new Map<string, { time_in: string | null; time_out: string | null }>() } = useQuery({
+  const { data: liveTapMap = new Map<string, { time_in: string | null; time_out: string | null; session_name: string | null; time_start: string | null; time_end: string | null }>() } = useQuery({
     queryKey: ['gym-live-status-range', format(pageDateRange.from, 'yyyy-MM-dd'), format(pageDateRange.to, 'yyyy-MM-dd')],
     queryFn: async () => {
       const fromStr = format(pageDateRange.from, 'yyyy-MM-dd');
@@ -437,27 +397,30 @@ export default function ReportsPage() {
       const tryFetch = async (base: string) => {
         const resp = await fetch(`${base}/gym-live-status-range?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`);
         const json = await resp.json();
-        if (!json || !json.ok) return [] as Array<{ employee_id: string; date: string; time_in: string | null; time_out: string | null }>;
+        if (!json || !json.ok) return [] as Array<{ employee_id: string; date: string; time_in: string | null; time_out: string | null; session_name: string | null; time_start: string | null; time_end: string | null }>;
         const rows = Array.isArray(json.taps) ? json.taps : [];
         return rows.map((r: unknown) => {
-          const obj = r as { employee_id?: string; date?: string; time_in?: string | null; time_out?: string | null };
+          const obj = r as { employee_id?: string; date?: string; time_in?: string | null; time_out?: string | null; session_name?: string | null; time_start?: string | null; time_end?: string | null };
           return {
             employee_id: String(obj.employee_id ?? '').trim(),
             date: String(obj.date ?? ''),
             time_in: obj.time_in != null ? String(obj.time_in) : null,
             time_out: obj.time_out != null ? String(obj.time_out) : null,
+            session_name: obj.session_name != null ? String(obj.session_name) : null,
+            time_start: obj.time_start != null ? String(obj.time_start) : null,
+            time_end: obj.time_end != null ? String(obj.time_end) : null,
           };
         });
       };
       try {
         const rows = await tryFetch('/api');
-        const map = new Map<string, { time_in: string | null; time_out: string | null }>();
-        rows.forEach((r) => { const key = `${r.employee_id}__${r.date}`; if (r.employee_id && r.date) map.set(key, { time_in: r.time_in, time_out: r.time_out }); });
+        const map = new Map<string, { time_in: string | null; time_out: string | null; session_name: string | null; time_start: string | null; time_end: string | null }>();
+        rows.forEach((r) => { const key = `${r.employee_id}__${r.date}`; if (r.employee_id && r.date) map.set(key, { time_in: r.time_in, time_out: r.time_out, session_name: r.session_name ?? null, time_start: r.time_start ?? null, time_end: r.time_end ?? null }); });
         return map;
       } catch (_) {
         const rows = await tryFetch('');
-        const map = new Map<string, { time_in: string | null; time_out: string | null }>();
-        rows.forEach((r) => { const key = `${r.employee_id}__${r.date}`; if (r.employee_id && r.date) map.set(key, { time_in: r.time_in, time_out: r.time_out }); });
+        const map = new Map<string, { time_in: string | null; time_out: string | null; session_name: string | null; time_start: string | null; time_end: string | null }>();
+        rows.forEach((r) => { const key = `${r.employee_id}__${r.date}`; if (r.employee_id && r.date) map.set(key, { time_in: r.time_in, time_out: r.time_out, session_name: r.session_name ?? null, time_start: r.time_start ?? null, time_end: r.time_end ?? null }); });
         return map;
       }
     },
@@ -474,24 +437,33 @@ export default function ReportsPage() {
     female: Number(bookingDataRes.female_total || 0),
   };
 
+  const statItems: Array<{ key: string; label: string; value: number; icon: ElementType; iconClass: string; bgClass: string }> = [
+    { key: 'totalBookings', label: 'Total Bookings', value: stats.totalBookings, icon: Calendar, iconClass: 'text-primary', bgClass: 'bg-primary/10' },
+    { key: 'timeIn', label: 'Time In', value: stats.timeIn, icon: Clock, iconClass: 'text-blue-500', bgClass: 'bg-blue-500/10' },
+    { key: 'timeOut', label: 'Time Out', value: stats.timeOut, icon: Users, iconClass: 'text-red-500', bgClass: 'bg-red-500/10' },
+    { key: 'male', label: 'Male', value: stats.male, icon: Users, iconClass: 'text-blue-500', bgClass: 'bg-blue-500/10' },
+    { key: 'female', label: 'Female', value: stats.female, icon: Users, iconClass: 'text-pink-500', bgClass: 'bg-pink-500/10' },
+  ];
+
   const handleExportCSV = () => {
     const headers = ['No', 'Booking ID', 'ID Card', 'Name', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
       const rows = bookingData.map((record, idx) => [
       String(idx + 1),
       formatBookingId(record.booking_id),
-        String((bookingOverlayMap.get(record.booking_id)?.card_no ?? record.card_no) ?? ''),
-        String(((bookingOverlayMap.get(record.booking_id)?.employee_name) ?? (record.name ?? record.employee_name)) ?? ''),
-        String((bookingOverlayMap.get(record.booking_id)?.employee_id ?? record.employee_id) ?? ''),
-        String((bookingOverlayMap.get(record.booking_id)?.department ?? record.department) ?? ''),
-        getGenderLabel(bookingOverlayMap.get(record.booking_id)?.gender ?? record.gender),
+        String(record.card_no ?? ''),
+        String((record.name ?? record.employee_name) ?? ''),
+        String(record.employee_id ?? ''),
+        String(record.department ?? ''),
+        getGenderLabel(record.gender),
       formatTimeOnly(liveTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_in ?? record.time_in),
       formatTimeOnly(liveTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_out ?? record.time_out),
       (() => {
-        const s = bookingOverlayMap.get(record.booking_id);
-        const start = s?.time_start ?? record.time_start ?? null;
-        const end = s?.time_end ?? record.time_end ?? null;
+        const key = `${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`;
+        const live = liveTapMap.get(key);
+        const start = (live?.time_start ?? record.time_start) ?? null;
+        const end = (live?.time_end ?? record.time_end) ?? null;
         if (start && end) return `${start} - ${end}`;
-        const sl = String((bookingOverlayMap.get(record.booking_id)?.session_name ?? record.session_name) || '').trim().toLowerCase();
+        const sl = String((live?.session_name ?? record.session_name) || '').trim().toLowerCase();
         return sl.startsWith('morning')
           ? '05:00 - 12:00'
           : sl.startsWith('afternoon')
@@ -502,7 +474,11 @@ export default function ReportsPage() {
           ? '21:00 - 23:59'
           : '-';
       })(),
-        String((bookingOverlayMap.get(record.booking_id)?.session_name ?? record.session_name) ?? ''),
+        (() => {
+          const key = `${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`;
+          const live = liveTapMap.get(key);
+          return String((live?.session_name ?? record.session_name) ?? '');
+        })(),
     ]);
 
     const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
@@ -536,208 +512,133 @@ export default function ReportsPage() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Attendance Reports</h1>
-            <p className="text-muted-foreground">
-              View and export gym attendance data
-            </p>
-          </div>
-          <Button onClick={handleExportCSV} disabled={filteredData.length === 0}>
-            <Download className="h-4 w-4 mr-2" />
-            Export CSV
-          </Button>
-        </div>
-
-        {/* Filters */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Filter className="h-5 w-5 text-muted-foreground" />
-              <CardTitle className="text-lg">Date Filter</CardTitle>
+      <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
+      <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
+        <CardHeader>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <CardTitle className="text-2xl">Attendance Reports</CardTitle>
+              <CardDescription>View and export gym attendance data</CardDescription>
             </div>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-start">
-              <div className="space-y-2">
-                <Label>Period</Label>
-                <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="today">Today</SelectItem>
-                    <SelectItem value="yesterday">Yesterday</SelectItem>
-                    <SelectItem value="week">This Week</SelectItem>
-                    <SelectItem value="month">This Month</SelectItem>
-                    <SelectItem value="year">This Year</SelectItem>
-                    <SelectItem value="custom">Custom Range</SelectItem>
-                  </SelectContent>
-                </Select>
-                <div className="text-xs text-muted-foreground">
-                  {dateRange === 'all' ? (
-                    <>Showing: All Time</>
-                  ) : (
-                    <>Showing: {format(start, 'MMM d, yyyy')} - {format(end, 'MMM d, yyyy')}</>
-                  )}
+            <Button onClick={handleExportCSV} disabled={filteredData.length === 0}>
+              <Download className="h-4 w-4 mr-2" />
+              Export CSV
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="flex-1">
+          <div className="space-y-6">
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Filter className="h-5 w-5 text-muted-foreground" />
+                <div className="text-lg font-semibold">Date Filter</div>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-start">
+                <div className="space-y-2">
+                  <Label>Period</Label>
+                  <Select value={dateRange} onValueChange={(v) => setDateRange(v as DateRange)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="yesterday">Yesterday</SelectItem>
+                      <SelectItem value="week">This Week</SelectItem>
+                      <SelectItem value="month">This Month</SelectItem>
+                      <SelectItem value="year">This Year</SelectItem>
+                      <SelectItem value="custom">Custom Range</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <div className="text-xs text-muted-foreground">
+                    {dateRange === 'all' ? (
+                      <>Showing: All Time</>
+                    ) : (
+                      <>Showing: {format(start, 'MMM d, yyyy')} - {format(end, 'MMM d, yyyy')}</>
+                    )}
+                  </div>
+                </div>
+
+                {dateRange === 'custom' && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Start Date</Label>
+                      <Input type="date" value={customStartDate} onChange={(e) => setCustomStartDate(e.target.value)} className="w-full" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>End Date</Label>
+                      <Input type="date" value={customEndDate} onChange={(e) => setCustomEndDate(e.target.value)} className="w-full" />
+                    </div>
+                  </>
+                )}
+
+                <div className="space-y-2">
+                  <Label>Employee ID</Label>
+                  <Input type="text" value={filterEmpId} onChange={(e) => setFilterEmpId(e.target.value)} placeholder="Search by ID" className="w-full" />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Department</Label>
+                  <Select value={filterDept} onValueChange={(v) => setFilterDept(v)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      {departments.map((d) => (<SelectItem key={d} value={d}>{d}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Gender</Label>
+                  <Select value={filterGender} onValueChange={(v) => setFilterGender(v as 'all' | 'Male' | 'Female')}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      <SelectItem value="Male">Male</SelectItem>
+                      <SelectItem value="Female">Female</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Session</Label>
+                  <Select value={filterSession} onValueChange={(v) => setFilterSession(v)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All</SelectItem>
+                      {sessions.map((s) => (<SelectItem key={s} value={s}>{s}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
-
-              {dateRange === 'custom' && (
-                <>
-                  <div className="space-y-2">
-                    <Label>Start Date</Label>
-                    <Input
-                      type="date"
-                      value={customStartDate}
-                      onChange={(e) => setCustomStartDate(e.target.value)}
-                      className="w-full"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>End Date</Label>
-                    <Input
-                      type="date"
-                      value={customEndDate}
-                      onChange={(e) => setCustomEndDate(e.target.value)}
-                      className="w-full"
-                    />
-                  </div>
-                </>
-              )}
-
-              <div className="space-y-2">
-                <Label>Employee ID</Label>
-                <Input
-                  type="text"
-                  value={filterEmpId}
-                  onChange={(e) => setFilterEmpId(e.target.value)}
-                  placeholder="Search by ID"
-                  className="w-full"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Department</Label>
-                <Select value={filterDept} onValueChange={(v) => setFilterDept(v)}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    {departments.map((d) => (
-                      <SelectItem key={d} value={d}>{d}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Gender</Label>
-                <Select value={filterGender} onValueChange={(v) => setFilterGender(v as 'all' | 'Male' | 'Female')}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="Male">Male</SelectItem>
-                    <SelectItem value="Female">Female</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Session</Label>
-                <Select value={filterSession} onValueChange={(v) => setFilterSession(v)}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    {sessions.map((s) => (
-                      <SelectItem key={s} value={s}>{s}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
-          </CardContent>
-        </Card>
 
         {/* Statistics */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-primary/10 p-2">
-                  <Calendar className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Bookings</p>
-                  <p className="text-2xl font-bold">{stats.totalBookings}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-blue-500/10 p-2">
-                  <Clock className="h-5 w-5 text-blue-500" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Time In</p>
-                  <p className="text-2xl font-bold">{stats.timeIn}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-red-500/10 p-2">
-                  <Users className="h-5 w-5 text-red-500" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Time Out</p>
-                  <p className="text-2xl font-bold">{stats.timeOut}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-blue-500/10 p-2">
-                  <Users className="h-5 w-5 text-blue-500" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Male</p>
-                  <p className="text-2xl font-bold">{stats.male}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="pt-6">
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-pink-500/10 p-2">
-                  <Users className="h-5 w-5 text-pink-500" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Female</p>
-                  <p className="text-2xl font-bold">{stats.female}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {statItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <div key={item.key} className="rounded-lg border bg-card p-4">
+                    <div className="flex items-center gap-3">
+                      <div className={`rounded-lg p-2 ${item.bgClass}`}>
+                        <Icon className={`h-5 w-5 ${item.iconClass}`} />
+                      </div>
+                      <div>
+                        <p className="text-sm text-muted-foreground">{item.label}</p>
+                        <p className="text-2xl font-bold">{item.value}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
 
         {/* Attendance Table */}
         <Card>
@@ -816,11 +717,11 @@ export default function ReportsPage() {
                       <TableRow key={`${record.booking_id}-${idx}`}>
                         <TableCell className="font-mono text-sm">{idx + 1}</TableCell>
                         <TableCell className="font-mono text-sm">{formatBookingId(record.booking_id)}</TableCell>
-                        <TableCell className="font-mono text-sm">{(bookingOverlayMap.get(record.booking_id)?.card_no ?? record.card_no) || '-'}</TableCell>
-                        <TableCell className="text-sm">{(bookingOverlayMap.get(record.booking_id)?.employee_name ?? (record.name ?? record.employee_name)) || '-'}</TableCell>
-                        <TableCell className="font-mono text-sm">{(bookingOverlayMap.get(record.booking_id)?.employee_id ?? record.employee_id) || '-'}</TableCell>
-                        <TableCell>{(bookingOverlayMap.get(record.booking_id)?.department ?? record.department) || '-'}</TableCell>
-                        <TableCell className="font-medium">{getGenderChip(bookingOverlayMap.get(record.booking_id)?.gender ?? record.gender)}</TableCell>
+                        <TableCell className="font-mono text-sm">{record.card_no || '-'}</TableCell>
+                        <TableCell className="text-sm">{(record.name ?? record.employee_name) || '-'}</TableCell>
+                        <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
+                        <TableCell>{record.department || '-'}</TableCell>
+                        <TableCell className="font-medium">{getGenderChip(record.gender)}</TableCell>
                         <TableCell className="font-mono text-sm">
                           {formatTimeOnly(liveTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_in ?? record.time_in)}
                         </TableCell>
@@ -829,14 +730,23 @@ export default function ReportsPage() {
                         </TableCell>
                         <TableCell className="font-medium">
                           {(() => {
-                            const s = bookingOverlayMap.get(record.booking_id);
-                            const start = s?.time_start ?? record.time_start ?? null;
-                            const end = s?.time_end ?? record.time_end ?? null;
-                            const text = start && end ? `${start} - ${end}` : start || '';
-                            return getScheduleChip(bookingOverlayMap.get(record.booking_id)?.session_name ?? record.session_name, text);
+                            const key = `${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`;
+                            const live = liveTapMap.get(key);
+                            const start = (live?.time_start ?? record.time_start) ?? null;
+                            const end = (live?.time_end ?? record.time_end) ?? null;
+                            const text = start && end ? `${start} - ${end}` : (start || '');
+                            const sess = (live?.session_name ?? record.session_name) ?? null;
+                            return getScheduleChip(sess, text);
                           })()}
                         </TableCell>
-                        <TableCell className="font-medium">{getSessionChip(record.session_name)}</TableCell>
+                        <TableCell className="font-medium">
+                          {(() => {
+                            const key = `${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`;
+                            const live = liveTapMap.get(key);
+                            const sess = (live?.session_name ?? record.session_name) ?? null;
+                            return getSessionChip(sess);
+                          })()}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -874,6 +784,9 @@ export default function ReportsPage() {
             )}
           </CardContent>
         </Card>
+          </div>
+        </CardContent>
+      </Card>
       </div>
     </AppLayout>
   );

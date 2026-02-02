@@ -254,323 +254,326 @@ export default function ManagementPage() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary">
-            <UserCog className="h-6 w-6 text-primary-foreground" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold">Management Account</h1>
-            <p className="text-muted-foreground">Manage user roles and permissions</p>
-          </div>
-        </div>
-
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2">
-              <UserPlus className="h-4 w-4" />
-              Create Account
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Account</DialogTitle>
-              <DialogDescription>Create a new user account with a specific role.</DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="username">Username</Label>
-                <Input
-                  id="username"
-                  value={newUserUsername}
-                  onChange={(e) => setNewUserUsername(e.target.value)}
-                  placeholder="Enter username"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={newUserEmail}
-                  onChange={(e) => setNewUserEmail(e.target.value)}
-                  placeholder="Enter email"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    value={newUserPassword}
-                    onChange={(e) => setNewUserPassword(e.target.value)}
-                    placeholder="Enter password (min 8, upper/lower/number/symbol)"
-                    className="pr-12"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  >
-                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                  </button>
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="confirm-password">Re-confirm Password</Label>
-                <div className="relative">
-                  <Input
-                    id="confirm-password"
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    value={newUserConfirmPassword}
-                    onChange={(e) => setNewUserConfirmPassword(e.target.value)}
-                    placeholder="Re-enter password"
-                    className="pr-12"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  >
-                    {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                  </button>
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="role">Role</Label>
-                <Select value={newUserRole} onValueChange={(value) => setNewUserRole(value as AppRole)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="superadmin">Super Admin</SelectItem>
-                    <SelectItem value="committee">Committee</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="user">User</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateUser} disabled={isCreating}>
-                {isCreating ? 'Creating...' : 'Create Account'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <Card>
-            <CardHeader className="flex flex-row items-center gap-3 pb-2">
-              <Shield className="h-5 w-5 text-destructive" />
-              <div>
-                <CardTitle className="text-lg">Super Admin</CardTitle>
-                <CardDescription>Full system access and configuration</CardDescription>
-              </div>
+        <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
+          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
+            <CardHeader>
+              <h1 className="text-2xl font-bold flex items-center gap-2">
+                <UserCog className="h-6 w-6" />
+                Management Account
+              </h1>
+              <p className="text-muted-foreground">Manage user roles and permissions</p>
             </CardHeader>
             <CardContent>
-              <p className="text-2xl font-bold">
-                {accounts.filter((a) => a.role === 'superadmin').length}
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center gap-3 pb-2">
-              <Users className="h-5 w-5 text-primary" />
-              <div>
-                <CardTitle className="text-lg">Committee</CardTitle>
-                <CardDescription>Committee members with elevated access</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">
-                {accounts.filter((a) => a.role === 'committee').length}
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>User Accounts</CardTitle>
-            <CardDescription>View and manage user roles</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-16">No</TableHead>
-                    <TableHead>Username</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Last Sign In</TableHead>
-                    <TableHead>Current Role</TableHead>
-                    <TableHead>Change Role</TableHead>
-                    <TableHead className="w-28">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {accounts.map((acc, index) => (
-                    <TableRow key={acc.account_id}>
-                      <TableCell>{index + 1}</TableCell>
-                      <TableCell className="font-medium">{acc.username}</TableCell>
-                      <TableCell>{acc.email || '-'}</TableCell>
-                      <TableCell>{acc.last_sign_in ? new Date(acc.last_sign_in).toLocaleString() : (acc.last_sign_in_at ? new Date(acc.last_sign_in_at).toLocaleString() : '-')}</TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Badge variant={getRoleBadgeVariant(acc.role)} className={getRoleBadgeClass(acc.role)}>{getRoleLabel(acc.role)}</Badge>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Select
-                          onValueChange={(value) => handleRoleChange(acc.account_id, value as AppRole)}
+              <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="gap-2">
+                    <UserPlus className="h-4 w-4" />
+                    Create Account
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Create New Account</DialogTitle>
+                    <DialogDescription>Create a new user account with a specific role.</DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="username">Username</Label>
+                      <Input
+                        id="username"
+                        value={newUserUsername}
+                        onChange={(e) => setNewUserUsername(e.target.value)}
+                        placeholder="Enter username"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="email">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={newUserEmail}
+                        onChange={(e) => setNewUserEmail(e.target.value)}
+                        placeholder="Enter email"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="password">Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          type={showPassword ? 'text' : 'password'}
+                          value={newUserPassword}
+                          onChange={(e) => setNewUserPassword(e.target.value)}
+                          placeholder="Enter password (min 8, upper/lower/number/symbol)"
+                          className="pr-12"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                         >
-                          <SelectTrigger className="w-40">
-                            <SelectValue placeholder="Select role" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="superadmin">Super Admin</SelectItem>
-                            <SelectItem value="committee">Committee</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                            <SelectItem value="user">User</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Button variant="ghost" size="icon" onClick={() => openEditDialog(acc)} aria-label="Edit user">
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => setIsDeletingUserId(acc.account_id)}
-                                aria-label="Delete user"
-                                className="text-destructive hover:text-destructive"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Delete user</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                  This removes the user from the listing and clears assigned roles.
-                                </AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel onClick={() => setIsDeletingUserId(0)}>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={handleDeleteUser}>Delete</AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                          {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="confirm-password">Re-confirm Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="confirm-password"
+                          type={showConfirmPassword ? 'text' : 'password'}
+                          value={newUserConfirmPassword}
+                          onChange={(e) => setNewUserConfirmPassword(e.target.value)}
+                          placeholder="Re-enter password"
+                          className="pr-12"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                        >
+                          {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="role">Role</Label>
+                      <Select value={newUserRole} onValueChange={(value) => setNewUserRole(value as AppRole)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="superadmin">Super Admin</SelectItem>
+                          <SelectItem value="committee">Committee</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="user">User</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={handleCreateUser} disabled={isCreating}>
+                      {isCreating ? 'Creating...' : 'Create Account'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
 
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Edit User</DialogTitle>
-              <DialogDescription>Update username and role.</DialogDescription>
-            </DialogHeader>
-            <div className="grid gap-4 py-4">
-              <div className="grid gap-2">
-                <Label htmlFor="edit-username">Username</Label>
-                <Input
-                  id="edit-username"
-                  value={editUsername}
-                  onChange={(e) => setEditUsername(e.target.value)}
-                  placeholder="Enter username"
-                />
+              <div className="grid gap-4 md:grid-cols-2">
+                <Card>
+                  <CardHeader className="flex flex-row items-center gap-3 pb-2">
+                    <Shield className="h-5 w-5 text-destructive" />
+                    <div>
+                      <CardTitle className="text-lg">Super Admin</CardTitle>
+                      <CardDescription>Full system access and configuration</CardDescription>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-2xl font-bold">
+                      {accounts.filter((a) => a.role === 'superadmin').length}
+                    </p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="flex flex-row items-center gap-3 pb-2">
+                    <Users className="h-5 w-5 text-primary" />
+                    <div>
+                      <CardTitle className="text-lg">Committee</CardTitle>
+                      <CardDescription>Committee members with elevated access</CardDescription>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-2xl font-bold">
+                      {accounts.filter((a) => a.role === 'committee').length}
+                    </p>
+                  </CardContent>
+                </Card>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-email">Email</Label>
-                <Input
-                  id="edit-email"
-                  type="email"
-                  value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
-                  placeholder="Enter email (admin-managed)"
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-password">Password</Label>
-                <div className="relative">
-                  <Input
-                    id="edit-password"
-                    type={showEditPassword ? 'text' : 'password'}
-                    value={editPassword}
-                    onChange={(e) => setEditPassword(e.target.value)}
-                    placeholder="Set new password (min 8, upper/lower/number/symbol)"
-                    className="pr-12"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowEditPassword(!showEditPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  >
-                    {showEditPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                  </button>
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-confirm-password">Re-confirm Password</Label>
-                <div className="relative">
-                  <Input
-                    id="edit-confirm-password"
-                    type={showEditConfirmPassword ? 'text' : 'password'}
-                    value={editConfirmPassword}
-                    onChange={(e) => setEditConfirmPassword(e.target.value)}
-                    placeholder="Re-enter new password"
-                    className="pr-12"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowEditConfirmPassword(!showEditConfirmPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  >
-                    {showEditConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                  </button>
-                </div>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="edit-role">Role</Label>
-                <Select value={editRole} onValueChange={(value) => setEditRole(value as AppRole)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="superadmin">Super Admin</SelectItem>
-                    <SelectItem value="committee">Committee</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="user">User</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleUpdateUser}>Save Changes</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>User Accounts</CardTitle>
+                  <CardDescription>View and manage user roles</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {isLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-16">No</TableHead>
+                          <TableHead>Username</TableHead>
+                          <TableHead>Email</TableHead>
+                          <TableHead>Last Sign In</TableHead>
+                          <TableHead>Current Role</TableHead>
+                          <TableHead>Change Role</TableHead>
+                          <TableHead className="w-28">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {accounts.map((acc, index) => (
+                          <TableRow key={acc.account_id}>
+                            <TableCell>{index + 1}</TableCell>
+                            <TableCell className="font-medium">{acc.username}</TableCell>
+                            <TableCell>{acc.email || '-'}</TableCell>
+                            <TableCell>{acc.last_sign_in ? new Date(acc.last_sign_in).toLocaleString() : (acc.last_sign_in_at ? new Date(acc.last_sign_in_at).toLocaleString() : '-')}</TableCell>
+                            <TableCell>
+                              <div className="flex gap-1">
+                                <Badge variant={getRoleBadgeVariant(acc.role)} className={getRoleBadgeClass(acc.role)}>{getRoleLabel(acc.role)}</Badge>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Select
+                                onValueChange={(value) => handleRoleChange(acc.account_id, value as AppRole)}
+                              >
+                                <SelectTrigger className="w-40">
+                                  <SelectValue placeholder="Select role" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="superadmin">Super Admin</SelectItem>
+                                  <SelectItem value="committee">Committee</SelectItem>
+                                  <SelectItem value="admin">Admin</SelectItem>
+                                  <SelectItem value="user">User</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Button variant="ghost" size="icon" onClick={() => openEditDialog(acc)} aria-label="Edit user">
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => setIsDeletingUserId(acc.account_id)}
+                                      aria-label="Delete user"
+                                      className="text-destructive hover:text-destructive"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader>
+                                      <AlertDialogTitle>Delete user</AlertDialogTitle>
+                                      <AlertDialogDescription>
+                                        This removes the user from the listing and clears assigned roles.
+                                      </AlertDialogDescription>
+                                    </AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel onClick={() => setIsDeletingUserId(0)}>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction onClick={handleDeleteUser}>Delete</AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Edit User</DialogTitle>
+                    <DialogDescription>Update username and role.</DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-username">Username</Label>
+                      <Input
+                        id="edit-username"
+                        value={editUsername}
+                        onChange={(e) => setEditUsername(e.target.value)}
+                        placeholder="Enter username"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-email">Email</Label>
+                      <Input
+                        id="edit-email"
+                        type="email"
+                        value={editEmail}
+                        onChange={(e) => setEditEmail(e.target.value)}
+                        placeholder="Enter email (admin-managed)"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-password">Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="edit-password"
+                          type={showEditPassword ? 'text' : 'password'}
+                          value={editPassword}
+                          onChange={(e) => setEditPassword(e.target.value)}
+                          placeholder="Set new password (min 8, upper/lower/number/symbol)"
+                          className="pr-12"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowEditPassword(!showEditPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                        >
+                          {showEditPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-confirm-password">Re-confirm Password</Label>
+                      <div className="relative">
+                        <Input
+                          id="edit-confirm-password"
+                          type={showEditConfirmPassword ? 'text' : 'password'}
+                          value={editConfirmPassword}
+                          onChange={(e) => setEditConfirmPassword(e.target.value)}
+                          placeholder="Re-enter new password"
+                          className="pr-12"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowEditConfirmPassword(!showEditConfirmPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                        >
+                          {showEditConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="edit-role">Role</Label>
+                      <Select value={editRole} onValueChange={(value) => setEditRole(value as AppRole)}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select role" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="superadmin">Super Admin</SelectItem>
+                          <SelectItem value="committee">Committee</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="user">User</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
+                    <Button onClick={handleUpdateUser}>Save Changes</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </AppLayout>
   );

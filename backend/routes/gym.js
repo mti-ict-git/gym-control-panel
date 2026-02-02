@@ -20,6 +20,7 @@ async function getGymDbPool(config) {
 
 const gymBookingsCache = new Map();
 const gymSessionsCache = new Map();
+const gymReportsCache = new Map();
 
 router.get('/env-dump', (req, res) => {
   const out = {
@@ -155,6 +156,18 @@ router.post('/gym-reports-init', async (req, res) => {
       );
       await pool.request().query(
         "IF COL_LENGTH('dbo.gym_reports', 'TimeEnd') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD TimeEnd VARCHAR(5) NULL END"
+      );
+      await pool.request().query(
+        "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_reports_Department' AND object_id = OBJECT_ID('dbo.gym_reports')) BEGIN CREATE INDEX IX_gym_reports_Department ON dbo.gym_reports(Department) END"
+      );
+      await pool.request().query(
+        "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_reports_Gender' AND object_id = OBJECT_ID('dbo.gym_reports')) BEGIN CREATE INDEX IX_gym_reports_Gender ON dbo.gym_reports(Gender) END"
+      );
+      await pool.request().query(
+        "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_reports_SessionName' AND object_id = OBJECT_ID('dbo.gym_reports')) BEGIN CREATE INDEX IX_gym_reports_SessionName ON dbo.gym_reports(SessionName) END"
+      );
+      await pool.request().query(
+        "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_reports_Name' AND object_id = OBJECT_ID('dbo.gym_reports')) BEGIN CREATE INDEX IX_gym_reports_Name ON dbo.gym_reports(Name) END"
       );
     }
 
@@ -4312,6 +4325,21 @@ router.get('/gym-live-status-range', async (req, res) => {
          GROUP BY EmployeeID, CAST(TxnTime AS date)`
       );
 
+      const reqB = pool.request();
+      reqB.input('from', sql.Date, fromSafe);
+      reqB.input('to', sql.Date, toSafe);
+      const bookingsRes = await reqB.query(
+        `SELECT
+          gb.EmployeeID AS employee_id,
+          gb.BookingDate AS booking_date,
+          s.Session AS session_name,
+          CONVERT(varchar(5), s.StartTime, 108) AS time_start,
+          CONVERT(varchar(5), s.EndTime, 108) AS time_end
+        FROM dbo.gym_booking gb
+        LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
+        WHERE gb.BookingDate BETWEEN @from AND @to AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')`
+      );
+
       const pad2 = (n) => String(n).padStart(2, '0');
       const pad3 = (n) => String(n).padStart(3, '0');
       const toUtc8Iso = (d) => {
@@ -4333,12 +4361,27 @@ router.get('/gym-live-status-range', async (req, res) => {
         return `${y}-${m}-${day}`;
       };
 
+      const toYmd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const scheduleMap = new Map(
+        (Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset : []).map((b) => {
+          const empId = b?.employee_id != null ? String(b.employee_id).trim() : '';
+          const dt = b?.booking_date instanceof Date ? b.booking_date : (b?.booking_date ? new Date(String(b.booking_date)) : null);
+          const key = empId && dt ? `${empId}__${toYmd(dt)}` : '';
+          const sess = b?.session_name != null ? String(b.session_name).trim() : null;
+          const ts = b?.time_start != null ? String(b.time_start).trim() : null;
+          const te = b?.time_end != null ? String(b.time_end).trim() : null;
+          return [key, { session_name: sess, time_start: ts, time_end: te }];
+        })
+      );
+
       const taps = (Array.isArray(aggRes?.recordset) ? aggRes.recordset : []).map((r) => {
         const empId = r?.employee_id != null ? String(r.employee_id).trim() : '';
         const dt = r?.tap_date instanceof Date ? r.tap_date : (r?.tap_date ? new Date(String(r.tap_date)) : null);
         const ti = r?.time_in instanceof Date ? r.time_in : (r?.time_in ? new Date(String(r.time_in)) : null);
         const to = r?.time_out instanceof Date ? r.time_out : (r?.time_out ? new Date(String(r.time_out)) : null);
-        return { employee_id: empId, date: dt ? padDate(dt) : '', time_in: toUtc8Iso(ti), time_out: toUtc8Iso(to) };
+        const key = empId && dt ? `${empId}__${toYmd(dt)}` : '';
+        const sched = key ? scheduleMap.get(key) || { session_name: null, time_start: null, time_end: null } : { session_name: null, time_start: null, time_end: null };
+        return { employee_id: empId, date: dt ? padDate(dt) : '', time_in: toUtc8Iso(ti), time_out: toUtc8Iso(to), session_name: sched.session_name, time_start: sched.time_start, time_end: sched.time_end };
       }).filter((t) => t.employee_id && t.date);
 
       const payload = { ok: true, taps };
@@ -4614,6 +4657,12 @@ router.get('/gym-reports', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
   try {
+    const cacheKey = [fromStr, toStr, page, limit, sortKeyRaw, sortDirRaw, empFilter, deptFilter, genderFilterRaw, sessionFilter].map((x) => String(x)).join('|');
+    const cached = gymReportsCache.get(cacheKey);
+    const nowMs = Date.now();
+    if (cached && nowMs - cached.atMs < 2000) {
+      return res.json(cached.payload);
+    }
     const pool = await new sql.ConnectionPool(config).connect();
 
     const colsQ = await pool.request().query("SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='gym_reports'");
@@ -4682,7 +4731,6 @@ router.get('/gym-reports', async (req, res) => {
     reqData.input('offset', sql.Int, offset);
     reqData.input('limit', sql.Int, limit);
 
-    const countSql = `SELECT COUNT(1) AS total FROM dbo.gym_reports ${whereClause}`;
     const aggSql = `SELECT
         COUNT(1) AS total,
         SUM(CASE WHEN [TimeIn] IS NOT NULL THEN 1 ELSE 0 END) AS time_in_total,
@@ -4707,19 +4755,20 @@ router.get('/gym-reports', async (req, res) => {
 
     const dataSql = `SELECT ${selectCols.join(', ')} FROM dbo.gym_reports ${whereClause} ORDER BY ${orderSql} OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
 
-    const countRes = await reqCount.query(countSql);
     const aggRes = await reqCount.query(aggSql);
     const dataRes = await reqData.query(dataSql);
 
     await pool.close();
-    const total = Number(countRes?.recordset?.[0]?.total || 0);
+    const total = Number(aggRes?.recordset?.[0]?.total || 0);
     const aggRow = Array.isArray(aggRes?.recordset) ? aggRes.recordset[0] : {};
     const timeInTotal = Number(aggRow?.time_in_total || 0);
     const timeOutTotal = Number(aggRow?.time_out_total || 0);
     const maleTotal = Number(aggRow?.male_total || 0);
     const femaleTotal = Number(aggRow?.female_total || 0);
     const reports = Array.isArray(dataRes?.recordset) ? dataRes.recordset : [];
-    return res.json({ ok: true, total, time_in_total: timeInTotal, time_out_total: timeOutTotal, male_total: maleTotal, female_total: femaleTotal, reports });
+    const payload = { ok: true, total, time_in_total: timeInTotal, time_out_total: timeOutTotal, male_total: maleTotal, female_total: femaleTotal, reports };
+    gymReportsCache.set(cacheKey, { atMs: nowMs, payload });
+    return res.json(payload);
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, reports: [] });

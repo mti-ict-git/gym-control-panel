@@ -130,54 +130,62 @@ export default function ProfileSettings() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Profile</h1>
-        <p className="text-muted-foreground">Manage your account information</p>
+      <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
+        <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
+          <CardHeader>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <User className="h-6 w-6" />
+              Profile
+            </h1>
+            <p className="text-muted-foreground">Manage your account information</p>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <User className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle className="text-lg">Admin Profile</CardTitle>
+                </div>
+                <CardDescription>Your account information</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary text-primary-foreground text-2xl font-semibold">
+                    {displayName.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="font-medium text-xl">{displayName}</p>
+                    <p className="text-sm text-muted-foreground">{user?.email}</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
+                  <div>
+                    <p className="text-sm text-muted-foreground">User ID</p>
+                    <p className="font-mono text-sm truncate">{user?.account_id ?? 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Last Sign In</p>
+                    <p className="text-sm">{accountInfo?.last_sign_in ? formatDateTimeLocal(accountInfo.last_sign_in) : (accountInfo?.last_sign_in_at ? formatDateTimeLocal(accountInfo.last_sign_in_at) : lastSignIn)}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Last Sign In (legacy)</p>
+                    <p className="text-sm">{accountInfo?.last_sign_in_at ? formatDateTimeLocal(accountInfo.last_sign_in_at) : 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Account Created</p>
+                    <p className="text-sm">{accountInfo?.created_at ? formatDateTimeLocal(accountInfo.created_at) : 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Email Verified</p>
+                    <p className="text-sm">{accountInfo?.email_verified ? 'Yes' : 'No'}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </CardContent>
+        </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <User className="h-5 w-5 text-muted-foreground" />
-            <CardTitle className="text-lg">Admin Profile</CardTitle>
-          </div>
-          <CardDescription>Your account information</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center gap-4">
-            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary text-primary-foreground text-2xl font-semibold">
-              {displayName.charAt(0).toUpperCase()}
-            </div>
-            <div>
-              <p className="font-medium text-xl">{displayName}</p>
-              <p className="text-sm text-muted-foreground">{user?.email}</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
-            <div>
-              <p className="text-sm text-muted-foreground">User ID</p>
-              <p className="font-mono text-sm truncate">{user?.account_id ?? 'N/A'}</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Last Sign In</p>
-              <p className="text-sm">{accountInfo?.last_sign_in ? formatDateTimeLocal(accountInfo.last_sign_in) : (accountInfo?.last_sign_in_at ? formatDateTimeLocal(accountInfo.last_sign_in_at) : lastSignIn)}</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Last Sign In (legacy)</p>
-              <p className="text-sm">{accountInfo?.last_sign_in_at ? formatDateTimeLocal(accountInfo.last_sign_in_at) : 'N/A'}</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Account Created</p>
-              <p className="text-sm">{accountInfo?.created_at ? formatDateTimeLocal(accountInfo.created_at) : 'N/A'}</p>
-            </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Email Verified</p>
-              <p className="text-sm">{accountInfo?.email_verified ? 'Yes' : 'No'}</p>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

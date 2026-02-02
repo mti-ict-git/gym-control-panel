@@ -5,6 +5,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
 import { GymSession, formatTime } from '@/hooks/useGymSessions';
@@ -114,165 +115,171 @@ export default function SchedulesPage() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Schedules</h1>
-            <p className="text-muted-foreground">Manage gym sessions and view calendar.</p>
-          </div>
-        </div>
+        <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
+          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
+            <CardHeader>
+              <CardTitle className="text-2xl flex items-center gap-2">
+                <CalendarIcon className="h-6 w-6" />
+                Schedules
+              </CardTitle>
+              <CardDescription>Manage gym sessions and view calendar.</CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1">
+              <Tabs defaultValue="sessions" className="w-full">
+                <TabsList>
+                  <TabsTrigger value="sessions" className="flex items-center gap-2">
+                    <List className="h-4 w-4" />
+                    Sessions
+                  </TabsTrigger>
+                  <TabsTrigger value="calendar" className="flex items-center gap-2">
+                    <CalendarIcon className="h-4 w-4" />
+                    Calendar
+                  </TabsTrigger>
+                </TabsList>
 
-        <Tabs defaultValue="sessions" className="w-full">
-          <TabsList>
-            <TabsTrigger value="sessions" className="flex items-center gap-2">
-              <List className="h-4 w-4" />
-              Sessions
-            </TabsTrigger>
-            <TabsTrigger value="calendar" className="flex items-center gap-2">
-              <CalendarIcon className="h-4 w-4" />
-              Calendar
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="sessions" className="space-y-4 mt-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="relative w-full md:w-80">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                  placeholder="Search session name or time (HH:MM)"
-                  className="pl-9"
-                />
-              </div>
-              <Button onClick={() => setSessionDialogOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Create Session
-              </Button>
-            </div>
-            {isLoading ? (
-              <div className="space-y-4">
-                <Skeleton className="h-12 w-full" />
-                <Skeleton className="h-12 w-full" />
-                <Skeleton className="h-12 w-full" />
-              </div>
-            ) : sessions && sessions.length > 0 ? (
-              <div className="space-y-2">
-              <div className="rounded-lg border bg-card overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-16">No</TableHead>
-                      <TableHead>
-                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('session_name')}>
-                          Session
-                          <SortIndicator active={sortBy === 'session_name'} dir={sortDir} />
-                        </button>
-                      </TableHead>
-                      <TableHead>
-                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('time_start')}>
-                          Time Start
-                          <SortIndicator active={sortBy === 'time_start'} dir={sortDir} />
-                        </button>
-                      </TableHead>
-                      <TableHead>
-                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('time_end')}>
-                          Time End
-                          <SortIndicator active={sortBy === 'time_end'} dir={sortDir} />
-                        </button>
-                      </TableHead>
-                      <TableHead>
-                        <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('quota')}>
-                          Quota
-                          <SortIndicator active={sortBy === 'quota'} dir={sortDir} />
-                        </button>
-                      </TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sessions.map((session, index) => (
-                      <TableRow key={`${session.session_name}-${session.time_start}-${index}`}>
-                        <TableCell className="font-medium">{(page - 1) * pageSize + index + 1}</TableCell>
-                        <TableCell className="font-medium"><SessionBadge name={session.session_name} /></TableCell>
-                        <TableCell>{formatTime(session.time_start)}</TableCell>
-                        <TableCell>{session.time_end ? formatTime(session.time_end) : '-'}</TableCell>
-                        <TableCell>{session.quota}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setEditingSession(session);
-                                setEditDialogOpen(true);
-                              }}
-                              title="Edit"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive hover:text-destructive"
-                              onClick={() => {
-                                setDeletingSession(session);
-                                setDeleteDialogOpen(true);
-                              }}
-                              title="Delete"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Rows per page</span>
-                  <Tabs value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
-                    <TabsList>
-                      <TabsTrigger value="6">6</TabsTrigger>
-                      <TabsTrigger value="10">10</TabsTrigger>
-                      <TabsTrigger value="20">20</TabsTrigger>
-                      <TabsTrigger value="50">50</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-muted-foreground">Page {page} of {Math.max(1, Math.ceil(totalCount / pageSize))}</span>
-                  <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>Prev</Button>
-                  <Button variant="outline" size="sm" onClick={() => setPage((p) => (p < Math.ceil(totalCount / pageSize) ? p + 1 : p))} disabled={page >= Math.ceil(totalCount / pageSize)}>Next</Button>
-                </div>
-              </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center py-16">
-                <div className="flex flex-col items-center justify-center p-8 bg-card rounded-xl shadow-sm border max-w-md text-center">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10 mb-4">
-                    <CalendarIcon className="h-8 w-8 text-primary" />
+                <TabsContent value="sessions" className="space-y-4 mt-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="relative w-full md:w-80">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={search}
+                        onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                        placeholder="Search session name or time (HH:MM)"
+                        className="pl-9"
+                      />
+                    </div>
+                    <Button onClick={() => setSessionDialogOpen(true)}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create Session
+                    </Button>
                   </div>
-                  <h3 className="text-lg font-semibold mb-2">Belum ada jadwal gym</h3>
-                  <p className="text-sm text-muted-foreground mb-6">
-                    Buat jadwal gym untuk mulai mengatur sesi dan kuota.
-                  </p>
-                  <Button onClick={() => setSessionDialogOpen(true)} className="gap-2">
-                    <Plus className="h-4 w-4" />
-                    Buat Jadwal Gym
-                  </Button>
-                </div>
-              </div>
-            )}
-          </TabsContent>
+                  {isLoading ? (
+                    <div className="space-y-4">
+                      <Skeleton className="h-12 w-full" />
+                      <Skeleton className="h-12 w-full" />
+                      <Skeleton className="h-12 w-full" />
+                    </div>
+                  ) : sessions && sessions.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="rounded-lg border bg-card overflow-hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead className="w-16">No</TableHead>
+                              <TableHead>
+                                <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('session_name')}>
+                                  Session
+                                  <SortIndicator active={sortBy === 'session_name'} dir={sortDir} />
+                                </button>
+                              </TableHead>
+                              <TableHead>
+                                <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('time_start')}>
+                                  Time Start
+                                  <SortIndicator active={sortBy === 'time_start'} dir={sortDir} />
+                                </button>
+                              </TableHead>
+                              <TableHead>
+                                <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('time_end')}>
+                                  Time End
+                                  <SortIndicator active={sortBy === 'time_end'} dir={sortDir} />
+                                </button>
+                              </TableHead>
+                              <TableHead>
+                                <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('quota')}>
+                                  Quota
+                                  <SortIndicator active={sortBy === 'quota'} dir={sortDir} />
+                                </button>
+                              </TableHead>
+                              <TableHead className="text-right">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {sessions.map((session, index) => (
+                              <TableRow key={`${session.session_name}-${session.time_start}-${index}`}>
+                                <TableCell className="font-medium">{(page - 1) * pageSize + index + 1}</TableCell>
+                                <TableCell className="font-medium"><SessionBadge name={session.session_name} /></TableCell>
+                                <TableCell>{formatTime(session.time_start)}</TableCell>
+                                <TableCell>{session.time_end ? formatTime(session.time_end) : '-'}</TableCell>
+                                <TableCell>{session.quota}</TableCell>
+                                <TableCell className="text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => {
+                                        setEditingSession(session);
+                                        setEditDialogOpen(true);
+                                      }}
+                                      title="Edit"
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="text-destructive hover:text-destructive"
+                                      onClick={() => {
+                                        setDeletingSession(session);
+                                        setDeleteDialogOpen(true);
+                                      }}
+                                      title="Delete"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-muted-foreground">Rows per page</span>
+                          <Tabs value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
+                            <TabsList>
+                              <TabsTrigger value="6">6</TabsTrigger>
+                              <TabsTrigger value="10">10</TabsTrigger>
+                              <TabsTrigger value="20">20</TabsTrigger>
+                              <TabsTrigger value="50">50</TabsTrigger>
+                            </TabsList>
+                          </Tabs>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm text-muted-foreground">Page {page} of {Math.max(1, Math.ceil(totalCount / pageSize))}</span>
+                          <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>Prev</Button>
+                          <Button variant="outline" size="sm" onClick={() => setPage((p) => (p < Math.ceil(totalCount / pageSize) ? p + 1 : p))} disabled={page >= Math.ceil(totalCount / pageSize)}>Next</Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center py-16">
+                      <div className="flex flex-col items-center justify-center p-8 bg-card rounded-xl shadow-sm border max-w-md text-center">
+                        <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10 mb-4">
+                          <CalendarIcon className="h-8 w-8 text-primary" />
+                        </div>
+                        <h3 className="text-lg font-semibold mb-2">Belum ada jadwal gym</h3>
+                        <p className="text-sm text-muted-foreground mb-6">
+                          Buat jadwal gym untuk mulai mengatur sesi dan kuota.
+                        </p>
+                        <Button onClick={() => setSessionDialogOpen(true)} className="gap-2">
+                          <Plus className="h-4 w-4" />
+                          Buat Jadwal Gym
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>
 
-          <TabsContent value="calendar" className="mt-4">
-            <WeeklyCalendar 
-              sessions={calendarSessions} 
-            />
-          </TabsContent>
-        </Tabs>
+                <TabsContent value="calendar" className="mt-4">
+                  <WeeklyCalendar 
+                    sessions={calendarSessions} 
+                  />
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
 
