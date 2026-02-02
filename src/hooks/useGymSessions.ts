@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
 export interface GymSession {
   id: string;
+  schedule_id?: number;
   session_name: string;
   time_start: string;
   time_end: string;
@@ -32,8 +33,9 @@ export function useGymSessionsList() {
       const resp = await fetch('/api/gym-sessions').catch(() => fetch('/gym-sessions'));
       const json = await resp.json();
       if (!json.ok) throw new Error(json.error || 'Failed to load sessions');
-      const sessions = (json.sessions || []).map((s: { session_name: string; time_start: string; time_end: string | null; quota: number }, idx: number) => ({
+      const sessions = (json.sessions || []).map((s: { schedule_id?: number; session_name: string; time_start: string; time_end: string | null; quota: number }, idx: number) => ({
         id: `gymdb-${s.session_name}-${s.time_start}-${idx}`,
+        schedule_id: Number(s.schedule_id || 0) || undefined,
         session_name: s.session_name,
         time_start: s.time_start,
         time_end: s.time_end ?? s.time_start,

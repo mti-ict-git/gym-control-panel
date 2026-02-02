@@ -363,13 +363,14 @@ router.get('/gym-sessions', async (req, res) => {
     reqData.input('limit', sql.Int, limit);
 
     const countSql = `SELECT COUNT(1) AS total FROM dbo.gym_schedule ${whereClause}`;
-    const dataSql = `SELECT Session AS session_name, CONVERT(varchar(5), StartTime, 108) AS time_start, CONVERT(varchar(5), EndTime, 108) AS time_end, Quota AS quota FROM dbo.gym_schedule ${whereClause} ORDER BY ${orderSql} OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
+    const dataSql = `SELECT ScheduleID AS schedule_id, Session AS session_name, CONVERT(varchar(5), StartTime, 108) AS time_start, CONVERT(varchar(5), EndTime, 108) AS time_end, Quota AS quota FROM dbo.gym_schedule ${whereClause} ORDER BY ${orderSql} OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
 
     const countRes = await reqCount.query(countSql);
     const result = await reqData.query(dataSql);
 
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
     const sessions = rows.map((r) => ({
+      schedule_id: Number(r.schedule_id || 0) || 0,
       session_name: String(r.session_name),
       time_start: String(r.time_start),
       time_end: r.time_end ? String(r.time_end) : null,
@@ -3559,6 +3560,222 @@ router.post('/gym-access-committee-remove', async (req, res) => {
     await pool.close();
 
     return res.json({ ok: true, employee_id: employeeId, unit_no: unitNo });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+// Committee duty roster
+router.get('/gym-committee-roster', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+  const unitNo = String(req.query.unit_no || '').trim() || envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+  const dateRaw = String(req.query.date || '').trim();
+  if (!dateRaw) {
+    return res.status(400).json({ ok: false, error: 'date is required (yyyy-MM-dd)' });
+  }
+  const dutyDate = new Date(dateRaw);
+  if (isNaN(dutyDate.getTime())) {
+    return res.status(400).json({ ok: false, error: 'Invalid date format' });
+  }
+
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 3, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const exec = async (q) => { await pool.request().query(q); };
+    await exec(`IF OBJECT_ID('dbo.gym_committee_roster','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_committee_roster (
+        RosterID INT IDENTITY(1,1) NOT NULL,
+        UnitNo VARCHAR(20) NOT NULL,
+        DutyDate DATE NOT NULL,
+        ScheduleID INT NOT NULL,
+        EmployeeID VARCHAR(20) NOT NULL,
+        IsActive BIT NOT NULL CONSTRAINT DF_gym_committee_roster_IsActive DEFAULT 1,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_committee_roster_CreatedAt DEFAULT GETDATE(),
+        UpdatedAt DATETIME NULL,
+        CONSTRAINT PK_gym_committee_roster PRIMARY KEY (RosterID)
+      );
+    END`);
+    await exec(`IF NOT EXISTS (
+      SELECT 1 FROM sys.indexes WHERE name = 'UQ_gym_committee_roster_Unit_Date_Schedule_Emp'
+        AND object_id = OBJECT_ID('dbo.gym_committee_roster')
+    ) BEGIN
+      CREATE UNIQUE INDEX UQ_gym_committee_roster_Unit_Date_Schedule_Emp
+      ON dbo.gym_committee_roster (UnitNo, DutyDate, ScheduleID, EmployeeID);
+    END`);
+
+    const req1 = pool.request();
+    req1.input('unit', sql.VarChar(20), unitNo);
+    req1.input('date', sql.Date, dutyDate);
+    const r = await req1.query(`SELECT
+        r.RosterID AS roster_id,
+        r.EmployeeID AS employee_id,
+        r.UnitNo AS unit_no,
+        r.DutyDate AS duty_date,
+        r.ScheduleID AS schedule_id,
+        s.Session AS session_name,
+        CONVERT(varchar(5), s.StartTime, 108) AS time_start,
+        CONVERT(varchar(5), s.EndTime, 108) AS time_end,
+        r.CreatedAt AS created_at,
+        r.UpdatedAt AS updated_at
+      FROM dbo.gym_committee_roster r
+      LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = r.ScheduleID
+      WHERE r.UnitNo = @unit AND r.DutyDate = @date AND r.IsActive = 1
+      ORDER BY s.StartTime ASC, r.EmployeeID ASC`);
+    await pool.close();
+    const rows = Array.isArray(r?.recordset) ? r.recordset : [];
+    const roster = rows.map((x) => ({
+      roster_id: Number(x.roster_id || 0) || 0,
+      employee_id: String(x.employee_id || '').trim(),
+      unit_no: String(x.unit_no || '').trim(),
+      duty_date: x.duty_date ? new Date(x.duty_date).toISOString().slice(0, 10) : dateRaw,
+      schedule_id: Number(x.schedule_id || 0) || 0,
+      session_name: String(x.session_name || '').trim(),
+      time_start: String(x.time_start || '').trim(),
+      time_end: String(x.time_end || '').trim(),
+      created_at: x.created_at ? new Date(x.created_at).toISOString() : null,
+      updated_at: x.updated_at ? new Date(x.updated_at).toISOString() : null,
+    })).filter((r) => r.employee_id && r.schedule_id);
+    return res.json({ ok: true, unit_no: unitNo, date: dateRaw, roster });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, roster: [] });
+  }
+});
+
+router.post('/gym-committee-roster-assign', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+  const unitNo = (req?.body?.unit_no != null ? String(req.body.unit_no).trim() : '') || envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+  const employeeId = req?.body?.employee_id != null ? String(req.body.employee_id).trim() : '';
+  const scheduleId = Number(req?.body?.schedule_id != null ? Number(req.body.schedule_id) : NaN);
+  const dateRaw = req?.body?.duty_date != null ? String(req.body.duty_date).trim() : '';
+  const dutyDate = dateRaw ? new Date(dateRaw) : null;
+  if (!employeeId || !Number.isFinite(scheduleId) || !dutyDate || isNaN(dutyDate.getTime())) {
+    return res.status(400).json({ ok: false, error: 'employee_id, schedule_id, duty_date are required' });
+  }
+
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 3, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const exec = async (q) => { await pool.request().query(q); };
+    await exec(`IF OBJECT_ID('dbo.gym_committee_roster','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_committee_roster (
+        RosterID INT IDENTITY(1,1) NOT NULL,
+        UnitNo VARCHAR(20) NOT NULL,
+        DutyDate DATE NOT NULL,
+        ScheduleID INT NOT NULL,
+        EmployeeID VARCHAR(20) NOT NULL,
+        IsActive BIT NOT NULL CONSTRAINT DF_gym_committee_roster_IsActive DEFAULT 1,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_committee_roster_CreatedAt DEFAULT GETDATE(),
+        UpdatedAt DATETIME NULL,
+        CONSTRAINT PK_gym_committee_roster PRIMARY KEY (RosterID)
+      );
+    END`);
+    await exec(`IF NOT EXISTS (
+      SELECT 1 FROM sys.indexes WHERE name = 'UQ_gym_committee_roster_Unit_Date_Schedule_Emp'
+        AND object_id = OBJECT_ID('dbo.gym_committee_roster')
+    ) BEGIN
+      CREATE UNIQUE INDEX UQ_gym_committee_roster_Unit_Date_Schedule_Emp
+      ON dbo.gym_committee_roster (UnitNo, DutyDate, ScheduleID, EmployeeID);
+    END`);
+
+    const reqCount = pool.request();
+    reqCount.input('unit', sql.VarChar(20), unitNo);
+    reqCount.input('date', sql.Date, dutyDate);
+    reqCount.input('schedule', sql.Int, scheduleId);
+    const countRes = await reqCount.query(`SELECT COUNT(1) AS total FROM dbo.gym_committee_roster WHERE UnitNo=@unit AND DutyDate=@date AND ScheduleID=@schedule AND IsActive = 1`);
+    const totalActive = Number(countRes?.recordset?.[0]?.total || 0);
+    if (totalActive >= 2) {
+      await pool.close();
+      return res.status(200).json({ ok: false, error: 'Maksimal 2 penjaga untuk sesi ini' });
+    }
+
+    const req1 = pool.request();
+    req1.input('unit', sql.VarChar(20), unitNo);
+    req1.input('date', sql.Date, dutyDate);
+    req1.input('schedule', sql.Int, scheduleId);
+    req1.input('emp', sql.VarChar(20), employeeId);
+    await req1.query(`IF EXISTS (
+        SELECT 1 FROM dbo.gym_committee_roster WHERE UnitNo=@unit AND DutyDate=@date AND ScheduleID=@schedule AND EmployeeID=@emp
+      )
+      UPDATE dbo.gym_committee_roster SET IsActive=1, UpdatedAt=SYSDATETIME() WHERE UnitNo=@unit AND DutyDate=@date AND ScheduleID=@schedule AND EmployeeID=@emp
+    ELSE
+      INSERT INTO dbo.gym_committee_roster (UnitNo, DutyDate, ScheduleID, EmployeeID, IsActive, UpdatedAt)
+      VALUES (@unit, @date, @schedule, @emp, 1, SYSDATETIME())`);
+    await pool.close();
+    return res.json({ ok: true, employee_id: employeeId, schedule_id: scheduleId, duty_date: dateRaw, unit_no: unitNo });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.post('/gym-committee-roster-remove', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+  const unitNo = (req?.body?.unit_no != null ? String(req.body.unit_no).trim() : '') || envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+  const employeeId = req?.body?.employee_id != null ? String(req.body.employee_id).trim() : '';
+  const scheduleId = Number(req?.body?.schedule_id != null ? Number(req.body.schedule_id) : NaN);
+  const dateRaw = req?.body?.duty_date != null ? String(req.body.duty_date).trim() : '';
+  const dutyDate = dateRaw ? new Date(dateRaw) : null;
+  if (!employeeId || !Number.isFinite(scheduleId) || !dutyDate || isNaN(dutyDate.getTime())) {
+    return res.status(400).json({ ok: false, error: 'employee_id, schedule_id, duty_date are required' });
+  }
+
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 3, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    const exec = async (q) => { await pool.request().query(q); };
+    await exec(`IF OBJECT_ID('dbo.gym_committee_roster','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_committee_roster (
+        RosterID INT IDENTITY(1,1) NOT NULL,
+        UnitNo VARCHAR(20) NOT NULL,
+        DutyDate DATE NOT NULL,
+        ScheduleID INT NOT NULL,
+        EmployeeID VARCHAR(20) NOT NULL,
+        IsActive BIT NOT NULL CONSTRAINT DF_gym_committee_roster_IsActive DEFAULT 1,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_committee_roster_CreatedAt DEFAULT GETDATE(),
+        UpdatedAt DATETIME NULL,
+        CONSTRAINT PK_gym_committee_roster PRIMARY KEY (RosterID)
+      );
+    END`);
+    const req1 = pool.request();
+    req1.input('unit', sql.VarChar(20), unitNo);
+    req1.input('date', sql.Date, dutyDate);
+    req1.input('schedule', sql.Int, scheduleId);
+    req1.input('emp', sql.VarChar(20), employeeId);
+    await req1.query(`IF EXISTS (
+        SELECT 1 FROM dbo.gym_committee_roster WHERE UnitNo=@unit AND DutyDate=@date AND ScheduleID=@schedule AND EmployeeID=@emp
+      )
+      UPDATE dbo.gym_committee_roster SET IsActive=0, UpdatedAt=SYSDATETIME() WHERE UnitNo=@unit AND DutyDate=@date AND ScheduleID=@schedule AND EmployeeID=@emp`);
+    await pool.close();
+    return res.json({ ok: true, employee_id: employeeId, schedule_id: scheduleId, duty_date: dateRaw, unit_no: unitNo });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });

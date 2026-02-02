@@ -124,6 +124,41 @@ export function WeeklyCalendar({ sessions, onCreateSession, onSelectSession }: W
     staleTime: 30_000,
   });
 
+  const { data: weekRoster } = useQuery({
+    queryKey: ['gym-committee-roster-week', weekStartKey],
+    queryFn: async (): Promise<Record<string, Record<number, number>>> => {
+      const fetchOneDay = async (dateKey: string) => {
+        const params = `date=${encodeURIComponent(dateKey)}`;
+        const doFetch = async (url: string) => {
+          const resp = await fetch(`${url}?${params}`);
+          const json = await resp.json();
+          if (resp.status >= 500) throw new Error(json?.error || 'Server error');
+          return json as { ok: boolean; roster?: Array<{ schedule_id: number; employee_id: string }>; error?: string };
+        };
+        let json: { ok: boolean; roster?: Array<{ schedule_id: number; employee_id: string }>; error?: string } | null = null;
+        try {
+          json = await doFetch('/api/gym-committee-roster');
+        } catch (_) {
+          json = await doFetch('/gym-committee-roster');
+        }
+        const rows = json && json.ok && Array.isArray(json.roster) ? json.roster : [];
+        const byScheduleId: Record<number, number> = {};
+        for (const r of rows) {
+          const sid = Number(r.schedule_id || 0) || 0;
+          if (!sid) continue;
+          byScheduleId[sid] = (byScheduleId[sid] || 0) + 1;
+        }
+        return byScheduleId;
+      };
+      const keys = weekDays.map((d) => format(d, 'yyyy-MM-dd'));
+      const results = await Promise.all(keys.map((k) => fetchOneDay(k)));
+      const map: Record<string, Record<number, number>> = {};
+      keys.forEach((k, idx) => { map[k] = results[idx]; });
+      return map;
+    },
+    staleTime: 10_000,
+  });
+
   const handlePrevWeek = () => setCurrentDate(subWeeks(currentDate, 1));
   const handleNextWeek = () => setCurrentDate(addWeeks(currentDate, 1));
 
@@ -310,6 +345,7 @@ export function WeeklyCalendar({ sessions, onCreateSession, onSelectSession }: W
                     const colorClass = sessionColorMap.get(session.id) || SESSION_COLORS[0];
                     const dayKey = format(day, 'yyyy-MM-dd');
                     const availabilityForSession = weekAvailability?.[dayKey]?.byTimeStart?.[session.time_start] || null;
+                    const rosterCount = (session.schedule_id ? weekRoster?.[dayKey]?.[session.schedule_id] : undefined) || 0;
                     
                     // Only show if within visible time range
                     const [startHour] = session.time_start.split(':').map(Number);
@@ -329,6 +365,14 @@ export function WeeklyCalendar({ sessions, onCreateSession, onSelectSession }: W
                             <div className="text-xs font-medium truncate">
                               {session.session_name}
                             </div>
+                            {session.schedule_id ? (
+                              <div className="absolute top-1 right-1">
+                                <span className="inline-flex items-center rounded-md border bg-white/70 backdrop-blur px-1.5 py-0.5 text-[10px] font-medium">
+                                  <Users className="h-3 w-3 mr-1" />
+                                  {rosterCount}
+                                </span>
+                              </div>
+                            ) : null}
                           </div>
                         </PopoverTrigger>
                         <PopoverContent className="w-64 p-3" side="right">

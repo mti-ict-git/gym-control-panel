@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 export interface GymDbSession {
+  schedule_id?: number;
   session_name: string;
   time_start: string; // HH:MM
   time_end: string | null; // HH:MM or null

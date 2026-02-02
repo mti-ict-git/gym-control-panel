@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Calendar as CalendarIcon, List, Pencil, Plus, Trash2, Search, ArrowUpDown, ChevronUp, ChevronDown, Copy, Download } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Calendar as CalendarIcon, List, Pencil, Plus, Trash2, Search, ArrowUpDown, ChevronUp, ChevronDown, Copy, Download, Users as UsersIcon } from 'lucide-react';
 import { useGymDbSessions, useGymDbSessionsPaged, GymDbSession } from '@/hooks/useGymDbSessions';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { EmptyState } from '@/components/EmptyState';
@@ -25,6 +25,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { format } from 'date-fns';
 
 export default function SchedulesPage() {
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
@@ -47,6 +50,153 @@ export default function SchedulesPage() {
   const totalCount = paged.total;
   const endpoint = '/api';
 
+  const [rosterDate, setRosterDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
+  const [selectedAssign, setSelectedAssign] = useState<Map<number, string>>(new Map());
+
+  const committeeQuery = useQuery({
+    queryKey: ['gym-access-committee'],
+    queryFn: async () => {
+      const tryFetch = async (url: string) => {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('Failed to fetch committee list');
+        return (await resp.json()) as { ok: boolean; members?: Array<{ employee_id: string; unit_no: string; created_at: string | null; updated_at: string | null }>; error?: string };
+      };
+      try {
+        const json = await tryFetch('/api/gym-access-committee');
+        if (!json.ok) throw new Error(json.error || 'Failed to fetch committee list');
+        return Array.isArray(json.members) ? json.members : [];
+      } catch (_) {
+        const json = await tryFetch('/gym-access-committee');
+        if (!json.ok) throw new Error(json.error || 'Failed to fetch committee list');
+        return Array.isArray(json.members) ? json.members : [];
+      }
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const committeeIds = useMemo(() => (Array.isArray(committeeQuery.data) ? committeeQuery.data.map((m) => m.employee_id).filter(Boolean) : []), [committeeQuery.data]);
+
+  const committeeDetailsQuery = useQuery({
+    queryKey: ['employee-core', { ids: committeeIds.join(',') }],
+    enabled: committeeIds.length > 0,
+    queryFn: async () => {
+      const tryFetch = async (url: string) => {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('Failed to fetch employee details');
+        return (await resp.json()) as { ok: boolean; employees?: Array<{ employee_id: string; name: string; department: string | null }>; error?: string };
+      };
+      const ids = committeeIds.join(',');
+      try {
+        const json = await tryFetch(`/api/employee-core?ids=${encodeURIComponent(ids)}&limit=200`);
+        if (!json.ok) throw new Error(json.error || 'Failed to fetch employee details');
+        return Array.isArray(json.employees) ? json.employees : [];
+      } catch (_) {
+        const json = await tryFetch(`/employee-core?ids=${encodeURIComponent(ids)}&limit=200`);
+        if (!json.ok) throw new Error(json.error || 'Failed to fetch employee details');
+        return Array.isArray(json.employees) ? json.employees : [];
+      }
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const committeeInfoMap = useMemo(() => {
+    const map = new Map<string, { name: string; department: string | null }>();
+    const rows = Array.isArray(committeeDetailsQuery.data) ? committeeDetailsQuery.data : [];
+    for (const r of rows) {
+      map.set(String(r.employee_id), { name: String(r.name || '').trim(), department: r.department ?? null });
+    }
+    return map;
+  }, [committeeDetailsQuery.data]);
+
+  const rosterQuery = useQuery({
+    queryKey: ['gym-committee-roster', rosterDate],
+    queryFn: async () => {
+      const tryFetch = async (url: string) => {
+        const resp = await fetch(url);
+        const json = await resp.json();
+        if (resp.status >= 500) throw new Error(json?.error || 'Server error');
+        return json as { ok: boolean; roster?: Array<{ employee_id: string; schedule_id: number; duty_date: string; unit_no: string }>; error?: string };
+      };
+      try {
+        const json = await tryFetch(`/api/gym-committee-roster?date=${encodeURIComponent(rosterDate)}`);
+        if (!json.ok) throw new Error(json.error || 'Failed to fetch roster');
+        return Array.isArray(json.roster) ? json.roster : [];
+      } catch (_) {
+        const json = await tryFetch(`/gym-committee-roster?date=${encodeURIComponent(rosterDate)}`);
+        if (!json.ok) throw new Error(json.error || 'Failed to fetch roster');
+        return Array.isArray(json.roster) ? json.roster : [];
+      }
+    },
+    staleTime: 10_000,
+    refetchOnWindowFocus: false,
+  });
+
+  const rosterBySchedule = useMemo(() => {
+    const m = new Map<number, Array<{ employee_id: string; schedule_id: number }>>();
+    const rows = Array.isArray(rosterQuery.data) ? rosterQuery.data : [];
+    for (const r of rows) {
+      const key = Number(r.schedule_id || 0) || 0;
+      if (!m.has(key)) m.set(key, []);
+      m.get(key)!.push({ employee_id: String(r.employee_id), schedule_id: key });
+    }
+    return m;
+  }, [rosterQuery.data]);
+
+  const sessionListForRoster: GymDbSession[] = useMemo(() => {
+    const rows = Array.isArray(allSessionsForCalendar) ? allSessionsForCalendar : [];
+    const sorted = [...rows].sort((a, b) => String(a.time_start).localeCompare(String(b.time_start)) || String(a.session_name).localeCompare(String(b.session_name)));
+    return sorted;
+  }, [allSessionsForCalendar]);
+
+  const assignRosterMutation = useMutation({
+    mutationFn: async (payload: { employee_id: string; schedule_id: number; duty_date: string }) => {
+      if (!payload.schedule_id || payload.schedule_id <= 0) throw new Error('ScheduleID tidak tersedia untuk sesi ini');
+      const post = async (url: string) => {
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const j = await r.json();
+        if (r.status >= 500) throw new Error(j?.error || 'Server error');
+        if (!j?.ok) throw new Error(j?.error || 'Failed to assign');
+        return true;
+      };
+      try {
+        await post('/api/gym-committee-roster-assign');
+      } catch (_) {
+        await post('/gym-committee-roster-assign');
+      }
+      return true;
+    },
+    onSuccess: () => {
+      toast.success('Penjaga ditambahkan');
+      rosterQuery.refetch();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Gagal assign'),
+  });
+
+  const removeRosterMutation = useMutation({
+    mutationFn: async (payload: { employee_id: string; schedule_id: number; duty_date: string }) => {
+      const post = async (url: string) => {
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const j = await r.json();
+        if (r.status >= 500) throw new Error(j?.error || 'Server error');
+        if (!j?.ok) throw new Error(j?.error || 'Failed to remove');
+        return true;
+      };
+      try {
+        await post('/api/gym-committee-roster-remove');
+      } catch (_) {
+        await post('/gym-committee-roster-remove');
+      }
+      return true;
+    },
+    onSuccess: () => {
+      toast.success('Penjaga dihapus');
+      rosterQuery.refetch();
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Gagal hapus'),
+  });
+
   const endFor = (label: string): string | null => {
     switch (label) {
       case 'Morning':
@@ -65,6 +215,7 @@ export default function SchedulesPage() {
 
   const toDialogSession = (session: GymDbSession): GymSession => ({
     id: `gymdb-${session.session_name}-${session.time_start}`,
+    schedule_id: session.schedule_id,
     session_name: session.session_name,
     time_start: session.time_start,
     time_end: timeEndForSession(session),
@@ -77,6 +228,7 @@ export default function SchedulesPage() {
     const timeEnd = s.time_end ?? endFor(s.session_name) ?? '00:00';
     return {
       id: `gymdb-${s.session_name}-${s.time_start}-${idx}`,
+      schedule_id: s.schedule_id,
       session_name: s.session_name,
       time_start: s.time_start,
       time_end: timeEnd,
@@ -163,6 +315,10 @@ export default function SchedulesPage() {
                   <TabsTrigger value="calendar" className="flex items-center gap-2">
                     <CalendarIcon className="h-4 w-4" />
                     Calendar
+                  </TabsTrigger>
+                  <TabsTrigger value="roster" className="flex items-center gap-2">
+                    <UsersIcon className="h-4 w-4" />
+                    Roster
                   </TabsTrigger>
                 </TabsList>
 
@@ -353,6 +509,91 @@ export default function SchedulesPage() {
                     onCreateSession={() => setSessionDialogOpen(true)}
                     onSelectSession={(session) => { setPresetSession(session); setSessionDialogOpen(true); }}
                   />
+                </TabsContent>
+
+                <TabsContent value="roster" className="mt-4 space-y-4">
+                  <div className="flex flex-col md:flex-row md:items-end gap-3">
+                    <div className="w-full md:w-64">
+                      <div className="text-sm text-muted-foreground mb-1">Tanggal</div>
+                      <Input type="date" value={rosterDate} onChange={(e) => setRosterDate(e.target.value)} />
+                    </div>
+                    <div className="w-full md:flex-1"></div>
+                  </div>
+                  <div className="rounded-lg border bg-card overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-16">No</TableHead>
+                          <TableHead>Session</TableHead>
+                          <TableHead>Time</TableHead>
+                          <TableHead>Penjaga</TableHead>
+                          <TableHead className="text-right">Assign</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sessionListForRoster.map((s, idx) => {
+                          const assigned = rosterBySchedule.get(s.schedule_id || 0) || [];
+                          const isFull = assigned.length >= 2;
+                          return (
+                            <TableRow key={`roster-${String(s.session_name)}-${String(s.time_start)}-${idx}`}>
+                              <TableCell className="font-medium">{idx + 1}</TableCell>
+                              <TableCell className="font-medium"><SessionBadge name={s.session_name} /></TableCell>
+                              <TableCell>{formatTime(s.time_start)}{s.time_end ? ` - ${formatTime(s.time_end)}` : ''}</TableCell>
+                              <TableCell>
+                                <div className="flex flex-wrap gap-2">
+                                  {assigned.map((r) => {
+                                    const info = committeeInfoMap.get(r.employee_id) || { name: '-', department: null };
+                                    return (
+                                      <div key={`${r.employee_id}-${r.schedule_id}`} className="inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs">
+                                        <span className="font-mono">{r.employee_id}</span>
+                                        <span className="font-medium">{info.name || '-'}</span>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="text-destructive"
+                                          onClick={() => removeRosterMutation.mutate({ employee_id: r.employee_id, schedule_id: r.schedule_id, duty_date: rosterDate })}
+                                        >
+                                          <Trash2 className="h-3.5 w-3.5" />
+                                        </Button>
+                                      </div>
+                                    );
+                                  })}
+                                  {assigned.length === 0 && <span className="text-xs text-muted-foreground">Belum ada penjaga.</span>}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center gap-2 justify-end">
+                                  <Select value={selectedAssign.get(s.schedule_id || 0) || ''} onValueChange={(v) => setSelectedAssign((m) => new Map(m).set(s.schedule_id || 0, v))} disabled={!s.schedule_id || s.schedule_id <= 0 || isFull}>
+                                    <SelectTrigger className="w-56">
+                                      <SelectValue placeholder={isFull ? 'Kapasitas sesi penuh (max 2)' : 'Pilih anggota komite'} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {committeeIds.map((id) => {
+                                        const info = committeeInfoMap.get(id) || { name: '-', department: null };
+                                        return (
+                                          <SelectItem key={id} value={id}>{id} — {info.name || '-'}</SelectItem>
+                                        );
+                                      })}
+                                    </SelectContent>
+                                  </Select>
+                                  <Button
+                                    onClick={() => {
+                                      const emp = selectedAssign.get(s.schedule_id || 0) || '';
+                                      if (!emp) { toast.error('Pilih anggota komite terlebih dahulu'); return; }
+                                      assignRosterMutation.mutate({ employee_id: emp, schedule_id: s.schedule_id || 0, duty_date: rosterDate });
+                                    }}
+                                    disabled={!s.schedule_id || s.schedule_id <= 0 || isFull}
+                                  >
+                                    Assign
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
                 </TabsContent>
               </Tabs>
             </CardContent>
