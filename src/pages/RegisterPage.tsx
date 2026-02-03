@@ -681,7 +681,7 @@ export default function RegisterPage() {
                       </FormControl>
                       <SelectContent className="z-[9999] bg-white">
                         <SelectItem value="MTI">MTI</SelectItem>
-                        <SelectItem value="MMS">MMS</SelectItem>
+                        <SelectItem value="MMS">MMS / MBM</SelectItem>
                         <SelectItem value="VISITOR">Visitor</SelectItem>
                       </SelectContent>
                     </Select>

@@ -171,7 +171,6 @@ export default function DashboardPage() {
                     <StatCard title="Completed Today" value={todayStats?.completed || 0} icon={CheckCircle} variant="success" badgeText="This Week" sparklineData={weeklySparkCompleted} onClick={() => navigate('/reports')} />
                     <StatCard title="Pending Approvals" value={todayStats?.pending || 0} icon={Clock} variant="warning" onClick={() => { setDrawerType('pending'); setDrawerOpen(true); }} />
                     <StatCard title="Approved Today" value={todayStats?.approved || 0} icon={CheckCircle} variant="info" onClick={() => navigate('/gym_booking')} />
-                    <StatCard title="Rejected Today" value={todayStats?.rejected || 0} icon={XCircle} variant="destructive" onClick={() => navigate('/gym_booking')} />
                   </>
                 )}
               </div>
