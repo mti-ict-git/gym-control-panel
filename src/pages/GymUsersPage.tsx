@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import { useGymLiveStatus, type LivePersonStatus } from '@/hooks/useGymLiveStatus';
+import { useVaultUsers } from '@/hooks/useVaultUsers';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +25,7 @@ export default function GymUsersPage() {
   const [accessFilter, setAccessFilter] = useState<AccessFilter>('ALL');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const { data: liveStatus, isLoading: isLoadingStatus, isFetching, dataUpdatedAt } = useGymLiveStatus({ enabled: autoRefresh, refetchInterval: 2000 });
+  const { data: vaultBookings } = useVaultUsers();
   const [sortBy, setSortBy] = useState<'name' | 'employee_id' | 'department' | 'status' | 'time_in' | 'time_out'>('status');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
@@ -119,9 +121,43 @@ export default function GymUsersPage() {
     return <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${color}`}>{name}: {count}</span>;
   };
 
+  const bookingMap = useMemo(() => {
+    const map = new Map<string, { name: string; department: string | null }>();
+    (vaultBookings || []).forEach((b) => {
+      const emp = String(b.employee_id || '').trim();
+      if (!emp) return;
+      const name = String(b.name || '').trim();
+      const dept = b.department != null ? String(b.department).trim() : '';
+      const existing = map.get(emp);
+      if (!existing) {
+        map.set(emp, { name, department: dept || null });
+        return;
+      }
+      const nextName = existing.name || name;
+      const nextDept = existing.department || dept || null;
+      map.set(emp, { name: nextName, department: nextDept });
+    });
+    return map;
+  }, [vaultBookings]);
+
+  const enrichedLive = useMemo((): LivePersonStatus[] => {
+    const list: LivePersonStatus[] = Array.isArray(liveStatus) ? liveStatus : [];
+    return list.map((p) => {
+      const emp = typeof p.employee_id === 'string' ? p.employee_id.trim() : '';
+      const lookup = emp ? bookingMap.get(emp) : null;
+      const name = typeof p.name === 'string' ? p.name.trim() : '';
+      const department = typeof p.department === 'string' ? p.department.trim() : '';
+      return {
+        ...p,
+        name: name || (lookup?.name ? lookup.name : null),
+        department: department || (lookup?.department ? lookup.department : null),
+      } satisfies LivePersonStatus;
+    });
+  }, [bookingMap, liveStatus]);
+
   const sessionCounts = useMemo(() => {
     const counts: Record<string, number> = { 'Morning': 0, 'Afternoon': 0, 'Night - 1': 0, 'Night - 2': 0, 'COMITTE': 0, 'Other': 0 };
-    (liveStatus ?? []).forEach((p) => {
+    (enrichedLive ?? []).forEach((p) => {
       const label = normalizeSession(p.schedule);
       if (label === '') counts['COMITTE']++;
       else if (label === 'Morning') counts['Morning']++;
@@ -131,11 +167,11 @@ export default function GymUsersPage() {
       else counts['Other']++;
     });
     return counts;
-  }, [liveStatus]);
+  }, [enrichedLive]);
 
   const filtered = useMemo((): LivePersonStatus[] => {
     const q = search.trim().toLowerCase();
-    const list: LivePersonStatus[] = Array.isArray(liveStatus) ? liveStatus : [];
+    const list: LivePersonStatus[] = Array.isArray(enrichedLive) ? enrichedLive : [];
     return list.filter((p) => {
       const session = normalizeSession(p.schedule);
       const sessionBucket: SessionFilter =
@@ -156,7 +192,7 @@ export default function GymUsersPage() {
       const sched = String(p.schedule ?? '').toLowerCase();
       return name.includes(q) || emp.includes(q) || dept.includes(q) || sched.includes(q);
     });
-  }, [accessFilter, liveStatus, search, sessionFilter, statusFilter]);
+  }, [accessFilter, enrichedLive, search, sessionFilter, statusFilter]);
 
   const sorted = useMemo(() => {
     const arr: LivePersonStatus[] = [...filtered];
@@ -202,9 +238,9 @@ export default function GymUsersPage() {
   const exportCsv = () => {
     const headers = ['Name','Employee ID','Department','Session','Schedule','Date','Time In','Time Out','Status','Access'];
     const rows = sorted.map((p) => [
-      String(p.name ?? ''),
+      String(getDisplayName(p)),
       String(p.employee_id ?? ''),
-      String(p.department ?? ''),
+      String(getDisplayDepartment(p)),
       String(normalizeSession(p.schedule)),
       String(getTimeSchedule(p.schedule)),
       String(formatDateUtc8(p.time_in, p.time_out)),
@@ -233,6 +269,18 @@ export default function GymUsersPage() {
         <span>{label}</span>
       </span>
     );
+  };
+
+  const getDisplayName = (p: LivePersonStatus) => {
+    const raw = typeof p.name === 'string' ? p.name.trim() : '';
+    if (raw) return raw;
+    const emp = typeof p.employee_id === 'string' ? p.employee_id.trim() : '';
+    return emp || 'Unknown';
+  };
+
+  const getDisplayDepartment = (p: LivePersonStatus) => {
+    const raw = typeof p.department === 'string' ? p.department.trim() : '';
+    return raw || 'Unknown';
   };
 
   return (
@@ -422,11 +470,11 @@ export default function GymUsersPage() {
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
-                                  <div className="truncate font-semibold">{p.name ?? '-'}</div>
+                                  <div className="truncate font-semibold">{getDisplayName(p)}</div>
                                   <div className="mt-0.5 text-xs text-muted-foreground">
                                     <span>{p.employee_id ?? '-'}</span>
                                     <span className="px-1">•</span>
-                                    <span className="truncate">{p.department ?? '-'}</span>
+                                    <span className="truncate">{getDisplayDepartment(p)}</span>
                                   </div>
                                 </div>
                                 <div className="flex flex-col items-end gap-2">
@@ -487,9 +535,9 @@ export default function GymUsersPage() {
                             onClick={() => p.employee_id && navigate(`/live_gym/${encodeURIComponent(String(p.employee_id))}`)}
                           >
                               <TableCell className="w-12 text-right">{idx + 1}</TableCell>
-                              <TableCell className="font-medium">{p.name ?? '-'}</TableCell>
+                              <TableCell className="font-medium">{getDisplayName(p)}</TableCell>
                               <TableCell>{p.employee_id ?? '-'}</TableCell>
-                              <TableCell>{p.department ?? '-'}</TableCell>
+                              <TableCell>{getDisplayDepartment(p)}</TableCell>
                               <TableCell>{getSessionChip(normalizeSession(p.schedule))}</TableCell>
                               <TableCell>{getScheduleChip(p.schedule)}</TableCell>
                               <TableCell>{formatDateUtc8(p.time_in, p.time_out)}</TableCell>
