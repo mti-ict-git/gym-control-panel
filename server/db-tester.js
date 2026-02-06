@@ -1167,13 +1167,28 @@ app.post('/gym-booking-create', async (req, res) => {
       genderCol ? `[${genderCol}] AS gender` : `CAST(NULL AS varchar(50)) AS gender`,
     ].join(',\n        ');
 
+    const buildIdCandidates = (raw) => {
+      const base = String(raw || '').trim();
+      if (!base) return [];
+      const set = new Set([base]);
+      const digits = base.replace(/[^0-9]/g, '');
+      if (digits && digits !== base) set.add(digits);
+      return Array.from(set);
+    };
+    const ids = buildIdCandidates(employeeId);
     const empReq = masterPool.request();
-    empReq.input('id', sql.VarChar(100), employeeId);
+    const params = ids.map((_, idx) => `@id${idx}`);
+    ids.forEach((id, idx) => {
+      empReq.input(`id${idx}`, sql.VarChar(100), id);
+    });
+    const whereById = params.length > 0
+      ? `[${employeeIdCol}] IN (${params.join(', ')})`
+      : `[${employeeIdCol}] = @id0`;
     const empResult = await empReq.query(`
       SELECT TOP 1
         ${selectCols}
       FROM [${coreSchema}].[employee_core]
-      WHERE [${employeeIdCol}] = @id
+      WHERE ${whereById}
     `);
 
     const empRow = Array.isArray(empResult?.recordset) ? empResult.recordset[0] : null;

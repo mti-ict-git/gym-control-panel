@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar as CalendarIcon, Search, Activity, Download, ArrowUpDown, RefreshCw } from 'lucide-react';
+import { Calendar as CalendarIcon, Search, Activity, Download, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -12,8 +12,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-type SessionFilter = 'ALL' | 'COMITTE' | 'Morning' | 'Afternoon' | 'Night - 1' | 'Night - 2' | 'Other';
+type SessionFilter = 'ALL' | 'Morning' | 'Afternoon' | 'Night - 1' | 'Night - 2';
 type StatusFilter = 'ALL' | 'BOOKED' | 'IN_GYM' | 'LEFT';
 type AccessFilter = 'ALL' | 'GRANTED' | 'NO_ACCESS';
 
@@ -26,7 +27,7 @@ export default function GymUsersPage() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const { data: liveStatus, isLoading: isLoadingStatus, isFetching, dataUpdatedAt } = useGymLiveStatus({ enabled: autoRefresh, refetchInterval: 2000 });
   const { data: vaultBookings } = useVaultUsers();
-  const [sortBy, setSortBy] = useState<'name' | 'employee_id' | 'department' | 'status' | 'time_in' | 'time_out'>('status');
+  const [sortBy, setSortBy] = useState<'name' | 'employee_id' | 'department' | 'status' | 'time_in' | 'time_out' | 'schedule'>('status');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const formatTimeUtc8 = (iso: string | null) => {
@@ -156,7 +157,13 @@ export default function GymUsersPage() {
   }, [bookingMap, liveStatus]);
 
   const sessionCounts = useMemo(() => {
-    const counts: Record<string, number> = { 'Morning': 0, 'Afternoon': 0, 'Night - 1': 0, 'Night - 2': 0, 'COMITTE': 0, 'Other': 0 };
+    const counts: Record<'Morning' | 'Afternoon' | 'Night - 1' | 'Night - 2' | 'COMITTE', number> = {
+      'Morning': 0,
+      'Afternoon': 0,
+      'Night - 1': 0,
+      'Night - 2': 0,
+      'COMITTE': 0,
+    };
     (enrichedLive ?? []).forEach((p) => {
       const label = normalizeSession(p.schedule);
       if (label === '') counts['COMITTE']++;
@@ -164,23 +171,36 @@ export default function GymUsersPage() {
       else if (label === 'Afternoon') counts['Afternoon']++;
       else if (label === 'Night - 1') counts['Night - 1']++;
       else if (label === 'Night - 2') counts['Night - 2']++;
-      else counts['Other']++;
     });
     return counts;
   }, [enrichedLive]);
+
+  const toggleSort = (key: typeof sortBy) => {
+    if (sortBy === key) {
+      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+    setSortBy(key);
+    setSortDir('asc');
+  };
+
+  const headerSortLabel = (key: typeof sortBy) => (sortBy === key ? (sortDir === 'asc' ? '↑' : '↓') : '');
+
+  const sortableHeadClass = (key: typeof sortBy) =>
+    `cursor-pointer select-none ${sortBy === key ? 'text-foreground' : 'text-muted-foreground'}`;
 
   const filtered = useMemo((): LivePersonStatus[] => {
     const q = search.trim().toLowerCase();
     const list: LivePersonStatus[] = Array.isArray(enrichedLive) ? enrichedLive : [];
     return list.filter((p) => {
       const session = normalizeSession(p.schedule);
-      const sessionBucket: SessionFilter =
+      const sessionBucket =
         session === ''
           ? 'COMITTE'
           : session === 'Morning' || session === 'Afternoon' || session === 'Night - 1' || session === 'Night - 2'
             ? session
             : 'Other';
-      if (sessionFilter !== 'ALL' && sessionBucket !== sessionFilter) return false;
+      if (sessionFilter !== 'ALL' && sessionBucket !== sessionFilter && sessionBucket !== 'COMITTE') return false;
       if (statusFilter !== 'ALL' && p.status !== statusFilter) return false;
       if (accessFilter === 'GRANTED' && p.access_indicator.color !== 'green') return false;
       if (accessFilter === 'NO_ACCESS' && p.access_indicator.color !== 'red') return false;
@@ -199,6 +219,13 @@ export default function GymUsersPage() {
     const key = sortBy;
     const dir = sortDir === 'asc' ? 1 : -1;
     arr.sort((a, b) => {
+      if (key === 'schedule') {
+        const av = String(getTimeSchedule(a.schedule)).toLowerCase();
+        const bv = String(getTimeSchedule(b.schedule)).toLowerCase();
+        if (av < bv) return -1 * dir;
+        if (av > bv) return 1 * dir;
+        return 0;
+      }
       const ak = a[key as keyof LivePersonStatus];
       const bk = b[key as keyof LivePersonStatus];
       const av = String(ak ?? '').toLowerCase();
@@ -214,6 +241,29 @@ export default function GymUsersPage() {
     });
     return arr;
   }, [filtered, sortBy, sortDir]);
+
+  const stats = useMemo(() => {
+    const base = Array.isArray(filtered) ? filtered : [];
+    return base.reduce(
+      (acc, p) => {
+        acc.total += 1;
+        if (p.status === 'IN_GYM') acc.inside += 1;
+        if (p.status === 'BOOKED') acc.booked += 1;
+        if (p.status === 'LEFT') acc.outside += 1;
+        if (p.access_indicator.color === 'green') acc.accessGranted += 1;
+        if (p.access_indicator.color === 'red') acc.accessDenied += 1;
+        return acc;
+      },
+      { total: 0, inside: 0, booked: 0, outside: 0, accessGranted: 0, accessDenied: 0 },
+    );
+  }, [filtered]);
+
+  const resetFilters = () => {
+    setSearch('');
+    setSessionFilter('ALL');
+    setStatusFilter('ALL');
+    setAccessFilter('ALL');
+  };
 
   const sessionCountButton = (name: string, count: number, selected: boolean, onClick: () => void) => {
     const lower = name.toLowerCase();
@@ -287,11 +337,16 @@ export default function GymUsersPage() {
     <AppLayout>
       <div className="space-y-6">
         <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
-          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
-            <CardHeader>
+          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-xl md:rounded-t-none md:border-t-0">
+            <CardHeader className="border-b bg-muted/30">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-2xl">Live Gym Monitoring</CardTitle>
+                  <CardTitle className="text-2xl font-semibold flex items-center gap-3">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <Activity className="h-5 w-5" />
+                    </span>
+                    Live Gym Monitoring
+                  </CardTitle>
                   <CardDescription>Real-time overview of active gym members and access status.</CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
@@ -310,136 +365,149 @@ export default function GymUsersPage() {
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-12 gap-4">
-                <div className="col-span-12 lg:col-span-5">
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                      <CalendarIcon className="h-5 w-5 text-primary" />
+                <div className="col-span-12 lg:col-span-4">
+                  <div className="rounded-xl border bg-card shadow-sm p-4 space-y-4">
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                        <CalendarIcon className="h-5 w-5 text-primary" />
+                      </div>
+                      <div>
+                        <div className="text-sm text-muted-foreground">Today's Booking Date</div>
+                        <div className="text-lg font-semibold">{format(new Date(), 'yyyy-MM-dd')}</div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-lg border bg-background p-3">
+                        <div className="text-xs text-muted-foreground">Total</div>
+                        <div className="text-xl font-semibold">{stats.total}</div>
+                      </div>
+                      <div className="rounded-lg border bg-background p-3">
+                        <div className="text-xs text-muted-foreground">Inside</div>
+                        <div className="text-xl font-semibold">{stats.inside}</div>
+                      </div>
+                      <div className="rounded-lg border bg-background p-3">
+                        <div className="text-xs text-muted-foreground">Booked</div>
+                        <div className="text-xl font-semibold">{stats.booked}</div>
+                      </div>
+                      <div className="rounded-lg border bg-background p-3">
+                        <div className="text-xs text-muted-foreground">Outside</div>
+                        <div className="text-xl font-semibold">{stats.outside}</div>
+                      </div>
                     </div>
                     <div>
-                      <div className="text-sm text-muted-foreground">Today's Booking Date</div>
-                      <div className="text-lg font-semibold">{format(new Date(), 'yyyy-MM-dd')}</div>
-                    </div>
-                  </div>
-                  <div className="mt-3">
-                    <div className="text-sm text-muted-foreground mb-2">Session & Count</div>
-                    <div className="flex flex-wrap gap-2">
-                      {sessionCountButton('COMITTE', sessionCounts['COMITTE'], sessionFilter === 'COMITTE', () => setSessionFilter('COMITTE'))}
-                      {sessionCountButton('Morning', sessionCounts['Morning'], sessionFilter === 'Morning', () => setSessionFilter('Morning'))}
-                      {sessionCountButton('Afternoon', sessionCounts['Afternoon'], sessionFilter === 'Afternoon', () => setSessionFilter('Afternoon'))}
-                      {sessionCountButton('Night - 1', sessionCounts['Night - 1'], sessionFilter === 'Night - 1', () => setSessionFilter('Night - 1'))}
-                      {sessionCountButton('Night - 2', sessionCounts['Night - 2'], sessionFilter === 'Night - 2', () => setSessionFilter('Night - 2'))}
-                      {sessionCountButton('Other', sessionCounts['Other'], sessionFilter === 'Other', () => setSessionFilter('Other'))}
+                      <div className="text-sm text-muted-foreground mb-2">Session & Count</div>
+                      <div className="flex flex-wrap gap-2">
+                        {sessionCountButton('All', stats.total, sessionFilter === 'ALL', () => setSessionFilter('ALL'))}
+                        {sessionCountButton('Morning', sessionCounts['Morning'] + sessionCounts['COMITTE'], sessionFilter === 'Morning', () => setSessionFilter('Morning'))}
+                        {sessionCountButton('Afternoon', sessionCounts['Afternoon'] + sessionCounts['COMITTE'], sessionFilter === 'Afternoon', () => setSessionFilter('Afternoon'))}
+                        {sessionCountButton('Night - 1', sessionCounts['Night - 1'] + sessionCounts['COMITTE'], sessionFilter === 'Night - 1', () => setSessionFilter('Night - 1'))}
+                        {sessionCountButton('Night - 2', sessionCounts['Night - 2'] + sessionCounts['COMITTE'], sessionFilter === 'Night - 2', () => setSessionFilter('Night - 2'))}
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="col-span-12 lg:col-span-7 space-y-3">
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                    <div className="relative flex-1">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                      <Input
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        placeholder="Search name / employee id / department"
-                        className="pl-9"
-                        aria-label="Search live gym monitoring"
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 justify-end">
-                      <span className="text-xs text-muted-foreground">Total</span>
-                      <span className="text-sm font-semibold">{sorted.length}</span>
-                      <Button variant="outline" size="sm" onClick={exportCsv} className="ml-2">
-                        <Download className="h-4 w-4" />
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-                        <RefreshCw className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {([
-                      'ALL',
-                      'COMITTE',
-                      'Morning',
-                      'Afternoon',
-                      'Night - 1',
-                      'Night - 2',
-                      'Other',
-                    ] as SessionFilter[]).map((v) => (
-                      <button
-                        key={v}
-                        type="button"
-                        onClick={() => setSessionFilter(v)}
-                        className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
-                          sessionFilter === v ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
-                        }`}
-                        aria-pressed={sessionFilter === v}
-                      >
-                        {v}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {([
-                      { label: 'All', value: 'ALL' },
-                      { label: 'Booked', value: 'BOOKED' },
-                      { label: 'Inside', value: 'IN_GYM' },
-                      { label: 'Outside', value: 'LEFT' },
-                    ] as Array<{ label: string; value: StatusFilter }>).map((x) => (
-                      <button
-                        key={x.value}
-                        type="button"
-                        onClick={() => setStatusFilter(x.value)}
-                        className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
-                          statusFilter === x.value ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
-                        }`}
-                        aria-pressed={statusFilter === x.value}
-                      >
-                        {x.label}
-                      </button>
-                    ))}
-                    {([
-                      { label: 'All Access', value: 'ALL' },
-                      { label: 'Granted', value: 'GRANTED' },
-                      { label: 'No Access', value: 'NO_ACCESS' },
-                    ] as Array<{ label: string; value: AccessFilter }>).map((x) => (
-                      <button
-                        key={x.value}
-                        type="button"
-                        onClick={() => setAccessFilter(x.value)}
-                        className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
-                          accessFilter === x.value ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
-                        }`}
-                        aria-pressed={accessFilter === x.value}
-                      >
-                        {x.label}
-                      </button>
-                    ))}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">Sort by</span>
-                      {([
-                        { key: 'status', label: 'Status' },
-                        { key: 'name', label: 'Name' },
-                        { key: 'employee_id', label: 'Employee ID' },
-                        { key: 'department', label: 'Department' },
-                        { key: 'time_in', label: 'Time In' },
-                        { key: 'time_out', label: 'Time Out' },
-                      ] as Array<{ key: typeof sortBy; label: string }>).map((opt) => (
-                        <Button
-                          key={opt.key}
-                          variant={sortBy === opt.key ? 'default' : 'outline'}
-                          size="sm"
-                          onClick={() => setSortBy(opt.key)}
-                        >
-                          {opt.label}
+                <div className="col-span-12 lg:col-span-8">
+                  <div className="rounded-xl border bg-card shadow-sm p-4 space-y-4">
+                    <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+                      <div className="relative flex-1">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          placeholder="Search name / employee id / department"
+                          className="pl-9"
+                          aria-label="Search live gym monitoring"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 justify-end">
+                        <span className="text-xs text-muted-foreground">Total</span>
+                        <span className="text-sm font-semibold">{stats.total}</span>
+                        <Button variant="outline" size="sm" onClick={exportCsv} className="ml-2">
+                          <Download className="h-4 w-4" />
                         </Button>
-                      ))}
-                      <Button variant="outline" size="sm" onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}>
-                        <ArrowUpDown className="h-4 w-4" />
-                      </Button>
+                        <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+                          <RefreshCw className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Session</div>
+                        <Select value={sessionFilter} onValueChange={(v) => setSessionFilter(v as SessionFilter)}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ALL">All</SelectItem>
+                            <SelectItem value="Morning">Morning</SelectItem>
+                            <SelectItem value="Afternoon">Afternoon</SelectItem>
+                            <SelectItem value="Night - 1">Night - 1</SelectItem>
+                            <SelectItem value="Night - 2">Night - 2</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Status</div>
+                        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ALL">All</SelectItem>
+                            <SelectItem value="BOOKED">Booked</SelectItem>
+                            <SelectItem value="IN_GYM">Inside</SelectItem>
+                            <SelectItem value="LEFT">Outside</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground mb-1">Access</div>
+                        <Select value={accessFilter} onValueChange={(v) => setAccessFilter(v as AccessFilter)}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ALL">All</SelectItem>
+                            <SelectItem value="GRANTED">Granted</SelectItem>
+                            <SelectItem value="NO_ACCESS">No Access</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex items-end justify-end">
+                        <Button variant="outline" size="sm" onClick={resetFilters}>
+                          Reset Filters
+                        </Button>
+                      </div>
+                    </div>
+                    {(search || sessionFilter !== 'ALL' || statusFilter !== 'ALL' || accessFilter !== 'ALL') && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-muted-foreground">Active Filters</span>
+                        {search ? (
+                          <Button variant="secondary" size="sm" onClick={() => setSearch('')}>
+                            Search: {search}
+                          </Button>
+                        ) : null}
+                        {sessionFilter !== 'ALL' ? (
+                          <Button variant="secondary" size="sm" onClick={() => setSessionFilter('ALL')}>
+                            Session: {sessionFilter}
+                          </Button>
+                        ) : null}
+                        {statusFilter !== 'ALL' ? (
+                          <Button variant="secondary" size="sm" onClick={() => setStatusFilter('ALL')}>
+                            Status: {statusFilter === 'IN_GYM' ? 'Inside' : statusFilter === 'LEFT' ? 'Outside' : 'Booked'}
+                          </Button>
+                        ) : null}
+                        {accessFilter !== 'ALL' ? (
+                          <Button variant="secondary" size="sm" onClick={() => setAccessFilter('ALL')}>
+                            Access: {accessFilter === 'GRANTED' ? 'Granted' : 'No Access'}
+                          </Button>
+                        ) : null}
+                        <Button variant="ghost" size="sm" onClick={resetFilters}>
+                          Clear All
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -455,7 +523,7 @@ export default function GymUsersPage() {
                   <div className="space-y-4">
                     <div className="md:hidden space-y-3">
                       {sorted.length < 1 ? (
-                        <div className="rounded-lg border bg-card p-6 text-center text-sm text-muted-foreground">
+                        <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground shadow-sm">
                           No results.
                         </div>
                       ) : (
@@ -465,7 +533,7 @@ export default function GymUsersPage() {
                           return (
                             <div
                               key={key}
-                              className="rounded-lg border bg-card p-4 cursor-pointer"
+                              className="rounded-xl border bg-card p-4 cursor-pointer shadow-sm"
                               onClick={() => p.employee_id && navigate(`/live_gym/${encodeURIComponent(String(p.employee_id))}`)}
                             >
                               <div className="flex items-start justify-between gap-3">
@@ -510,20 +578,34 @@ export default function GymUsersPage() {
                       )}
                     </div>
 
-                    <div className="hidden md:block rounded-lg border bg-card overflow-x-auto">
+                    <div className="hidden md:block rounded-xl border bg-card shadow-sm overflow-x-auto">
                       <Table>
                         <TableHeader>
                           <TableRow>
                             <TableHead className="w-12 text-right">No</TableHead>
-                            <TableHead>Name</TableHead>
-                            <TableHead>ID Employee</TableHead>
-                            <TableHead>Department</TableHead>
+                            <TableHead className={sortableHeadClass('name')} onClick={() => toggleSort('name')}>
+                              Name {headerSortLabel('name')}
+                            </TableHead>
+                            <TableHead className={sortableHeadClass('employee_id')} onClick={() => toggleSort('employee_id')}>
+                              ID Employee {headerSortLabel('employee_id')}
+                            </TableHead>
+                            <TableHead className={sortableHeadClass('department')} onClick={() => toggleSort('department')}>
+                              Department {headerSortLabel('department')}
+                            </TableHead>
                             <TableHead>Session</TableHead>
-                            <TableHead>Time Schedule</TableHead>
+                            <TableHead className={sortableHeadClass('schedule')} onClick={() => toggleSort('schedule')}>
+                              Time Schedule {headerSortLabel('schedule')}
+                            </TableHead>
                             <TableHead>Date</TableHead>
-                            <TableHead>Time In</TableHead>
-                            <TableHead>Time Out</TableHead>
-                            <TableHead>Status</TableHead>
+                            <TableHead className={sortableHeadClass('time_in')} onClick={() => toggleSort('time_in')}>
+                              Time In {headerSortLabel('time_in')}
+                            </TableHead>
+                            <TableHead className={sortableHeadClass('time_out')} onClick={() => toggleSort('time_out')}>
+                              Time Out {headerSortLabel('time_out')}
+                            </TableHead>
+                            <TableHead className={sortableHeadClass('status')} onClick={() => toggleSort('status')}>
+                              Status {headerSortLabel('status')}
+                            </TableHead>
                             <TableHead>Access</TableHead>
                           </TableRow>
                         </TableHeader>

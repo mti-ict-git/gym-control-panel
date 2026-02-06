@@ -68,14 +68,14 @@ export default function LoginPage() {
   
 
   return (
-    <div className="min-h-screen flex bg-slate-400/80">
+    <div className="min-h-screen flex bg-gradient-to-br from-background via-muted/40 to-muted/60">
       {/* Left Panel - Decorative */}
       <div className="hidden lg:flex lg:w-1/2 p-6">
-        <div className="w-full bg-slate-100 rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden">
+        <div className="w-full bg-card/80 rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden border border-border/60 shadow-lg ring-1 ring-black/5 dark:ring-white/10">
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-72 h-72 border border-slate-300 rounded-full absolute" />
-            <div className="w-96 h-96 border border-slate-300 rounded-full absolute" />
-            <div className="w-[28rem] h-[28rem] border border-slate-200 rounded-full absolute" />
+            <div className="w-72 h-72 border border-border/60 rounded-full absolute" />
+            <div className="w-96 h-96 border border-border/60 rounded-full absolute" />
+            <div className="w-[28rem] h-[28rem] border border-border/50 rounded-full absolute" />
           </div>
 
           <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
@@ -118,12 +118,12 @@ export default function LoginPage() {
           <div className="flex-1" />
 
           <div className="relative z-10 text-center">
-            <h2 className="text-2xl font-semibold text-slate-800 mb-3">
+            <h2 className="text-2xl font-semibold text-foreground mb-3">
               Manage your gym sessions
               <br />
               with ease and efficiency.
             </h2>
-            <p className="text-slate-500 text-sm max-w-xs mx-auto">
+            <p className="text-muted-foreground text-sm max-w-xs mx-auto">
               Track attendance, manage schedules, and keep your members engaged with our admin platform.
             </p>
 
@@ -147,7 +147,7 @@ export default function LoginPage() {
 
       {/* Right Panel - Form */}
       <div className="w-full lg:w-1/2 p-6 flex items-center justify-center">
-        <div className="w-full max-w-md bg-white rounded-3xl p-8 lg:p-12 shadow-xl">
+        <div className="w-full max-w-md bg-card rounded-3xl p-8 lg:p-12 shadow-xl border border-border/60">
           {/* Mobile logo */}
           <div className="flex lg:hidden justify-center mb-6">
             <img src={gymIcon} alt="Gym" className="w-14 h-14 object-contain" />
@@ -157,13 +157,16 @@ export default function LoginPage() {
 
             <TabsContent value="login">
               <div className="text-center mb-8">
-                <h1 className="text-2xl font-semibold text-slate-900">Welcome Back</h1>
-                <p className="text-slate-500 text-sm mt-1">Sign in to your account</p>
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+                  <img src={gymIcon} alt="Gym" className="h-7 w-7 object-contain" />
+                </div>
+                <h1 className="text-2xl font-semibold text-foreground">Welcome Back</h1>
+                <p className="text-muted-foreground text-sm mt-1">Sign in to your account</p>
               </div>
 
               <form onSubmit={handleLogin} className="space-y-5">
                 <div className="space-y-2">
-                  <Label htmlFor="login-identity" className="text-slate-700">Email or Username</Label>
+                  <Label htmlFor="login-identity" className="text-foreground">Email or Username</Label>
                   <Input
                     id="login-identity"
                     type="text"
@@ -171,12 +174,12 @@ export default function LoginPage() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors"
+                    className="h-12 rounded-xl border-border/60 bg-background focus:bg-background transition-colors"
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="login-password" className="text-slate-700">Password</Label>
+                  <Label htmlFor="login-password" className="text-foreground">Password</Label>
                   <div className="relative">
                     <Input
                       id="login-password"
@@ -185,12 +188,12 @@ export default function LoginPage() {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
-                      className="h-12 rounded-xl border-slate-200 bg-slate-50 focus:bg-white transition-colors pr-12"
+                      className="h-12 rounded-xl border-border/60 bg-background focus:bg-background transition-colors pr-12"
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                     >
                       {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                     </button>

@@ -131,17 +131,19 @@ export default function ProfileSettings() {
   return (
     <div className="space-y-6">
       <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
-        <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
-          <CardHeader>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <User className="h-6 w-6" />
+        <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-xl md:rounded-t-none md:border-t-0">
+          <CardHeader className="border-b bg-muted/30">
+            <CardTitle className="text-2xl font-semibold flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <User className="h-5 w-5" />
+              </span>
               Profile
-            </h1>
-            <p className="text-muted-foreground">Manage your account information</p>
+            </CardTitle>
+            <CardDescription>Manage your account information</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <Card>
-              <CardHeader>
+            <Card className="rounded-xl border bg-card shadow-sm">
+              <CardHeader className="border-b bg-muted/30">
                 <div className="flex items-center gap-2">
                   <User className="h-5 w-5 text-muted-foreground" />
                   <CardTitle className="text-lg">Admin Profile</CardTitle>

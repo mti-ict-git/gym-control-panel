@@ -1871,6 +1871,14 @@ router.post('/gym-booking-create', async (req, res) => {
 
     await gymPool.close();
 
+    const buildIdCandidates = (raw) => {
+      const base = String(raw || '').trim();
+      if (!base) return [];
+      const set = new Set([base]);
+      const digits = base.replace(/[^0-9]/g, '');
+      if (digits && digits !== base) set.add(digits);
+      return Array.from(set);
+    };
     let empRow = null;
     let department = '';
     if (employeeTypeGuess === 'MTI') {
@@ -1899,9 +1907,15 @@ router.post('/gym-booking-create', async (req, res) => {
             genderCol ? `[${genderCol}] AS gender` : `CAST(NULL AS varchar(50)) AS gender`,
           ].join(',\n        ');
           const empReq = masterPool.request();
-          empReq.input('id', sql.VarChar(100), employeeId);
+          const ids = buildIdCandidates(employeeId);
+          const params = ids.map((_, idx) => `@id${idx}`);
+          ids.forEach((id, idx) => {
+            empReq.input(`id${idx}`, sql.VarChar(100), id);
+          });
+          const byId = params.length > 0 ? `[${employeeIdCol}] IN (${params.join(', ')})` : `[${employeeIdCol}] = @id0`;
+          const byStaff = staffNoCol ? ` OR [${staffNoCol}] IN (${params.join(', ')})` : '';
           const empResult = await empReq.query(
-            `SELECT TOP 1 ${selectCols} FROM [${coreSchema}].[employee_core] WHERE [${employeeIdCol}] = @id`
+            `SELECT TOP 1 ${selectCols} FROM [${coreSchema}].[employee_core] WHERE ${byId}${byStaff}`
           );
           empRow = Array.isArray(empResult?.recordset) ? empResult.recordset[0] : null;
         }

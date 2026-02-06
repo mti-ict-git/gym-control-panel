@@ -357,20 +357,35 @@ export default function VaultPage() {
     <AppLayout>
       <div className="space-y-6">
         <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
-          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
-          <CardHeader>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <Database className="h-6 w-6" />
-              Gym Booking
-            </h1>
-            <p className="text-muted-foreground">Booking list created from the Register page.</p>
-          </CardHeader>
-          <CardContent className="flex-1">
-            <div className="flex items-center gap-2">
-              <Filter className="h-5 w-5 text-muted-foreground" />
-              <div className="text-lg font-semibold">Search & Filters</div>
+          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-xl md:rounded-t-none md:border-t-0">
+          <CardHeader className="border-b bg-muted/30">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="text-2xl flex items-center gap-2">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Database className="h-5 w-5" />
+                  </span>
+                  Gym Booking
+                </CardTitle>
+                <CardDescription>Booking list created from the Register page.</CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {Object.entries(sessionCounts).map(([name, count]) => getSessionCountChip(name, count))}
+              </div>
             </div>
-            <div className="h-4" />
+          </CardHeader>
+          <CardContent className="flex-1 space-y-6">
+            <div className="rounded-xl border bg-card p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+                  <Filter className="h-5 w-5 text-muted-foreground" />
+                </span>
+                <div>
+                  <div className="text-sm font-semibold">Search & Filters</div>
+                  <div className="text-xs text-muted-foreground">Refine by date, session, status, or approval.</div>
+                </div>
+              </div>
+              <div className="h-4" />
               <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                 <div>
                   <div className="text-sm text-muted-foreground mb-1">Search</div>
@@ -474,49 +489,51 @@ export default function VaultPage() {
                   </Select>
                 </div>
               </div>
-              <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-4">
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg bg-primary/10 p-2">
-                        <UsersIcon className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Total Bookings</p>
-                        <p className="text-2xl font-bold">{totalCountFiltered}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg bg-blue-500/10 p-2">
-                        <User className="h-5 w-5 text-blue-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Male</p>
-                        <p className="text-2xl font-bold">{genderCounts.male}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-3">
-                      <div className="rounded-lg bg-pink-500/10 p-2">
-                        <User className="h-5 w-5 text-pink-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-muted-foreground">Female</p>
-                        <p className="text-2xl font-bold">{genderCounts.female}</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-                
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {Object.entries(statusCounts).map(([name, count]) => getStatusCountChip(name, count))}
               </div>
-              
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <Card className="rounded-xl border bg-card shadow-sm">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-lg bg-primary/10 p-2">
+                      <UsersIcon className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Bookings</p>
+                      <p className="text-2xl font-bold">{totalCountFiltered}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="rounded-xl border bg-card shadow-sm">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-lg bg-blue-500/10 p-2">
+                      <User className="h-5 w-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Male</p>
+                      <p className="text-2xl font-bold">{genderCounts.male}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="rounded-xl border bg-card shadow-sm">
+                <CardContent className="pt-6">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-lg bg-pink-500/10 p-2">
+                      <User className="h-5 w-5 text-pink-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Female</p>
+                      <p className="text-2xl font-bold">{genderCounts.female}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
 
               {vaultError ? (
                 <div className="mt-4">
@@ -541,7 +558,7 @@ export default function VaultPage() {
                   <div className="md:hidden">
                     <div className="space-y-3">
                       {vaultUsersFiltered.map((user, index) => (
-                        <Card key={`${user.employee_id}__${user.schedule_time}__${index}`}>
+                        <Card key={`${user.employee_id}__${user.schedule_time}__${index}`} className="rounded-xl border bg-card shadow-sm">
                           <CardHeader className="p-3 pb-1">
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
@@ -667,25 +684,26 @@ export default function VaultPage() {
                     </div>
                   </div>
 
-				  <div className="hidden md:block -mx-6 border-t">
-					  <Table>
+                  <div className="hidden md:block">
+                      <div className="-mx-6 overflow-hidden rounded-xl border bg-card shadow-sm">
+                      <Table>
                         <TableHeader>
-                          <TableRow>
-                            <TableHead className="w-12 text-right">No</TableHead>
+                          <TableRow className="bg-muted/40">
+                            <TableHead className="w-12 text-right text-xs uppercase text-muted-foreground">No</TableHead>
                             <TableHead>
                               <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('booking_id')}>
                                 Booking ID
                                 <SortIndicator active={sortBy === 'booking_id'} dir={sortDir} />
                               </button>
                             </TableHead>
-                            <TableHead className="hidden md:table-cell">ID Card</TableHead>
+                            <TableHead className="hidden md:table-cell text-xs uppercase text-muted-foreground">ID Card</TableHead>
                             <TableHead>
                               <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('name')}>
                                 Name
                                 <SortIndicator active={sortBy === 'name'} dir={sortDir} />
                               </button>
                             </TableHead>
-                            <TableHead className="hidden md:table-cell">Gender</TableHead>
+                            <TableHead className="hidden md:table-cell text-xs uppercase text-muted-foreground">Gender</TableHead>
                             <TableHead>
                               <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('employee_id')}>
                                 Employee ID
@@ -698,7 +716,7 @@ export default function VaultPage() {
                                 <SortIndicator active={sortBy === 'department'} dir={sortDir} />
                               </button>
                             </TableHead>
-                            <TableHead className="hidden md:table-cell">Session</TableHead>
+                            <TableHead className="hidden md:table-cell text-xs uppercase text-muted-foreground">Session</TableHead>
                             <TableHead className="hidden md:table-cell">
                               <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('time_start')}>
                                 Time Schedule
@@ -711,13 +729,13 @@ export default function VaultPage() {
                                 <SortIndicator active={sortBy === 'booking_date'} dir={sortDir} />
                               </button>
                             </TableHead>
-                            <TableHead className="text-center">
+                            <TableHead className="text-center text-xs uppercase text-muted-foreground">
                               <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('approval_status')}>
                                 Status
                                 <SortIndicator active={sortBy === 'approval_status'} dir={sortDir} />
                               </button>
                             </TableHead>
-                            <TableHead className="text-center">Action</TableHead>
+                            <TableHead className="text-center text-xs uppercase text-muted-foreground">Action</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -809,8 +827,8 @@ export default function VaultPage() {
                             </TableRow>
                           ))}
                         </TableBody>
-																</Table>
-															  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-y px-6 py-3">
+									</Table>
+                        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t bg-muted/20 px-6 py-3">
                       <div className="flex items-center gap-2">
                         <span className="text-sm text-muted-foreground">Rows per page</span>
                         <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>
@@ -830,6 +848,7 @@ export default function VaultPage() {
                         <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>Prev</Button>
                         <Button variant="outline" size="sm" onClick={() => setPage((p) => (p < totalPagesFiltered ? p + 1 : p))} disabled={page >= totalPagesFiltered}>Next</Button>
                       </div>
+                    </div>
                     </div>
                   </div>
                 </div>

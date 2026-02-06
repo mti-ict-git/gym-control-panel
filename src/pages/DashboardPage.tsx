@@ -100,11 +100,16 @@ export default function DashboardPage() {
       <div className="space-y-6">
 
         <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
-          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
-            <CardHeader>
+          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-xl md:rounded-t-none md:border-t-0">
+            <CardHeader className="border-b bg-muted/30">
               <div className="flex items-center justify-between">
                 <div>
-                  <h1 className="text-2xl font-bold">Dashboard</h1>
+                  <h1 className="text-2xl font-semibold flex items-center gap-3">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <LayoutDashboard className="h-5 w-5" />
+                    </span>
+                    Dashboard
+                  </h1>
                   <p className="text-muted-foreground">{format(new Date(), 'EEEE, dd MMM yyyy')}</p>
                 </div>
                 <div className="hidden md:flex items-center gap-3">
@@ -134,8 +139,8 @@ export default function DashboardPage() {
                   </div>
                 </div>
               </div>
-              <CardTitle className="text-2xl flex items-center gap-2">
-                <Database className="h-6 w-6" />
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Database className="h-5 w-5" />
                 Gym Booking Overview
               </CardTitle>
               <CardDescription>Ringkasan booking hari ini & antrian approval</CardDescription>
@@ -176,7 +181,7 @@ export default function DashboardPage() {
               </div>
 
               {Number(occupancy || 0) >= 12 || Number(occupancy || 0) >= Math.round(0.8 * 15) ? (
-                <div className="mt-4 rounded-md border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 p-3 flex items-center justify-between">
+                <div className="mt-4 rounded-xl border border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20 p-3 flex items-center justify-between">
                   <div className="text-sm font-medium text-yellow-800 dark:text-yellow-300">Almost Full</div>
                   <Button variant="outline" size="sm" onClick={() => navigate('/live_gym')}>Periksa Live Gym</Button>
                 </div>
@@ -189,16 +194,18 @@ export default function DashboardPage() {
               </div>
 
               <div className="h-6" />
-              <Card>
-                <CardHeader>
+              <Card className="rounded-xl border bg-card shadow-sm">
+                <CardHeader className="border-b bg-muted/30">
                   <CardTitle className="flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5" />
+                    <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <BarChart3 className="h-4 w-4" />
+                    </span>
                     Analytics
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <Tabs defaultValue="heatmap" className="w-full">
-                    <TabsList className="grid w-full grid-cols-4">
+                    <TabsList className="grid w-full grid-cols-4 rounded-lg bg-muted/40 p-1">
                       <TabsTrigger value="peak-hours">Peak Hours</TabsTrigger>
                       <TabsTrigger value="weekly-trends">Weekly Trends</TabsTrigger>
                       <TabsTrigger value="occupancy-pattern">Occupancy Pattern</TabsTrigger>
@@ -333,7 +340,7 @@ export default function DashboardPage() {
                         <Skeleton className="h-[300px] w-full" />
                       ) : heatmapData ? (
                         <div className="overflow-x-auto">
-                          <table className="min-w-[800px] w-full border rounded-md">
+                          <table className="min-w-[800px] w-full border rounded-xl">
                             <thead>
                               <tr>
                                 <th className="p-2 text-sm text-left">Day/Hour</th>

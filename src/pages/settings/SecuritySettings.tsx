@@ -73,6 +73,11 @@ export default function SecuritySettings() {
 
   const handleLogout = async () => {
     await logout();
+    toast({
+      title: 'Signed out',
+      description: 'You have successfully logged out.',
+      className: 'border-emerald-200 bg-emerald-50 text-emerald-900 border-l-4 border-l-emerald-500 shadow-[0_8px_24px_rgba(15,23,42,0.12)]',
+    });
     navigate('/login');
   };
 

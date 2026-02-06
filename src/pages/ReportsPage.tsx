@@ -513,11 +513,16 @@ export default function ReportsPage() {
   return (
     <AppLayout>
       <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
-      <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
-        <CardHeader>
+      <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-xl md:rounded-t-none md:border-t-0">
+        <CardHeader className="border-b bg-muted/30">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <CardTitle className="text-2xl">Attendance Reports</CardTitle>
+              <CardTitle className="text-2xl font-semibold flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <FileText className="h-5 w-5" />
+                </span>
+                Attendance Reports
+              </CardTitle>
               <CardDescription>View and export gym attendance data</CardDescription>
             </div>
             <Button onClick={handleExportCSV} disabled={filteredData.length === 0}>
@@ -529,7 +534,7 @@ export default function ReportsPage() {
         <CardContent className="flex-1">
           <div className="space-y-6">
 
-            <div className="space-y-4">
+            <div className="rounded-xl border bg-card shadow-sm p-4 space-y-4">
               <div className="flex items-center gap-2">
                 <Filter className="h-5 w-5 text-muted-foreground" />
                 <div className="text-lg font-semibold">Date Filter</div>
@@ -625,7 +630,7 @@ export default function ReportsPage() {
               {statItems.map((item) => {
                 const Icon = item.icon;
                 return (
-                  <div key={item.key} className="rounded-lg border bg-card p-4">
+                  <div key={item.key} className="rounded-xl border bg-card p-4 shadow-sm">
                     <div className="flex items-center gap-3">
                       <div className={`rounded-lg p-2 ${item.bgClass}`}>
                         <Icon className={`h-5 w-5 ${item.iconClass}`} />
@@ -641,8 +646,8 @@ export default function ReportsPage() {
             </div>
 
         {/* Attendance Table */}
-        <Card>
-          <CardHeader>
+        <Card className="rounded-xl border bg-card shadow-sm">
+          <CardHeader className="border-b bg-muted/30">
             <div className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-muted-foreground" />
               <CardTitle className="text-lg">Reports</CardTitle>
@@ -665,7 +670,7 @@ export default function ReportsPage() {
               </div>
             ) : (
               <div className="space-y-4">
-              <div className="rounded-md border overflow-x-auto">
+              <div className="rounded-xl border bg-card overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -752,7 +757,7 @@ export default function ReportsPage() {
                   </TableBody>
                 </Table>
               </div>
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t">
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-muted-foreground">Rows per page</span>
                   <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>

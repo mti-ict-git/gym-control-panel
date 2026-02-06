@@ -23,6 +23,7 @@ import {
   SidebarFooter,
 } from '@/components/ui/sidebar';
 import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Sun, Moon } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
@@ -41,6 +42,7 @@ export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { toast } = useToast();
   const isSuperAdmin = (user?.role || '').toLowerCase() === 'superadmin';
   const [isDark, setIsDark] = useState(false);
 
@@ -60,6 +62,11 @@ export function AppSidebar() {
 
   const handleLogout = async () => {
     await logout();
+    toast({
+      title: 'Signed out',
+      description: 'You have successfully logged out.',
+      className: 'border-emerald-200 bg-emerald-50 text-emerald-900 border-l-4 border-l-emerald-500 shadow-[0_8px_24px_rgba(15,23,42,0.12)]',
+    });
     navigate('/login');
   };
 
@@ -84,11 +91,11 @@ export function AppSidebar() {
   })();
 
   return (
-    <Sidebar className="border-r border-sidebar-border">
-      <SidebarHeader className="h-14 flex-row items-center justify-between gap-3 border-b border-sidebar-border px-6 py-0">
+    <Sidebar className="border-r border-sidebar-border bg-card shadow-sm">
+      <SidebarHeader className="h-14 flex-row items-center justify-between gap-3 border-b border-sidebar-border bg-muted/30 px-6 py-0">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary">
-            <Dumbbell className="h-4 w-4 text-primary-foreground" />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Dumbbell className="h-4 w-4 text-primary" />
           </div>
           <div className="min-w-0">
             <h2 className="truncate text-sm font-semibold leading-none text-sidebar-foreground">Super Gym</h2>
@@ -100,7 +107,7 @@ export function AppSidebar() {
         </Button>
       </SidebarHeader>
 
-      <SidebarContent className="p-2">
+      <SidebarContent className="p-3">
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -114,7 +121,7 @@ export function AppSidebar() {
                     <SidebarMenuItem key={item.title}>
                       <SidebarMenuButton 
                         asChild
-                        className={`touch-target ${isActive ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium' : ''}`}
+                        className={`touch-target rounded-xl px-3 py-2 transition-colors ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-sidebar-foreground hover:bg-muted/40'}`}
                       >
                         <button onClick={() => navigate(item.url)} className="w-full">
                           <item.icon className="h-5 w-5" />
@@ -129,7 +136,7 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="p-4">
+      <SidebarFooter className="border-t border-sidebar-border bg-muted/30 p-4">
         <Separator className="mb-4" />
         <div className="flex items-center gap-3 mb-4">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">

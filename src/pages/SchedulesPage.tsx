@@ -305,17 +305,19 @@ export default function SchedulesPage() {
     <AppLayout>
       <div className="space-y-6">
         <div className="-mx-4 -mt-4 md:-mx-6 md:-mt-6 md:-mb-6">
-          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-lg md:rounded-t-none md:border-t-0">
-            <CardHeader>
-              <CardTitle className="text-2xl flex items-center gap-2">
-                <CalendarIcon className="h-6 w-6" />
+          <Card className="flex w-full flex-col rounded-none md:min-h-[calc(100svh-3.5rem)] md:rounded-xl md:rounded-t-none md:border-t-0">
+            <CardHeader className="border-b bg-muted/30">
+              <CardTitle className="text-2xl font-semibold flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <CalendarIcon className="h-5 w-5" />
+                </span>
                 Schedules
               </CardTitle>
               <CardDescription>Manage gym sessions and view calendar.</CardDescription>
             </CardHeader>
             <CardContent className="flex-1">
               <Tabs defaultValue="sessions" className="w-full">
-                <TabsList>
+                <TabsList className="bg-muted/40 p-1 rounded-lg">
                   <TabsTrigger value="sessions" className="flex items-center gap-2">
                     <List className="h-4 w-4" />
                     Sessions
@@ -331,56 +333,58 @@ export default function SchedulesPage() {
                 </TabsList>
 
                 <TabsContent value="sessions" className="space-y-4 mt-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="relative w-full md:w-80">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        value={search}
-                        onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                        placeholder="Search session name or time (HH:MM)"
-                        className="pl-9"
-                      />
+                  <div className="rounded-xl border bg-card shadow-sm p-4 space-y-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="relative w-full md:w-80">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          value={search}
+                          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                          placeholder="Search session name or time (HH:MM)"
+                          className="pl-9"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button onClick={() => { setPresetSession(null); setSessionDialogOpen(true); }}>
+                          <Plus className="h-4 w-4 mr-2" />
+                          Create Session
+                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline">
+                              Preset
+                              <ChevronDown className="h-4 w-4 ml-2" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {GYM_SESSIONS.map((s) => (
+                              <DropdownMenuItem key={s.id} onClick={() => openWithPreset(s.name, s.startTime, s.endTime)}>
+                                {s.name} ({s.startTime}-{s.endTime})
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        <Button variant="outline" onClick={exportCsv}>
+                          <Download className="h-4 w-4 mr-2" />
+                          Export
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button onClick={() => { setPresetSession(null); setSessionDialogOpen(true); }}>
-                        <Plus className="h-4 w-4 mr-2" />
-                        Create Session
-                      </Button>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="outline">
-                            Preset
-                            <ChevronDown className="h-4 w-4 ml-2" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {GYM_SESSIONS.map((s) => (
-                            <DropdownMenuItem key={s.id} onClick={() => openWithPreset(s.name, s.startTime, s.endTime)}>
-                              {s.name} ({s.startTime}-{s.endTime})
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                      <Button variant="outline" onClick={exportCsv}>
-                        <Download className="h-4 w-4 mr-2" />
-                        Export
-                      </Button>
+                    <div className="flex flex-wrap gap-2">
+                      {['ALL','Morning','Afternoon','Night 1','Night 2'].map((label) => (
+                        <button
+                          key={label}
+                          type="button"
+                          onClick={() => setSearch(label === 'ALL' ? '' : label)}
+                          className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
+                            (search || '') === (label === 'ALL' ? '' : label) ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
+                          }`}
+                          aria-pressed={(search || '') === (label === 'ALL' ? '' : label)}
+                        >
+                          {label}
+                        </button>
+                      ))}
                     </div>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {['ALL','Morning','Afternoon','Night 1','Night 2'].map((label) => (
-                      <button
-                        key={label}
-                        type="button"
-                        onClick={() => setSearch(label === 'ALL' ? '' : label)}
-                        className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${
-                          (search || '') === (label === 'ALL' ? '' : label) ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-foreground'
-                        }`}
-                        aria-pressed={(search || '') === (label === 'ALL' ? '' : label)}
-                      >
-                        {label}
-                      </button>
-                    ))}
                   </div>
                   {isLoading ? (
                     <div className="space-y-4">
@@ -390,7 +394,7 @@ export default function SchedulesPage() {
                     </div>
                   ) : sessions && sessions.length > 0 ? (
                     <div className="space-y-2">
-                      <div className="rounded-lg border bg-card overflow-hidden">
+                      <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
                         <Table>
                           <TableHeader>
                             <TableRow>
@@ -473,7 +477,7 @@ export default function SchedulesPage() {
                           </TableBody>
                         </Table>
                       </div>
-                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3">
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 border-t">
                         <div className="flex items-center gap-2">
                           <span className="text-sm text-muted-foreground">Rows per page</span>
                           <Tabs value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1); }}>

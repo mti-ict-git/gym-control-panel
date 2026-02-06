@@ -58,7 +58,16 @@ export default function RegisterPage() {
   const [availability, setAvailability] = useState<Record<string, { available: number; booked: number; quota: number }>>({});
   const [availabilityLoading, setAvailabilityLoading] = useState(false);
   const [successOpen, setSuccessOpen] = useState(false);
-  const [successInfo, setSuccessInfo] = useState<{ bookingId: number | null; date: Date | null; sessionName: string; timeStart: string; timeEnd: string } | null>(null);
+  const [successInfo, setSuccessInfo] = useState<{
+    bookingId: number | null;
+    date: Date | null;
+    sessionName: string;
+    timeStart: string;
+    timeEnd: string;
+    employeeId: string;
+    employeeName: string | null;
+    department: string | null;
+  } | null>(null);
   const [datePopoverOpen, setDatePopoverOpen] = useState(false);
   const defaultContactName = 'Gym Coordinator';
   const defaultContactPhone = '+6281275000560';
@@ -164,7 +173,7 @@ export default function RegisterPage() {
       }
       if (/^-{3,}$/.test(line)) {
         flushLists();
-        elements.push(<div key={`hr-${i}`} className="border-t border-slate-200 my-2" />);
+        elements.push(<div key={`hr-${i}`} className="border-t border-border/60 my-2" />);
         continue;
       }
       if (/^\d+\.\s+/.test(line)) {
@@ -277,7 +286,7 @@ export default function RegisterPage() {
       ? 'bg-purple-100 text-purple-900 border-purple-200'
       : key.includes('night') && (key.includes('2') || key.includes('- 2'))
       ? 'bg-amber-100 text-amber-900 border-amber-200'
-      : 'bg-slate-100 text-slate-900 border-slate-200';
+      : 'bg-muted/60 text-foreground border-border/60';
   };
 
   const sessionFieldTone = (name: string): string => {
@@ -290,7 +299,7 @@ export default function RegisterPage() {
       ? 'border-purple-300 bg-purple-50'
       : key.includes('night') && (key.includes('2') || key.includes('- 2'))
       ? 'border-amber-300 bg-amber-50'
-      : 'border-slate-300 bg-slate-50';
+      : 'border-border/60 bg-background';
   };
 
   const sessionDotColor = (name: string): string => {
@@ -323,6 +332,72 @@ export default function RegisterPage() {
     if (remaining <= Math.ceil(quota * 0.3)) return 'bg-yellow-500';
     return 'bg-green-500';
   };
+
+  const fetchEmployeeProfile = useCallback(async (employeeId: string) => {
+    const empId = String(employeeId || '').trim();
+    if (!empId) return null;
+    const tryFetch = async (url: string) => {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('Failed to fetch employee details');
+      return (await resp.json()) as {
+        ok: boolean;
+        employees?: Array<{ employee_id: string; name: string; department: string | null }>;
+        error?: string;
+      };
+    };
+    const pick = (json: { ok: boolean; employees?: Array<{ employee_id: string; name: string; department: string | null }> }) => {
+      if (!json.ok) return null;
+      const row = Array.isArray(json.employees) ? json.employees[0] : null;
+      if (!row) return null;
+      const name = String(row.name || '').trim();
+      return { name: name.length > 0 ? name : null, department: row.department ?? null };
+    };
+    try {
+      const json = await tryFetch(`/api/employee-core?ids=${encodeURIComponent(empId)}&limit=1`);
+      return pick(json);
+    } catch (_) {
+      try {
+        const json = await tryFetch(`/employee-core?ids=${encodeURIComponent(empId)}&limit=1`);
+        return pick(json);
+      } catch (_) {
+        return null;
+      }
+    }
+  }, []);
+
+  const fetchBookingDetails = useCallback(async (bookingId: number, dateStr: string) => {
+    if (!bookingId || !dateStr) return null;
+    const params = `from=${encodeURIComponent(dateStr)}&to=${encodeURIComponent(dateStr)}`;
+    const tryFetch = async (url: string) => {
+      const resp = await fetch(url);
+      const json = (await resp.json()) as {
+        ok: boolean;
+        bookings?: Array<{ booking_id: number; employee_name?: string | null; department?: string | null }>;
+        error?: string;
+      };
+      if (resp.status >= 500) throw new Error(json?.error || 'Server error');
+      return json;
+    };
+    try {
+      const json = await tryFetch(`/api/gym-bookings?${params}`);
+      if (!json.ok) return null;
+      const row = (json.bookings || []).find((b) => Number(b.booking_id) === bookingId) || null;
+      if (!row) return null;
+      const name = row.employee_name != null ? String(row.employee_name).trim() : '';
+      return { name: name.length > 0 ? name : null, department: row.department ?? null };
+    } catch (_) {
+      try {
+        const json = await tryFetch(`/gym-bookings?${params}`);
+        if (!json.ok) return null;
+        const row = (json.bookings || []).find((b) => Number(b.booking_id) === bookingId) || null;
+        if (!row) return null;
+        const name = row.employee_name != null ? String(row.employee_name).trim() : '';
+        return { name: name.length > 0 ? name : null, department: row.department ?? null };
+      } catch (_) {
+        return null;
+      }
+    }
+  }, []);
 
   // Auto-swipe carousel
   useEffect(() => {
@@ -486,8 +561,11 @@ export default function RegisterPage() {
       }
 
       const selectedSession = selectedGymDbSession;
+      const employeeProfile = await fetchEmployeeProfile(data.employeeId);
 
       const bId = payload && typeof payload.booking_id === 'number' ? payload.booking_id : null;
+      const dateStr = format(data.date, 'yyyy-MM-dd');
+      const bookingDetails = bId ? await fetchBookingDetails(bId, dateStr) : null;
       if (selectedSession) {
         setSuccessInfo({
           bookingId: bId,
@@ -495,6 +573,9 @@ export default function RegisterPage() {
           sessionName: displaySessionName(selectedSession.session_name),
           timeStart: selectedSession.time_start,
           timeEnd: timeEndForSession(selectedSession),
+          employeeId: data.employeeId,
+          employeeName: bookingDetails?.name ?? employeeProfile?.name ?? null,
+          department: bookingDetails?.department ?? employeeProfile?.department ?? null,
         });
         setSuccessOpen(true);
       }
@@ -575,14 +656,14 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200">
+    <div className="min-h-screen flex bg-gradient-to-br from-background via-muted/40 to-muted/60">
       {/* Left Panel - Decorative */}
       <div className="hidden lg:flex lg:w-1/2 p-8">
-        <div className="w-full bg-white/60 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden border border-slate-200 shadow-xl">
+        <div className="w-full bg-card/80 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden border border-border/60 shadow-lg ring-1 ring-black/5 dark:ring-white/10">
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-72 h-72 border border-slate-300 rounded-full absolute" />
-            <div className="w-96 h-96 border border-slate-300 rounded-full absolute" />
-            <div className="w-[28rem] h-[28rem] border border-slate-200 rounded-full absolute" />
+            <div className="w-72 h-72 border border-border/60 rounded-full absolute" />
+            <div className="w-96 h-96 border border-border/60 rounded-full absolute" />
+            <div className="w-[28rem] h-[28rem] border border-border/50 rounded-full absolute" />
           </div>
 
           <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
@@ -625,12 +706,12 @@ export default function RegisterPage() {
           <div className="flex-1" />
 
           <div className="relative z-10 text-center">
-            <h1 className="text-3xl font-bold text-slate-900 mb-3 tracking-tight">
+            <h1 className="text-3xl font-bold text-foreground mb-3 tracking-tight">
               Book your gym session
               <br />
               quick and easy.
             </h1>
-            <p className="text-slate-600 text-sm max-w-xs mx-auto">
+            <p className="text-muted-foreground text-sm max-w-xs mx-auto">
               Reserve your spot for tomorrow or the next day. Stay fit, stay healthy!
             </p>
 
@@ -654,15 +735,15 @@ export default function RegisterPage() {
 
       {/* Right Panel - Form */}
       <div className="w-full lg:w-1/2 p-6 flex items-center justify-center">
-        <div className="w-full max-w-xl bg-white rounded-3xl p-10 lg:p-14 shadow-2xl border border-slate-200">
+        <div className="w-full max-w-xl bg-card rounded-3xl p-10 lg:p-14 shadow-xl border border-border/60">
           <div className="flex lg:hidden justify-center mb-6">
             <img src={gymIcon} alt="Gym" className="w-20 h-20 object-contain" />
           </div>
 
           <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-100 text-amber-900 text-xs font-semibold mb-3">Super Gym</div>
-            <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Gym Booking</h2>
-            <p className="text-slate-600 text-sm mt-1">Register for a gym session</p>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold mb-3">Super Gym</div>
+            <h2 className="text-2xl font-bold text-foreground tracking-tight">Gym Booking</h2>
+            <p className="text-muted-foreground text-sm mt-1">Register for a gym session</p>
           </div>
 
           <Form {...form}>
@@ -702,11 +783,11 @@ export default function RegisterPage() {
                         {...field}
                         onFocus={() => setShowEmpDropdown(true)}
                         onBlur={() => setTimeout(() => setShowEmpDropdown(false), 150)}
-                        className="h-12 rounded-xl border-slate-300 bg-slate-50 focus:bg-white transition-colors"
+                        className="h-12 rounded-xl border-border/60 bg-background focus:bg-background transition-colors"
                       />
                     </FormControl>
                     {showEmpDropdown && (empLoading || empSuggestions.length > 0) && (
-                      <div className="mt-2 border border-slate-200 rounded-xl bg-white shadow-sm max-h-48 overflow-auto">
+                      <div className="mt-2 border border-border/60 rounded-xl bg-card shadow-sm max-h-48 overflow-auto">
                         {empLoading ? (
                           <div className="px-3 py-2 text-sm text-slate-500">Searching...</div>
                         ) : (
@@ -747,7 +828,7 @@ export default function RegisterPage() {
                           <Button
                             variant="outline"
                             className={cn(
-                              'h-12 w-full rounded-xl border-slate-300 bg-slate-50 hover:bg-white pl-3 text-left font-normal transition-colors',
+                              'h-12 w-full rounded-xl border-border/60 bg-background hover:bg-muted/40 pl-3 text-left font-normal transition-colors',
                               !field.value && 'text-muted-foreground'
                             )}
                           >
@@ -797,7 +878,7 @@ export default function RegisterPage() {
                           initialFocus
                           className="pointer-events-auto"
                         />
-                        <div className="px-3 py-2 text-xs text-slate-600 border-t border-slate-200 flex items-center gap-4">
+                        <div className="px-3 py-2 text-xs text-muted-foreground border-t border-border/60 flex items-center gap-4">
                           <span className="flex items-center gap-2">
                             <span className="inline-block h-2 w-2 rounded-sm bg-blue-100 ring-1 ring-blue-300" />
                             <span>Available dates</span>
@@ -825,7 +906,7 @@ export default function RegisterPage() {
                         <FormControl>
                           <SelectTrigger
                             disabled={!selectedDate}
-                            className={`h-12 rounded-xl focus:ring-0 focus:ring-offset-0 transition-colors ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border-slate-300 bg-slate-50'}`}
+                            className={`h-12 rounded-xl focus:ring-0 focus:ring-offset-0 transition-colors ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border-border/60 bg-background'}`}
                           >
                             {selectedGymDbSession && (
                               <span className={`inline-block h-2 w-2 rounded-full ${sessionDotColor(selectedGymDbSession.session_name)} mr-2`} />
@@ -872,7 +953,7 @@ export default function RegisterPage() {
 
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-slate-800 mt-2 md:mt-0">Time</div>
-                  <div className={`flex h-12 w-full items-center rounded-xl px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border border-slate-300 bg-slate-50 text-slate-700'}`}>
+                  <div className={`flex h-12 w-full items-center rounded-xl px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border border-border/60 bg-background text-muted-foreground'}`}>
                     {selectedGymDbSession ? (
                       <>
                         <span className={`inline-block h-2 w-2 rounded-full ${sessionDotColor(selectedGymDbSession.session_name)} mr-2`} />
@@ -888,7 +969,7 @@ export default function RegisterPage() {
 
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-slate-800 mt-2 md:mt-0">Available</div>
-                  <div className={`flex h-12 w-full items-center rounded-xl px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border border-slate-300 bg-slate-50'}`}>
+                  <div className={`flex h-12 w-full items-center rounded-xl px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border border-border/60 bg-background'}`}>
                     {selectedGymDbSession ? (
                       availabilityLoading ? (
                         <span className="text-slate-600">Loading...</span>
@@ -952,7 +1033,7 @@ export default function RegisterPage() {
                     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 4;
                     if (atBottom) setEulaScrolled(true);
                   }}
-                  className="max-h-[60vh] overflow-auto rounded-md border border-slate-200 p-4 bg-slate-50"
+                  className="max-h-[60vh] overflow-auto rounded-md border border-border/60 p-4 bg-muted/30"
                 >
                   {renderEula(eulaText)}
                 </div>
@@ -987,6 +1068,13 @@ export default function RegisterPage() {
               <div className="text-sm text-slate-700">
                 {successInfo?.bookingId != null ? (
                   <div className="mt-2">Booking ID: {`GYMBOOK${String(successInfo.bookingId).padStart(2, '0')}`}</div>
+                ) : null}
+                {successInfo ? (
+                  <div className="mt-2 space-y-1">
+                    <div>Name: {successInfo.employeeName || '-'}</div>
+                    <div>Department: {successInfo.department || '-'}</div>
+                    <div>Employee ID: {successInfo.employeeId}</div>
+                  </div>
                 ) : null}
                 <div className="mt-3 text-slate-600">
                   Need help or want to change your booking? Contact {contactName} at {contactPhone}.
