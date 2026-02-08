@@ -225,8 +225,15 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     const nowInTz = new Date(nowUtcMs + tzOffsetMinutes * 60_000);
     const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
     const todayStr = `${nowInTz.getUTCFullYear()}-${String(nowInTz.getUTCMonth() + 1).padStart(2, '0')}-${String(nowInTz.getUTCDate()).padStart(2, '0')}`;
-    const toUtcMsForTodayTzTime = (hh, mm) => {
-      return Date.UTC(nowInTz.getUTCFullYear(), nowInTz.getUTCMonth(), nowInTz.getUTCDate(), hh, mm, 0, 0) - tzOffsetMinutes * 60_000;
+    const yestInTz = new Date(nowInTz.getTime() - 24 * 60 * 60 * 1000);
+    const yesterdayStr = `${yestInTz.getUTCFullYear()}-${String(yestInTz.getUTCMonth() + 1).padStart(2, '0')}-${String(yestInTz.getUTCDate()).padStart(2, '0')}`;
+    const toUtcMsForTzDateTime = (baseDateUtc, hh, mm) => {
+      return Date.UTC(baseDateUtc.getUTCFullYear(), baseDateUtc.getUTCMonth(), baseDateUtc.getUTCDate(), hh, mm, 0, 0) - tzOffsetMinutes * 60_000;
+    };
+    const parseYmdToUtcDate = (ymd) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || '').trim());
+      if (!m) return null;
+      return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 0, 0, 0, 0));
     };
 
     const pool = await new sql.ConnectionPool(cfg).connect();
@@ -409,17 +416,19 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     if (enabled) {
       const reqBookings = pool.request();
       reqBookings.input('todayStr', sql.VarChar(10), todayStr);
+      reqBookings.input('yesterdayStr', sql.VarChar(10), yesterdayStr);
       const bookingsRes = await reqBookings.query(
         `SELECT
           gb.EmployeeID AS employee_id,
           gb.CardNo AS card_no,
           gb.Department AS department,
           gb.ApprovalStatus AS approval_status,
+          CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date,
           CONVERT(varchar(5), s.StartTime, 108) AS time_start,
           CONVERT(varchar(5), s.EndTime, 108) AS time_end
         FROM dbo.gym_booking gb
         LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
-        WHERE CONVERT(varchar(10), gb.BookingDate, 23) = @todayStr
+        WHERE CONVERT(varchar(10), gb.BookingDate, 23) IN (@todayStr, @yesterdayStr)
           AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
           AND (
             (
@@ -440,8 +449,12 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         if (!start) continue;
         const end = parseHHMM(row.time_end);
 
-        const startAtRawUtcMs = toUtcMsForTodayTzTime(start.hh, start.mm);
-        const endAtRawUtcMs = end ? toUtcMsForTodayTzTime(end.hh, end.mm) : startAtRawUtcMs + 60 * 60_000;
+        const baseDate = parseYmdToUtcDate(row.booking_date) || new Date(Date.UTC(nowInTz.getUTCFullYear(), nowInTz.getUTCMonth(), nowInTz.getUTCDate(), 0, 0, 0, 0));
+        const startAtRawUtcMs = toUtcMsForTzDateTime(baseDate, start.hh, start.mm);
+        let endAtRawUtcMs = end ? toUtcMsForTzDateTime(baseDate, end.hh, end.mm) : startAtRawUtcMs + 60 * 60_000;
+        if (endAtRawUtcMs <= startAtRawUtcMs) {
+          endAtRawUtcMs += 24 * 60 * 60_000;
+        }
         const startAtUtcMs = startAtRawUtcMs - graceBeforeMin * 60_000;
         const endAtUtcMs = endAtRawUtcMs + graceAfterMin * 60_000;
 
