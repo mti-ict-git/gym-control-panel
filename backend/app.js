@@ -36,11 +36,6 @@ app.use(
 );
 app.use(express.json());
 
-app.use(systemRouter);
-const pushAccessEvent = typeof systemRouter?.locals?.pushAccessEvent === 'function'
-  ? systemRouter.locals.pushAccessEvent
-  : () => {};
-
 // Support both /api prefix and root-level routes to tolerate different proxy setups
 app.use('/api', testerRouter);
 app.use('/api', masterRouter);
@@ -52,6 +47,11 @@ app.use(masterRouter);
 app.use(gymRouter);
 app.use(authRouter);
 app.use(settingsRouter);
+
+app.use(systemRouter);
+const pushAccessEvent = typeof systemRouter?.locals?.pushAccessEvent === 'function'
+  ? systemRouter.locals.pushAccessEvent
+  : () => {};
 
 const PORT = process.env.PORT || 5055;
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
