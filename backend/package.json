@@ -1,0 +1,34 @@
+{
+  "name": "gym-control-panel-backend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node app.js",
+    "start": "node app.js",
+    "test": "node --test",
+    "test:coverage": "c8 --check-coverage --lines 90 --branches 90 --functions 90 --statements 90 node --test",
+    "controller:upload-card": "node scripts/upload-card-to-controller.js",
+    "seed-accounts": "node scripts/seed-accounts.js",
+    "backfill-passwords": "node scripts/backfill-passwords.js",
+    "fix-roles": "node scripts/fix-roles.js",
+    "check-roles": "node scripts/check-roles.js",
+    "pull-transactions": "node scripts/pull-transactions.js",
+    "scan-carddb-schema": "node scripts/scan-carddb-schema.js",
+    "add-name-to-gym-reports": "node scripts/add-name-to-gym-reports.js",
+    "get-latest-transaction": "node scripts/get-latest-transaction.js",
+    "gym-live-init": "node scripts/gym-live-init.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "mssql": "^12.2.0"
+  },
+  "devDependencies": {
+    "c8": "^10.1.2",
+    "supertest": "^7.0.0"
+  }
+}

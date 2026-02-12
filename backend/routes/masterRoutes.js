@@ -2,9 +2,16 @@ import express from 'express';
 import sql from 'mssql';
 import { envTrim, envBool } from '../lib/env.js';
 
-const router = express.Router();
+/**
+ * GET /employees
+ * Purpose: Search employee IDs by prefix.
+ * Params: query { q?: string }.
+ * Response: { success: boolean, employees: string[], error?: string }.
+ */
+export const createMasterRouter = ({ sqlImpl = sql, env = process.env } = {}) => {
+  const router = express.Router();
 
-router.get('/employees', async (req, res) => {
+  router.get('/employees', async (req, res) => {
   const {
     MASTER_DB_SERVER,
     MASTER_DB_PORT,
@@ -13,7 +20,7 @@ router.get('/employees', async (req, res) => {
     MASTER_DB_PASSWORD,
     MASTER_DB_ENCRYPT,
     MASTER_DB_TRUST_SERVER_CERTIFICATE,
-  } = process.env;
+  } = env;
 
   const q = String(req.query.q || '').trim();
 
@@ -40,10 +47,10 @@ router.get('/employees', async (req, res) => {
   };
 
   try {
-    const pool = await sql.connect(config);
+    const pool = await sqlImpl.connect(config);
     const request = pool.request();
     if (q) {
-      request.input('q', sql.VarChar(50), q + '%');
+      request.input('q', sqlImpl.VarChar(50), q + '%');
     }
     const query = q
       ? 'SELECT TOP 20 employee_id FROM employee_core WHERE employee_id LIKE @q ORDER BY employee_id'
@@ -56,9 +63,15 @@ router.get('/employees', async (req, res) => {
     const message = error?.message || String(error);
     return res.status(200).json({ success: false, error: message, employees: [] });
   }
-});
+  });
 
-router.get('/employee-core', async (req, res) => {
+/**
+ * GET /employee-core
+ * Purpose: Fetch employee core details by IDs or search query.
+ * Params: query { q?: string, ids?: string, limit?: number }.
+ * Response: { ok: boolean, employees: object[], error?: string }.
+ */
+  router.get('/employee-core', async (req, res) => {
   const {
     MASTER_DB_SERVER,
     MASTER_DB_PORT,
@@ -67,7 +80,7 @@ router.get('/employee-core', async (req, res) => {
     MASTER_DB_PASSWORD,
     MASTER_DB_ENCRYPT,
     MASTER_DB_TRUST_SERVER_CERTIFICATE,
-  } = process.env;
+  } = env;
 
   const q = String(req.query.q || '').trim();
   const idsRaw = String(req.query.ids || '').trim();
@@ -104,73 +117,22 @@ router.get('/employee-core', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
-  const pickColumn = (columns, candidates) => {
-    const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
-    for (const cand of candidates) {
-      const hit = map.get(String(cand).toLowerCase());
-      if (hit) return hit;
-    }
-    return null;
-  };
-
   try {
-    const pool = await sql.connect(config);
-
-    const schemaResult = await pool.request().query(
-      "SELECT TOP 1 TABLE_SCHEMA AS schema_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'employee_core' ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA"
-    );
-
-    const schema = schemaResult?.recordset?.[0]?.schema_name ? String(schemaResult.recordset[0].schema_name) : 'dbo';
-
-    const colReq = pool.request();
-    colReq.input('schema', sql.VarChar(128), schema);
-    const columnsResult = await colReq.query(
-      'SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = \'employee_core\' AND TABLE_SCHEMA = @schema'
-    );
-    const columns = (columnsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
-
-    const employeeIdCol = pickColumn(columns, ['employee_id', 'Employee ID', 'employeeid', 'EmployeeID', 'emp_id', 'EmpID']);
-    const nameCol = pickColumn(columns, ['name', 'Name', 'employee_name', 'Employee Name', 'full_name', 'FullName']);
-    const deptCol = pickColumn(columns, ['department', 'Department', 'dept', 'Dept', 'dept_name', 'DeptName']);
-    const cardCol = pickColumn(columns, ['id_card', 'ID Card', 'card_no', 'Card No', 'CardNo']);
-    const genderCol = pickColumn(columns, ['gender', 'Gender', 'sex', 'Sex', 'jenis_kelamin', 'Jenis Kelamin']);
-
-    if (!employeeIdCol || !nameCol) {
-      await pool.close();
-      return res.status(200).json({ ok: false, error: 'employee_core must have employee_id and Name columns', employees: [] });
-    }
-
-    const selectCols = [
-      `[${employeeIdCol}] AS employee_id`,
-      `[${nameCol}] AS name`,
-      deptCol ? `[${deptCol}] AS department` : `CAST(NULL AS varchar(255)) AS department`,
-      cardCol ? `[${cardCol}] AS card_no` : `CAST(NULL AS varchar(255)) AS card_no`,
-      genderCol ? `[${genderCol}] AS gender` : `CAST(NULL AS varchar(50)) AS gender`,
-    ].join(',\n        ');
-
-    const request = pool.request();
-    let whereSql = '';
-
+    const pool = await sqlImpl.connect(config);
+    const req1 = pool.request();
+    if (q) req1.input('q', sqlImpl.VarChar(100), `%${q}%`);
+    const clause = ids.length > 0 ? `WHERE employee_id IN (${ids.map((_, i) => `@emp${i}`).join(', ')})` : (q ? 'WHERE employee_id LIKE @q OR name LIKE @q' : '');
     if (ids.length > 0) {
-      const params = ids.map((_, idx) => `@id${idx}`);
-      ids.forEach((id, idx) => {
-        request.input(`id${idx}`, sql.VarChar(100), id);
-      });
-      whereSql = `WHERE [${employeeIdCol}] IN (${params.join(', ')})`;
-    } else if (q) {
-      request.input('qEmp', sql.VarChar(100), q + '%');
-      request.input('qName', sql.VarChar(200), q + '%');
-      whereSql = `WHERE [${employeeIdCol}] LIKE @qEmp OR [${nameCol}] LIKE @qName`;
+      ids.forEach((id, i) => req1.input(`emp${i}`, sqlImpl.VarChar(50), id));
     }
-
-    const query = `SELECT TOP (${limit}) ${selectCols} FROM [${schema}].[employee_core] ${whereSql} ORDER BY [${employeeIdCol}] ASC`;
-
-    const result = await request.query(query);
+    req1.input('Limit', sqlImpl.Int, limit);
+    const r = await req1.query(
+      `SELECT TOP (@Limit) employee_id, name, department, card_no, gender FROM employee_core ${clause} ORDER BY employee_id`
+    );
     await pool.close();
-
-    const employees = (result?.recordset || []).map((row) => ({
-      employee_id: String(row.employee_id ?? '').trim(),
-      name: String(row.name ?? '').trim(),
+    const employees = (r?.recordset || []).map((row) => ({
+      employee_id: row.employee_id != null ? String(row.employee_id).trim() : '',
+      name: row.name != null ? String(row.name).trim() : null,
       department: row.department != null ? String(row.department).trim() : null,
       card_no: row.card_no != null ? String(row.card_no).trim() : null,
       gender: row.gender != null ? String(row.gender).trim() : null,
@@ -181,6 +143,9 @@ router.get('/employee-core', async (req, res) => {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, employees: [] });
   }
-});
+  });
 
-export default router;
+  return router;
+};
+
+export default createMasterRouter();

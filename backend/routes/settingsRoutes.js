@@ -4,57 +4,64 @@ import path from 'path';
 import sql from 'mssql';
 import { envTrim, envBool } from '../lib/env.js';
 
-const router = express.Router();
+export const createSettingsRouter = ({
+  sqlImpl = sql,
+  fsImpl = fs,
+  pathImpl = path,
+  env = process.env,
+  baseDir = process.cwd(),
+} = {}) => {
+  const router = express.Router();
 
-const DATA_DIR = path.resolve(process.cwd(), 'backend', 'data');
-const SETTINGS_FILE = path.join(DATA_DIR, 'app-settings.json');
+  const DATA_DIR = pathImpl.resolve(baseDir, 'data');
+  const SETTINGS_FILE = pathImpl.join(DATA_DIR, 'app-settings.json');
 
-function ensureDir(dir) {
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-  } catch (_) {}
-}
-
-function readSettings() {
-  try {
-    const raw = fs.readFileSync(SETTINGS_FILE, 'utf8');
-    const json = JSON.parse(raw);
-    return typeof json === 'object' && json ? json : {};
-  } catch (_) {
-    return {};
+  function ensureDir(dir) {
+    try {
+      fsImpl.mkdirSync(dir, { recursive: true });
+    } catch (_) {}
   }
-}
 
-function writeSettings(obj) {
-  ensureDir(DATA_DIR);
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj, null, 2), 'utf8');
-}
-
-function getDbConfig() {
-  const server = envTrim(process.env.DB_SERVER);
-  const database = envTrim(process.env.DB_DATABASE);
-  const user = envTrim(process.env.DB_USER);
-  const password = envTrim(process.env.DB_PASSWORD);
-  const port = Number(envTrim(process.env.DB_PORT) || '1433');
-  const encrypt = envBool(process.env.DB_ENCRYPT, false);
-  const trustServerCertificate = envBool(process.env.DB_TRUST_SERVER_CERTIFICATE, true);
-  if (!server || !database || !user || !password) {
-    return null;
+  function readSettings() {
+    try {
+      const raw = fsImpl.readFileSync(SETTINGS_FILE, 'utf8');
+      const json = JSON.parse(raw);
+      return typeof json === 'object' && json ? json : {};
+    } catch (_) {
+      return {};
+    }
   }
-  return {
-    server,
-    port,
-    database,
-    user,
-    password,
-    options: { encrypt, trustServerCertificate },
-    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
-  };
-}
 
-async function ensureAppSettingsTable(pool) {
-  await pool.request().query(
-    `IF OBJECT_ID('dbo.gym_app_settings','U') IS NULL
+  function writeSettings(obj) {
+    ensureDir(DATA_DIR);
+    fsImpl.writeFileSync(SETTINGS_FILE, JSON.stringify(obj, null, 2), 'utf8');
+  }
+
+  function getDbConfig() {
+    const server = envTrim(env.DB_SERVER);
+    const database = envTrim(env.DB_DATABASE);
+    const user = envTrim(env.DB_USER);
+    const password = envTrim(env.DB_PASSWORD);
+    const port = Number(envTrim(env.DB_PORT) || '1433');
+    const encrypt = envBool(env.DB_ENCRYPT, false);
+    const trustServerCertificate = envBool(env.DB_TRUST_SERVER_CERTIFICATE, true);
+    if (!server || !database || !user || !password) {
+      return null;
+    }
+    return {
+      server,
+      port,
+      database,
+      user,
+      password,
+      options: { encrypt, trustServerCertificate },
+      pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+    };
+  }
+
+  async function ensureAppSettingsTable(pool) {
+    await pool.request().query(
+      `IF OBJECT_ID('dbo.gym_app_settings','U') IS NULL
      BEGIN
        CREATE TABLE dbo.gym_app_settings (
          Id INT NOT NULL PRIMARY KEY,
@@ -69,10 +76,16 @@ async function ensureAppSettingsTable(pool) {
        INSERT INTO dbo.gym_app_settings (Id, SupportContactName, SupportContactPhone)
        VALUES (1, 'Gym Coordinator', '+6281275000560');
      END;`
-  );
-}
+    );
+  }
 
-router.get('/app-settings/support-contact', (_req, res) => {
+/**
+ * GET /app-settings/support-contact
+ * Purpose: Retrieve support contact settings.
+ * Params: none.
+ * Response: { ok: boolean, name: string, phone: string }.
+ */
+  router.get('/app-settings/support-contact', (_req, res) => {
   (async () => {
     const config = getDbConfig();
     if (!config) {
@@ -82,7 +95,7 @@ router.get('/app-settings/support-contact', (_req, res) => {
       return res.json({ ok: true, name, phone });
     }
     try {
-      const pool = await new sql.ConnectionPool(config).connect();
+      const pool = await new sqlImpl.ConnectionPool(config).connect();
       await ensureAppSettingsTable(pool);
       const r = await pool.request().query(
         `SELECT TOP 1 SupportContactName AS name, SupportContactPhone AS phone FROM dbo.gym_app_settings WHERE Id = 1`
@@ -92,23 +105,28 @@ router.get('/app-settings/support-contact', (_req, res) => {
       const name = row?.name ? String(row.name) : 'Gym Coordinator';
       const phone = row?.phone ? String(row.phone) : '+6281275000560';
       return res.json({ ok: true, name, phone });
-    } catch (error) {
+    } catch (_) {
       const settings = readSettings();
       const name = typeof settings.support_contact_name === 'string' ? settings.support_contact_name : 'Gym Coordinator';
       const phone = typeof settings.support_contact_phone === 'string' ? settings.support_contact_phone : '+6281275000560';
       return res.json({ ok: true, name, phone });
     }
   })();
-});
+  });
 
-router.post('/app-settings/support-contact', (req, res) => {
+/**
+ * POST /app-settings/support-contact
+ * Purpose: Update support contact settings.
+ * Params: body { name: string, phone: string }.
+ * Response: { ok: boolean, error?: string }.
+ */
+  router.post('/app-settings/support-contact', (req, res) => {
   const name = String(req.body?.name || '').trim();
   const phone = String(req.body?.phone || '').trim();
 
   if (!name || name.length > 100) {
     return res.status(400).json({ ok: false, error: 'Invalid contact name' });
   }
-  // Allow leading + and digits, minimum length check
   const digits = phone.replace(/[^+0-9]/g, '');
   if (!digits || digits.length < 6 || digits.length > 20 || !/^\+?[0-9]+$/.test(digits)) {
     return res.status(400).json({ ok: false, error: 'Invalid contact phone' });
@@ -122,18 +140,18 @@ router.post('/app-settings/support-contact', (req, res) => {
       try {
         writeSettings(next);
         return res.json({ ok: true });
-      } catch (e) {
+      } catch (_) {
         return res.status(500).json({ ok: false, error: 'Failed to persist settings' });
       }
     }
     try {
-      const pool = await new sql.ConnectionPool(config).connect();
+      const pool = await new sqlImpl.ConnectionPool(config).connect();
       await ensureAppSettingsTable(pool);
       const req1 = pool.request();
-      req1.input('Id', sql.Int, 1);
-      req1.input('Name', sql.VarChar(100), name);
-      req1.input('Phone', sql.VarChar(20), digits);
-      req1.input('UpdatedBy', sql.VarChar(50), 'SETTINGS_API');
+      req1.input('Id', sqlImpl.Int, 1);
+      req1.input('Name', sqlImpl.VarChar(100), name);
+      req1.input('Phone', sqlImpl.VarChar(20), digits);
+      req1.input('UpdatedBy', sqlImpl.VarChar(50), 'SETTINGS_API');
       await req1.query(
         `IF EXISTS (SELECT 1 FROM dbo.gym_app_settings WHERE Id = @Id)
          BEGIN
@@ -152,14 +170,14 @@ router.post('/app-settings/support-contact', (req, res) => {
       );
       await pool.close();
       return res.json({ ok: true });
-    } catch (e) {
+    } catch (_) {
       return res.status(500).json({ ok: false, error: 'Failed to persist settings to DB' });
     }
   })();
-});
+  });
 
-async function ensureGymControllerSettings(pool) {
-  await pool.request().query(
+  async function ensureGymControllerSettings(pool) {
+    await pool.request().query(
     `IF OBJECT_ID('dbo.gym_controller_settings','U') IS NULL BEGIN
        CREATE TABLE dbo.gym_controller_settings (
          Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
@@ -186,17 +204,23 @@ async function ensureGymControllerSettings(pool) {
      END;
      IF NOT EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
        INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize) VALUES (1, 0);`
-  );
-}
+    );
+  }
 
-router.get('/gym-controller/settings', (_req, res) => {
+/**
+ * GET /gym-controller/settings
+ * Purpose: Read gym controller settings.
+ * Params: none.
+ * Response: { ok: boolean, settings?: object, error?: string }.
+ */
+  router.get('/gym-controller/settings', (_req, res) => {
   (async () => {
     const config = getDbConfig();
     if (!config) {
       return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
     }
     try {
-      const pool = await new sql.ConnectionPool(config).connect();
+      const pool = await new sqlImpl.ConnectionPool(config).connect();
       await ensureGymControllerSettings(pool);
       const r = await pool.request().query(
         `SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs FROM dbo.gym_controller_settings WHERE Id = 1`
@@ -223,9 +247,15 @@ router.get('/gym-controller/settings', (_req, res) => {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
   })();
-});
+  });
 
-router.post('/gym-controller/settings', (req, res) => {
+/**
+ * POST /gym-controller/settings
+ * Purpose: Update gym controller settings.
+ * Params: body { EnableAutoOrganize?: boolean, EnableManagerAllSessionAccess?: boolean, GraceBeforeMin?: number, GraceAfterMin?: number, WorkerIntervalMs?: number }.
+ * Response: { ok: boolean, error?: string }.
+ */
+  router.post('/gym-controller/settings', (req, res) => {
   (async () => {
     const config = getDbConfig();
     if (!config) {
@@ -244,15 +274,15 @@ router.post('/gym-controller/settings', (req, res) => {
     const workerIntervalMs = b.WorkerIntervalMs != null ? clamp(Number(b.WorkerIntervalMs) || 60000, 5000, 60 * 60 * 1000) : undefined;
 
     try {
-      const pool = await new sql.ConnectionPool(config).connect();
+      const pool = await new sqlImpl.ConnectionPool(config).connect();
       await ensureGymControllerSettings(pool);
       const req1 = pool.request();
-      req1.input('Id', sql.Int, 1);
-      if (enableAutoOrganize !== undefined) req1.input('EnableAutoOrganize', sql.Bit, enableAutoOrganize ? 1 : 0);
-      if (enableManagerAllSessionAccess !== undefined) req1.input('EnableManagerAllSessionAccess', sql.Bit, enableManagerAllSessionAccess ? 1 : 0);
-      if (graceBeforeMin !== undefined) req1.input('GraceBeforeMin', sql.Int, graceBeforeMin);
-      if (graceAfterMin !== undefined) req1.input('GraceAfterMin', sql.Int, graceAfterMin);
-      if (workerIntervalMs !== undefined) req1.input('WorkerIntervalMs', sql.Int, workerIntervalMs);
+      req1.input('Id', sqlImpl.Int, 1);
+      if (enableAutoOrganize !== undefined) req1.input('EnableAutoOrganize', sqlImpl.Bit, enableAutoOrganize ? 1 : 0);
+      if (enableManagerAllSessionAccess !== undefined) req1.input('EnableManagerAllSessionAccess', sqlImpl.Bit, enableManagerAllSessionAccess ? 1 : 0);
+      if (graceBeforeMin !== undefined) req1.input('GraceBeforeMin', sqlImpl.Int, graceBeforeMin);
+      if (graceAfterMin !== undefined) req1.input('GraceAfterMin', sqlImpl.Int, graceAfterMin);
+      if (workerIntervalMs !== undefined) req1.input('WorkerIntervalMs', sqlImpl.Int, workerIntervalMs);
 
       const sets = [];
       if (enableAutoOrganize !== undefined) sets.push('EnableAutoOrganize = @EnableAutoOrganize');
@@ -277,6 +307,9 @@ router.post('/gym-controller/settings', (req, res) => {
       return res.status(500).json({ ok: false, error: e?.message || String(e) });
     }
   })();
-});
+  });
 
-export default router;
+  return router;
+};
+
+export default createSettingsRouter();

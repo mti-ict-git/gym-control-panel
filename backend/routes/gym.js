@@ -5,6 +5,244 @@ import { envTrim, envBool, envInt, startOfDayUtcDateForOffsetMinutes } from '../
 
 const router = express.Router();
 
+/**
+ * Gym endpoints
+ * GET /env-dump
+ * Purpose: Return selected environment values for diagnostics.
+ * Params: none.
+ * Response: { ok: boolean, env: object }.
+ *
+ * POST /gym-reports-add-name
+ * Purpose: Ensure gym_reports has Name column.
+ * Params: none.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /gym-reports-init
+ * Purpose: Initialize gym_reports table and indexes.
+ * Params: none.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * GET /gym-availability
+ * Purpose: Fetch availability for gym sessions.
+ * Params: query filters for dates and sessions.
+ * Response: { ok: boolean, availability?: object[], error?: string }.
+ *
+ * GET /gym-sessions
+ * Purpose: List available gym sessions.
+ * Params: query filters for date and status.
+ * Response: { ok: boolean, sessions?: object[], error?: string }.
+ *
+ * POST /gym-session-create
+ * Purpose: Create a new gym session.
+ * Params: body session fields.
+ * Response: { ok: boolean, session_id?: number, error?: string }.
+ *
+ * POST /gym-session-update
+ * Purpose: Update an existing gym session.
+ * Params: body session fields with identifier.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /gym-session-delete
+ * Purpose: Delete a gym session.
+ * Params: body { id: number }.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /gym-schedule-create
+ * Purpose: Create or update a gym schedule.
+ * Params: body schedule fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * GET /gym-bookings
+ * Purpose: Retrieve gym bookings with filters and paging.
+ * Params: query filters, paging, sorting.
+ * Response: { ok: boolean, bookings?: object[], total?: number, error?: string }.
+ *
+ * GET /gym-bookings-by-ids
+ * Purpose: Retrieve bookings by IDs.
+ * Params: query { ids: string }.
+ * Response: { ok: boolean, bookings?: object[], error?: string }.
+ *
+ * GET /carddb-staff
+ * Purpose: Retrieve staff list from Card DB.
+ * Params: query filters.
+ * Response: { ok: boolean, staff?: object[], error?: string }.
+ *
+ * POST /gym-booking-update-status
+ * Purpose: Update booking status and approvals.
+ * Params: body booking status fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /gym-controller-access
+ * Purpose: Update gym access based on controller input.
+ * Params: body access event fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /gym-booking-backfill-cardno
+ * Purpose: Backfill booking card numbers.
+ * Params: body identifiers and card fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /gym-booking-create
+ * Purpose: Create a gym booking.
+ * Params: body booking fields.
+ * Response: { ok: boolean, booking_id?: number, error?: string }.
+ *
+ * POST /gym-booking-init
+ * Purpose: Initialize gym booking tables and constraints.
+ * Params: none.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * GET /gym-live-sync
+ * Purpose: Synchronize live transactions into cache.
+ * Params: query { since?: string, limit?: number }.
+ * Response: { ok: boolean, synced?: number, error?: string }.
+ *
+ * GET /gym-live-persisted
+ * Purpose: Read persisted live transactions.
+ * Params: query filters and paging.
+ * Response: { ok: boolean, data?: object[], error?: string }.
+ *
+ * POST /gym-accounts-init
+ * Purpose: Initialize gym account tables and defaults.
+ * Params: none.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * GET /gym-accounts
+ * Purpose: List gym accounts.
+ * Params: query filters.
+ * Response: { ok: boolean, accounts?: object[], error?: string }.
+ *
+ * GET /gym-bookings-by-employee
+ * Purpose: Retrieve bookings for an employee.
+ * Params: query { employee_id: string, from?: string, to?: string }.
+ * Response: { ok: boolean, bookings?: object[], error?: string }.
+ *
+ * POST /gym-booking-status
+ * Purpose: Update booking status.
+ * Params: body status fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * DELETE /gym-booking/:id
+ * Purpose: Delete booking by ID.
+ * Params: path { id: number }.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * GET /gym-controller-settings
+ * Purpose: Read gym controller settings.
+ * Params: none.
+ * Response: { ok: boolean, settings?: object, error?: string }.
+ *
+ * POST /gym-controller-settings
+ * Purpose: Update gym controller settings.
+ * Params: body settings fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * GET /gym-manager-all-session-preview
+ * Purpose: Preview manager all-session access.
+ * Params: query filters.
+ * Response: { ok: boolean, preview?: object[], error?: string }.
+ *
+ * GET /gym-access-committee
+ * Purpose: List committee access records.
+ * Params: query filters.
+ * Response: { ok: boolean, records?: object[], error?: string }.
+ *
+ * POST /gym-access-committee-add
+ * Purpose: Add committee access record.
+ * Params: body record fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /gym-access-committee-remove
+ * Purpose: Remove committee access record.
+ * Params: body identifiers.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * GET /gym-committee-roster
+ * Purpose: List committee roster.
+ * Params: query filters.
+ * Response: { ok: boolean, roster?: object[], error?: string }.
+ *
+ * POST /gym-committee-roster-assign
+ * Purpose: Assign committee roster entry.
+ * Params: body roster fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /gym-committee-roster-remove
+ * Purpose: Remove committee roster entry.
+ * Params: body identifiers.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /db-connections-init
+ * Purpose: Initialize DB connections table.
+ * Params: none.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * GET /db-connections
+ * Purpose: List DB connections.
+ * Params: query filters.
+ * Response: { ok: boolean, connections?: object[], error?: string }.
+ *
+ * POST /db-connections
+ * Purpose: Create DB connection.
+ * Params: body connection fields.
+ * Response: { ok: boolean, connection_id?: number, error?: string }.
+ *
+ * POST /db-connections-update
+ * Purpose: Update DB connection.
+ * Params: body connection fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /db-connections-delete
+ * Purpose: Delete DB connection.
+ * Params: body { id: number }.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /db-connections-test
+ * Purpose: Test DB connection.
+ * Params: body connection fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * POST /gym-accounts
+ * Purpose: Create or update gym account.
+ * Params: body account fields.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * DELETE /gym-accounts/:id
+ * Purpose: Delete gym account by ID.
+ * Params: path { id: number }.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * GET /gym-live-status
+ * Purpose: Return live gym status snapshot.
+ * Params: none.
+ * Response: { ok: boolean, people?: object[], error?: string }.
+ *
+ * GET /gym-live-status-range
+ * Purpose: Return live gym status for range.
+ * Params: query { from?: string, to?: string }.
+ * Response: { ok: boolean, people?: object[], error?: string }.
+ *
+ * POST /gym-reports-sync
+ * Purpose: Sync reports from bookings.
+ * Params: body sync filters.
+ * Response: { ok: boolean, synced?: number, error?: string }.
+ *
+ * POST /gym-reports-backfill
+ * Purpose: Backfill reports data.
+ * Params: body backfill filters.
+ * Response: { ok: boolean, error?: string }.
+ *
+ * GET /gym-reports-schema
+ * Purpose: Return report schema information.
+ * Params: none.
+ * Response: { ok: boolean, schema?: object, error?: string }.
+ *
+ * GET /gym-reports
+ * Purpose: Retrieve gym reports with filters and paging.
+ * Params: query filters, paging, sorting.
+ * Response: { ok: boolean, reports?: object[], total?: number, error?: string }.
+ */
+
 let gymLiveStatusCache = { atMs: 0, payload: null };
 const gymLiveRangeCache = new Map();
 

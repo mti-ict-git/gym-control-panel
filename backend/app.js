@@ -2,71 +2,44 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import sql from 'mssql';
-import testerRouter from './routes/tester.js';
-import masterRouter from './routes/master.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import testerRouter from './routes/testerRoutes.js';
+import masterRouter from './routes/masterRoutes.js';
 import gymRouter from './routes/gym.js';
-import authRouter from './routes/auth.js';
-import settingsRouter from './routes/settings.js';
+import authRouter from './routes/authRoutes.js';
+import settingsRouter from './routes/settingsRoutes.js';
+import systemRouter from './routes/systemRoutes.js';
 import { envBool, envTrim, envInt, startOfDayUtcDateForOffsetMinutes } from './lib/env.js';
 
 dotenv.config();
 
 const app = express();
-app.use(cors());
+const allowedOrigins = [
+  ...(process.env.FRONTEND_ORIGINS || process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean),
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+];
+const allowedOriginSet = new Set(allowedOrigins);
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOriginSet.has(origin)) return callback(null, true);
+      return callback(new Error('CORS not allowed'));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json());
 
-const sseClients = new Set();
-const accessEvents = [];
-const pushAccessEvent = (evt) => {
-  try {
-    accessEvents.push(evt);
-    if (accessEvents.length > 500) accessEvents.shift();
-    const data = `data: ${JSON.stringify(evt)}\n\n`;
-    for (const res of sseClients) {
-      res.write(data);
-    }
-  } catch (_) {}
-};
-
-app.get('/api/gym-access-stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-  for (const evt of accessEvents) {
-    res.write(`data: ${JSON.stringify(evt)}\n\n`);
-  }
-  sseClients.add(res);
-  req.on('close', () => {
-    try {
-      sseClients.delete(res);
-    } catch (_) {}
-  });
-});
-
-app.get('/gym-access-stream', (req, res) => {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-  for (const evt of accessEvents) {
-    res.write(`data: ${JSON.stringify(evt)}\n\n`);
-  }
-  sseClients.add(res);
-  req.on('close', () => {
-    try {
-      sseClients.delete(res);
-    } catch (_) {}
-  });
-});
-
-app.get('/api/gym-access-log', (_req, res) => {
-  res.json({ ok: true, events: accessEvents.slice(-200) });
-});
-
-app.get('/gym-access-log', (_req, res) => {
-  res.json({ ok: true, events: accessEvents.slice(-200) });
-});
+app.use(systemRouter);
+const pushAccessEvent = typeof systemRouter?.locals?.pushAccessEvent === 'function'
+  ? systemRouter.locals.pushAccessEvent
+  : () => {};
 
 // Support both /api prefix and root-level routes to tolerate different proxy setups
 app.use('/api', testerRouter);
@@ -80,44 +53,35 @@ app.use(gymRouter);
 app.use(authRouter);
 app.use(settingsRouter);
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
-});
-
-app.get('/api/gym-live-status', (_req, res) => {
-  res.json({ ok: true, people: [] });
-});
-
-app.get('/health', (_req, res) => {
-  res.json({ ok: true });
-});
-
 const PORT = process.env.PORT || 5055;
-app.listen(PORT, () => {
-  console.log(`DB tester listening on http://localhost:${PORT}`);
-});
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
 
-const enableAutoSync = String(process.env.GYM_SYNC_ENABLE || '1').trim().toLowerCase();
-if (['1','true','yes','y'].includes(enableAutoSync)) {
-  let syncing = false;
-  setInterval(async () => {
-    if (syncing) return;
-    syncing = true;
-    try {
-      const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-      const url = `http://localhost:${PORT}/gym-live-sync?since=${encodeURIComponent(since)}&limit=200`;
-      const r = await fetch(url);
-      await r.text();
-    } catch (_) {
-    } finally {
-      syncing = false;
-    }
-  }, 5000);
-}
+if (isMain) {
+  app.listen(PORT, () => {
+    console.log(`DB tester listening on http://localhost:${PORT}`);
+  });
 
-const enableAutoOrganizeWorker = String(process.env.GYM_AUTO_ORGANIZE_WORKER_ENABLE || '1').trim().toLowerCase();
-if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
-  let running = false;
+  const enableAutoSync = String(process.env.GYM_SYNC_ENABLE || '1').trim().toLowerCase();
+  if (['1','true','yes','y'].includes(enableAutoSync)) {
+    let syncing = false;
+    setInterval(async () => {
+      if (syncing) return;
+      syncing = true;
+      try {
+        const since = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+        const url = `http://localhost:${PORT}/gym-live-sync?since=${encodeURIComponent(since)}&limit=200`;
+        const r = await fetch(url);
+        await r.text();
+      } catch (_) {
+      } finally {
+        syncing = false;
+      }
+    }, 5000);
+  }
+
+  const enableAutoOrganizeWorker = String(process.env.GYM_AUTO_ORGANIZE_WORKER_ENABLE || '1').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
+    let running = false;
 
   const gymDbConfig = () => {
     const server = envTrim(process.env.DB_SERVER);
@@ -617,32 +581,35 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
   };
 
   setTimeout(loop, 5000);
+  }
+
+  const enableReportsAutoSync = String(process.env.GYM_REPORTS_SYNC_ENABLE || '1').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y'].includes(enableReportsAutoSync)) {
+    let running = false;
+    const tick = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const today = new Date();
+        const pad2 = (n) => String(n).padStart(2, '0');
+        const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+          const day = ymd(d);
+          const url = `http://localhost:${PORT}/gym-reports-sync?from=${encodeURIComponent(day)}&to=${encodeURIComponent(day)}`;
+          try {
+            const r = await fetch(url, { method: 'POST' });
+            await r.text();
+          } catch (_) {}
+        }
+      } catch (_) {
+      } finally {
+        running = false;
+        setTimeout(tick, 20000);
+      }
+    };
+    setTimeout(tick, 10000);
+  }
 }
 
-const enableReportsAutoSync = String(process.env.GYM_REPORTS_SYNC_ENABLE || '1').trim().toLowerCase();
-if (['1', 'true', 'yes', 'y'].includes(enableReportsAutoSync)) {
-  let running = false;
-  const tick = async () => {
-    if (running) return;
-    running = true;
-    try {
-      const today = new Date();
-      const pad2 = (n) => String(n).padStart(2, '0');
-      const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
-        const day = ymd(d);
-        const url = `http://localhost:${PORT}/gym-reports-sync?from=${encodeURIComponent(day)}&to=${encodeURIComponent(day)}`;
-        try {
-          const r = await fetch(url, { method: 'POST' });
-          await r.text();
-        } catch (_) {}
-      }
-    } catch (_) {
-    } finally {
-      running = false;
-      setTimeout(tick, 20000);
-    }
-  };
-  setTimeout(tick, 10000);
-}
+export default app;
