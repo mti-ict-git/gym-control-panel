@@ -622,8 +622,29 @@ export default function RegisterPage() {
           const txt = await resp.text();
           return txt;
         };
-        const txt = await tryFetch('/eula.md').catch(async () => tryFetch('/eula.txt'));
-        setEulaText(txt);
+        const baseUrl = import.meta.env.BASE_URL || '/';
+        const withBase = (file: string) => (baseUrl.endsWith('/') ? `${baseUrl}${file}` : `${baseUrl}/${file}`);
+        const candidates = [
+          withBase('eula.md'),
+          '/eula.md',
+          `${window.location.origin}${withBase('eula.md')}`,
+          withBase('eula.txt'),
+          '/eula.txt',
+          `${window.location.origin}${withBase('eula.txt')}`,
+        ];
+        let txt: string | null = null;
+        for (const path of candidates) {
+          try {
+            const next = await tryFetch(path);
+            if (next && next.trim().length > 0) {
+              txt = next;
+              break;
+            }
+          } catch (_) {
+            void 0;
+          }
+        }
+        setEulaText(txt ?? defaultEulaText);
       } catch (_) {
         setEulaText(defaultEulaText);
       }

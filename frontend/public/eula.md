@@ -1,8 +1,8 @@
-🏋️‍♂️ GYM CENTER RULES & REGULATIONS
+# 🏋️‍♂️ GYM CENTER RULES & REGULATIONS
 
 ---
 
-Bahasa Indonesia
+## Bahasa Indonesia
 
 1. Setiap pengguna wajib melakukan registrasi sebelum masuk ke area gym.
 2. Setiap pengguna wajib membawa ID Card untuk akses masuk ke area gym.
@@ -17,7 +17,7 @@ Bahasa Indonesia
 
 ---
 
-English
+## English
 
 1. Users are required to register before entering the gym area.
 2. Users are required to bring their ID Card to access the gym area.
