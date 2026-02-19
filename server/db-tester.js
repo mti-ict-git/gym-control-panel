@@ -10,6 +10,12 @@ function envTrim(value) {
   return t.length > 0 ? t : '';
 }
 
+async function ensureGymScheduleIsActiveColumn(pool) {
+  await pool.request().query(
+    "IF COL_LENGTH('dbo.gym_schedule', 'IsActive') IS NULL BEGIN ALTER TABLE dbo.gym_schedule ADD IsActive BIT NOT NULL CONSTRAINT DF_gym_schedule_IsActive DEFAULT 1; END ELSE BEGIN UPDATE dbo.gym_schedule SET IsActive = 1 WHERE IsActive IS NULL; END"
+  );
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -286,6 +292,7 @@ app.get('/gym-availability', async (req, res) => {
 
   try {
     const pool = await sql.connect(config);
+    await ensureGymScheduleIsActiveColumn(pool);
     const request = pool.request();
     request.input('dateParam', sql.Date, new Date(dateStr));
 
@@ -391,6 +398,7 @@ app.get('/gym-sessions', async (req, res) => {
 
   try {
     const pool = await sql.connect(config);
+    await ensureGymScheduleIsActiveColumn(pool);
     const request = pool.request();
     const result = await request.query(`
       SELECT 
@@ -399,6 +407,7 @@ app.get('/gym-sessions', async (req, res) => {
         CONVERT(varchar(5), EndTime, 108) AS time_end,
         Quota AS quota
       FROM dbo.gym_schedule
+      WHERE (IsActive = 1 OR IsActive IS NULL)
       ORDER BY StartTime
     `);
     await pool.close();
@@ -577,9 +586,11 @@ app.post('/gym-session-delete', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
   }
 
-  const { session_name, time_start } = req.body || {};
-  if (!session_name || !time_start) {
-    return res.status(400).json({ ok: false, error: 'session_name and time_start are required' });
+  const { schedule_id, session_name, time_start } = req.body || {};
+  const scheduleIdNum = Number(schedule_id || 0);
+  const hasScheduleId = Number.isFinite(scheduleIdNum) && scheduleIdNum > 0;
+  if (!hasScheduleId && (!session_name || !time_start)) {
+    return res.status(400).json({ ok: false, error: 'schedule_id or session_name and time_start are required' });
   }
 
   const config = {
@@ -598,14 +609,26 @@ app.post('/gym-session-delete', async (req, res) => {
   try {
     const pool = await sql.connect(config);
     const request = pool.request();
-    request.input('session_name', sql.VarChar(20), String(session_name));
-    request.input('time_start', sql.VarChar(5), String(time_start));
-
-    const result = await request.query(`
-      DELETE FROM dbo.gym_schedule
-      WHERE Session = @session_name
-        AND StartTime = CAST(@time_start AS time(0))
-    `);
+    let result;
+    if (hasScheduleId) {
+      request.input('schedule_id', sql.Int, scheduleIdNum);
+      result = await request.query(`
+        UPDATE dbo.gym_schedule
+        SET IsActive = 0
+        WHERE ScheduleID = @schedule_id
+          AND (IsActive = 1 OR IsActive IS NULL)
+      `);
+    } else {
+      request.input('session_name', sql.VarChar(20), String(session_name));
+      request.input('time_start', sql.VarChar(5), String(time_start));
+      result = await request.query(`
+        UPDATE dbo.gym_schedule
+        SET IsActive = 0
+        WHERE Session = @session_name
+          AND StartTime = CAST(@time_start AS time(0))
+          AND (IsActive = 1 OR IsActive IS NULL)
+      `);
+    }
 
     await pool.close();
 
@@ -1079,6 +1102,7 @@ app.post('/gym-booking-create', async (req, res) => {
     if (isNaN(bookingDate.getTime())) throw new Error('Invalid booking_date');
 
     const gymPool = await sql.connect(gymConfig);
+    await ensureGymScheduleIsActiveColumn(gymPool);
     const scheduleReq = gymPool.request();
     scheduleReq.input('session_name', sql.VarChar(50), sessionName);
     scheduleReq.input('time_start', sql.VarChar(5), timeStart);
@@ -1089,6 +1113,7 @@ app.post('/gym-booking-create', async (req, res) => {
       FROM dbo.gym_schedule
       WHERE Session = @session_name
         AND StartTime = CAST(@time_start AS time(0))
+        AND (IsActive = 1 OR IsActive IS NULL)
     `);
 
     const scheduleRow = Array.isArray(scheduleResult?.recordset) ? scheduleResult.recordset[0] : null;
@@ -1323,6 +1348,18 @@ app.post('/gym-booking-init', async (req, res) => {
         BEGIN
           ALTER TABLE dbo.gym_schedule
             ADD ScheduleID INT IDENTITY(1,1) NOT NULL;
+        END
+      `);
+
+      await exec(`
+        IF COL_LENGTH('dbo.gym_schedule', 'IsActive') IS NULL
+        BEGIN
+          ALTER TABLE dbo.gym_schedule
+            ADD IsActive BIT NOT NULL CONSTRAINT DF_gym_schedule_IsActive DEFAULT 1;
+        END
+        ELSE
+        BEGIN
+          UPDATE dbo.gym_schedule SET IsActive = 1 WHERE IsActive IS NULL;
         END
       `);
 

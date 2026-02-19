@@ -51,7 +51,8 @@ export default function SchedulesPage() {
   const { data: paged = { rows: [], total: 0 }, isLoading, refetch } = useGymDbSessionsPaged(search, page, pageSize, sortBy || undefined, sortDir);
   const sessions = paged.rows;
   const totalCount = paged.total;
-  const endpoint = '/api';
+  const endpointEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_DB_TEST_ENDPOINT as string | undefined;
+  const endpoint = endpointEnv && endpointEnv.trim().length > 0 ? endpointEnv : '/api';
 
   const [rosterDate, setRosterDate] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [selectedAssign, setSelectedAssign] = useState<Map<number, string>>(new Map());
@@ -754,6 +755,7 @@ export default function SchedulesPage() {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
+                        schedule_id: deletingSession.schedule_id,
                         session_name: deletingSession.session_name,
                         time_start: deletingSession.time_start,
                       }),
