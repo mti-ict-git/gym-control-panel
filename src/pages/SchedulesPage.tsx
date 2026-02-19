@@ -279,9 +279,11 @@ export default function SchedulesPage() {
       ? 'bg-green-100 text-green-900'
       : key.includes('afternoon')
       ? 'bg-blue-100 text-blue-900'
+      : key.includes('evening')
+      ? 'bg-purple-100 text-purple-900'
       : key.includes('night') && (key.includes('1') || key.includes('- 1'))
       ? 'bg-purple-100 text-purple-900'
-      : key.includes('night') && (key.includes('2') || key.includes('- 2'))
+      : key.includes('night') && (key.includes('2') || key.includes('- 2') || key.includes('ramadhan'))
       ? 'bg-amber-100 text-amber-900'
       : 'bg-slate-100 text-slate-900';
     return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md font-medium ${color}`}>{name}</span>;

@@ -134,6 +134,13 @@ function getSessionChip(session: string | null) {
       </span>
     );
   }
+  if (s === 'evening' || s.startsWith('evening')) {
+    return (
+      <span className="inline-flex items-center rounded-md bg-purple-100 text-purple-700 border border-purple-200 px-2 py-1 text-xs font-medium">
+        {session}
+      </span>
+    );
+  }
   if (s === 'night - 1' || s === 'night-1' || s === 'night1') {
     return (
       <span className="inline-flex items-center rounded-md bg-purple-100 text-purple-700 border border-purple-200 px-2 py-1 text-xs font-medium">
@@ -141,10 +148,10 @@ function getSessionChip(session: string | null) {
       </span>
     );
   }
-  if (s === 'night - 2' || s === 'night-2' || s === 'night2') {
+  if (s === 'night - 2' || s === 'night-2' || s === 'night2' || s.includes('night') && s.includes('ramadhan')) {
     return (
       <span className="inline-flex items-center rounded-md bg-amber-100 text-amber-700 border border-amber-200 px-2 py-1 text-xs font-medium">
-        Night - 2
+        {session}
       </span>
     );
   }
@@ -164,9 +171,11 @@ function getScheduleChip(session: string | null, text: string) {
     ? '05:00 - 12:00'
     : label.startsWith('afternoon')
     ? '12:00 - 18:00'
+    : label.includes('evening')
+    ? '17:00 - 19:00'
     : label.includes('night') && label.includes('1')
     ? '18:00 - 21:00'
-    : label.includes('night') && label.includes('2')
+    : label.includes('night') && (label.includes('2') || label.includes('ramadhan'))
     ? '21:00 - 23:59'
     : '-';
   const content = String(text || '').trim() || fallback;
@@ -174,9 +183,11 @@ function getScheduleChip(session: string | null, text: string) {
     ? 'bg-green-100 text-green-700 border border-green-200'
     : label.startsWith('afternoon')
     ? 'bg-blue-100 text-blue-700 border border-blue-200'
+    : label.includes('evening')
+    ? 'bg-purple-100 text-purple-700 border border-purple-200'
     : label.includes('night') && label.includes('1')
     ? 'bg-purple-100 text-purple-700 border border-purple-200'
-    : label.includes('night') && label.includes('2')
+    : label.includes('night') && (label.includes('2') || label.includes('ramadhan'))
     ? 'bg-amber-100 text-amber-700 border border-amber-200'
     : 'bg-slate-100 text-slate-700 border border-slate-200';
   return (

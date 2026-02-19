@@ -49,16 +49,20 @@ export default function GymUsersPage() {
 
   const getSessionChip = (session: string | null) => {
     const s = String(session || '').trim();
-    if (!s) return <span className="inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium bg-slate-100 text-slate-700 border-slate-200">COMITTE</span>;
+    if (!s) return <span className="inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium bg-teal-100 text-teal-700 border-teal-200">COMITTE</span>;
     const lower = s.toLowerCase();
     const color = lower.startsWith('morning')
       ? 'bg-green-100 text-green-700 border-green-200'
       : lower.startsWith('afternoon')
       ? 'bg-blue-100 text-blue-700 border-blue-200'
+      : lower.includes('evening')
+      ? 'bg-purple-100 text-purple-700 border-purple-200'
       : lower.includes('night') && lower.includes('1')
       ? 'bg-purple-100 text-purple-700 border-purple-200'
-      : lower.includes('night') && lower.includes('2')
+      : lower.includes('night') && (lower.includes('2') || lower.includes('ramadhan'))
       ? 'bg-amber-100 text-amber-700 border-amber-200'
+      : lower === 'comitte'
+      ? 'bg-cyan-100 text-cyan-700 border-cyan-200'
       : 'bg-slate-100 text-slate-700 border-slate-200';
     return <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${color}`}>{s}</span>;
   };
@@ -89,10 +93,14 @@ export default function GymUsersPage() {
       ? 'bg-green-100 text-green-700 border-green-200'
       : lower.startsWith('afternoon')
       ? 'bg-blue-100 text-blue-700 border-blue-200'
+      : lower.includes('evening')
+      ? 'bg-purple-100 text-purple-700 border-purple-200'
       : lower.includes('night') && lower.includes('1')
       ? 'bg-purple-100 text-purple-700 border-purple-200'
-      : lower.includes('night') && lower.includes('2')
+      : lower.includes('night') && (lower.includes('2') || lower.includes('ramadhan'))
       ? 'bg-amber-100 text-amber-700 border-amber-200'
+      : !lower || lower === 'comitte'
+      ? 'bg-teal-100 text-teal-700 border-teal-200'
       : 'bg-slate-100 text-slate-700 border-slate-200';
     return <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${color}`}>{text}</span>;
   };
@@ -114,9 +122,11 @@ export default function GymUsersPage() {
       ? 'bg-green-100 text-green-700 border-green-200'
       : lower.startsWith('afternoon')
       ? 'bg-blue-100 text-blue-700 border-blue-200'
+      : lower.includes('evening')
+      ? 'bg-purple-100 text-purple-700 border-purple-200'
       : lower.includes('night') && lower.includes('1')
       ? 'bg-purple-100 text-purple-700 border-purple-200'
-      : lower.includes('night') && lower.includes('2')
+      : lower.includes('night') && (lower.includes('2') || lower.includes('ramadhan'))
       ? 'bg-amber-100 text-amber-700 border-amber-200'
       : 'bg-slate-100 text-slate-700 border-slate-200';
     return <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${color}`}>{name}: {count}</span>;
