@@ -282,9 +282,11 @@ export default function RegisterPage() {
       ? 'bg-green-100 text-green-900 border-green-200'
       : key.includes('afternoon')
       ? 'bg-blue-100 text-blue-900 border-blue-200'
+      : key.includes('evening')
+      ? 'bg-purple-100 text-purple-900 border-purple-200'
       : key.includes('night') && (key.includes('1') || key.includes('- 1'))
       ? 'bg-purple-100 text-purple-900 border-purple-200'
-      : key.includes('night') && (key.includes('2') || key.includes('- 2'))
+      : key.includes('night') && (key.includes('2') || key.includes('- 2') || key.includes('ramadhan'))
       ? 'bg-amber-100 text-amber-900 border-amber-200'
       : 'bg-muted/60 text-foreground border-border/60';
   };
@@ -295,9 +297,11 @@ export default function RegisterPage() {
       ? 'border-green-300 bg-green-50'
       : key.includes('afternoon')
       ? 'border-blue-300 bg-blue-50'
+      : key.includes('evening')
+      ? 'border-purple-300 bg-purple-50'
       : key.includes('night') && (key.includes('1') || key.includes('- 1'))
       ? 'border-purple-300 bg-purple-50'
-      : key.includes('night') && (key.includes('2') || key.includes('- 2'))
+      : key.includes('night') && (key.includes('2') || key.includes('- 2') || key.includes('ramadhan'))
       ? 'border-amber-300 bg-amber-50'
       : 'border-border/60 bg-background';
   };
@@ -308,9 +312,11 @@ export default function RegisterPage() {
       ? 'bg-green-500'
       : key.includes('afternoon')
       ? 'bg-blue-500'
+      : key.includes('evening')
+      ? 'bg-purple-500'
       : key.includes('night') && (key.includes('1') || key.includes('- 1'))
       ? 'bg-purple-500'
-      : key.includes('night') && (key.includes('2') || key.includes('- 2'))
+      : key.includes('night') && (key.includes('2') || key.includes('- 2') || key.includes('ramadhan'))
       ? 'bg-amber-500'
       : 'bg-slate-400';
   };
