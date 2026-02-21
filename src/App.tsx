@@ -8,6 +8,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Index from "./pages/Index";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import CancelBookingPage from "./pages/CancelBookingPage";
 import DashboardPage from "./pages/DashboardPage";
 import GymUsersPage from "./pages/GymUsersPage";
 import UserDetailPage from "./pages/UserDetailPage";
@@ -40,6 +41,7 @@ const App = () => (
             <Route path="/" element={<Navigate to="/booking" replace />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/booking" element={<RegisterPage />} />
+            <Route path="/cancel-booking" element={<CancelBookingPage />} />
             <Route
               path="/dashboard"
               element={

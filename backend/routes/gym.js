@@ -2991,6 +2991,37 @@ router.post('/gym-booking-status', async (req, res) => {
   }
 });
 
+router.post('/gym-booking-cancel', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const { booking_id, employee_id } = req.body || {};
+  const id = Number(booking_id);
+  const employeeId = String(employee_id || '').trim();
+  if (!Number.isFinite(id) || id <= 0 || !employeeId) {
+    return res.status(400).json({ ok: false, error: 'booking_id and employee_id are required' });
+  }
+  const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
+  const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
+  const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  try {
+    const pool = await sql.connect(config);
+    const req1 = pool.request();
+    req1.input('id', sql.Int, id);
+    req1.input('employeeId', sql.VarChar(20), employeeId);
+    req1.input('today', sql.Date, todayDate);
+    const result = await req1.query("UPDATE dbo.gym_booking SET Status = 'CANCELLED' WHERE BookingID = @id AND EmployeeID = @employeeId AND Status = 'BOOKED' AND BookingDate >= @today");
+    await pool.close();
+    const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
+    if (affected < 1) return res.status(200).json({ ok: false, error: 'Booking not found or cannot be cancelled' });
+    return res.json({ ok: true, affected });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
+  }
+});
+
 router.delete('/gym-booking/:id', async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {

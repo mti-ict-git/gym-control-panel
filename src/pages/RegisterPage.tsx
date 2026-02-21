@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format, addDays, startOfDay } from 'date-fns';
 import { CalendarIcon, Loader2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import gymIcon from '@/assets/gym-icon.png';
 import treadmillImg from '@/assets/treadmill.png';
 import benchPressImg from '@/assets/bench-press.png';
@@ -73,6 +74,7 @@ export default function RegisterPage() {
   const defaultContactPhone = '+6281275000560';
   const [contactName, setContactName] = useState<string>(defaultContactName);
   const [contactPhone, setContactPhone] = useState<string>(defaultContactPhone);
+  const bookingToastClassName = 'rounded-2xl border border-slate-200/70 bg-white text-slate-900 shadow-[0_12px_30px_-18px_rgba(59,130,246,0.45)] ring-1 ring-blue-100/70 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:ring-slate-800';
 
   useEffect(() => {
     const lsName = typeof window !== 'undefined' ? localStorage.getItem('gym_support_contact_name') : null;
@@ -559,7 +561,7 @@ export default function RegisterPage() {
         toast({
           title: 'Registration failed',
           description: payload?.error || 'An error occurred. Please try again.',
-          variant: 'destructive',
+          className: bookingToastClassName,
         });
         setErrorInfo(payload?.error || 'An error occurred. Please try again.');
         setErrorOpen(true);
@@ -605,7 +607,7 @@ export default function RegisterPage() {
     } catch (error: unknown) {
       console.error('Registration error:', error);
       const msg = error instanceof Error ? error.message : 'An error occurred. Please try again.';
-      toast({ title: 'Registration failed', description: msg, variant: 'destructive' });
+      toast({ title: 'Registration failed', description: msg, className: bookingToastClassName });
       setErrorInfo(msg);
       setErrorOpen(true);
     } finally {
@@ -656,16 +658,15 @@ export default function RegisterPage() {
       toast({
         title: 'Validation Error',
         description: errorMessages.join(', ') || 'Please check the form for errors.',
-        variant: 'destructive',
+        className: bookingToastClassName,
       });
     }
   };
 
   return (
-    <div className="min-h-screen flex bg-gradient-to-br from-background via-muted/40 to-muted/60">
-      {/* Left Panel - Decorative */}
-      <div className="hidden lg:flex lg:w-1/2 p-8">
-        <div className="w-full bg-card/80 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-between p-12 relative overflow-hidden border border-border/60 shadow-lg ring-1 ring-black/5 dark:ring-white/10">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-muted/40 to-muted/60 p-4 md:p-8">
+      <div className="max-w-7xl w-full grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
+        <div className="hidden lg:flex flex-col items-center justify-center p-12 bg-card rounded-2xl shadow-sm relative overflow-hidden border border-border/60">
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-72 h-72 border border-border/60 rounded-full absolute" />
             <div className="w-96 h-96 border border-border/60 rounded-full absolute" />
@@ -685,10 +686,8 @@ export default function RegisterPage() {
             🎯
           </div>
 
-          {/* Spacer */}
           <div className="flex-1" />
 
-          {/* Carousel - Centered on circles */}
           <div className="absolute inset-0 flex items-center justify-center z-10">
             <div className="flex flex-col items-center">
               <div className="w-72 h-72 flex items-center justify-center relative">
@@ -707,17 +706,15 @@ export default function RegisterPage() {
               </div>
             </div>
           </div>
-
           {/* Spacer */}
           <div className="flex-1" />
-
-          <div className="relative z-10 text-center">
-            <h1 className="text-3xl font-bold text-foreground mb-3 tracking-tight">
+          <div className="relative z-10 text-center max-w-sm">
+            <h1 className="text-3xl font-bold text-foreground mb-4 leading-tight">
               Book your gym session
               <br />
               quick and easy.
             </h1>
-            <p className="text-muted-foreground text-sm max-w-xs mx-auto">
+            <p className="text-muted-foreground text-sm">
               Reserve your spot for tomorrow or the next day. Stay fit, stay healthy!
             </p>
 
@@ -737,23 +734,18 @@ export default function RegisterPage() {
             </div>
           </div>
         </div>
-      </div>
+        <div className="flex flex-col gap-6">
+          <div className="bg-card p-8 md:p-10 rounded-xl shadow-xl border border-border/60">
+            <div className="text-center mb-8">
+              <span className="inline-block px-3 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-semibold rounded-full mb-3 uppercase tracking-wider">
+                Super Gym
+              </span>
+              <h2 className="text-2xl font-bold text-foreground">Gym Booking</h2>
+              <p className="text-muted-foreground text-sm mt-1">Register for a gym session</p>
+            </div>
 
-      {/* Right Panel - Form */}
-      <div className="w-full lg:w-1/2 p-6 flex items-center justify-center">
-        <div className="w-full max-w-xl bg-card rounded-3xl p-10 lg:p-14 shadow-xl border border-border/60">
-          <div className="flex lg:hidden justify-center mb-6">
-            <img src={gymIcon} alt="Gym" className="w-20 h-20 object-contain" />
-          </div>
-
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold mb-3">Super Gym</div>
-            <h2 className="text-2xl font-bold text-foreground tracking-tight">Gym Booking</h2>
-            <p className="text-muted-foreground text-sm mt-1">Register for a gym session</p>
-          </div>
-
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="space-y-5">
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="space-y-5">
               <FormField
                 control={form.control}
                 name="employeeType"
@@ -762,7 +754,7 @@ export default function RegisterPage() {
                     <FormLabel className="text-slate-800">Employee Type</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
-                        <SelectTrigger className="h-12 rounded-xl focus:ring-0 focus:ring-offset-0">
+                        <SelectTrigger className="h-12 rounded-lg bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white focus:ring-0 focus:ring-offset-0 focus:border-primary">
                           <SelectValue placeholder="Select" />
                         </SelectTrigger>
                       </FormControl>
@@ -781,7 +773,7 @@ export default function RegisterPage() {
                 control={form.control}
                 name="employeeId"
                 render={({ field }) => (
-                  <FormItem>
+                  <FormItem className="relative">
                     <FormLabel className="text-slate-800">Employee ID</FormLabel>
                     <FormControl>
                       <Input
@@ -789,11 +781,11 @@ export default function RegisterPage() {
                         {...field}
                         onFocus={() => setShowEmpDropdown(true)}
                         onBlur={() => setTimeout(() => setShowEmpDropdown(false), 150)}
-                        className="h-12 rounded-xl border-border/60 bg-background focus:bg-background transition-colors"
+                        className="h-12 rounded-lg bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white placeholder:text-slate-400 focus-visible:ring-0 focus-visible:ring-offset-0 focus:border-primary"
                       />
                     </FormControl>
                     {showEmpDropdown && (empLoading || empSuggestions.length > 0) && (
-                      <div className="mt-2 border border-border/60 rounded-xl bg-card shadow-sm max-h-48 overflow-auto">
+                      <div className="absolute left-0 right-0 top-full mt-2 border border-border/60 rounded-xl bg-card shadow-sm max-h-48 overflow-auto z-20">
                         {empLoading ? (
                           <div className="px-3 py-2 text-sm text-slate-500">Searching...</div>
                         ) : (
@@ -834,11 +826,11 @@ export default function RegisterPage() {
                           <Button
                             variant="outline"
                             className={cn(
-                              'h-12 w-full rounded-xl border-border/60 bg-background hover:bg-muted/40 pl-3 text-left font-normal transition-colors',
-                              !field.value && 'text-muted-foreground'
+                              'h-12 w-full rounded-lg bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 pl-3 text-left font-normal text-slate-800 dark:text-white focus-visible:ring-0 focus-visible:ring-offset-0 focus:border-primary whitespace-nowrap overflow-hidden',
+                              !field.value && 'text-slate-400 dark:text-slate-500'
                             )}
                           >
-                            {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
+                            <span className="truncate">{field.value ? format(field.value, 'PPP') : 'Pick a date'}</span>
                             <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                           </Button>
                         </FormControl>
@@ -912,7 +904,7 @@ export default function RegisterPage() {
                         <FormControl>
                           <SelectTrigger
                             disabled={!selectedDate}
-                            className={`h-12 rounded-xl focus:ring-0 focus:ring-offset-0 transition-colors ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border-border/60 bg-background'}`}
+                            className={`h-12 rounded-lg transition-colors focus:ring-0 focus:ring-offset-0 focus:border-primary whitespace-nowrap ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500'}`}
                           >
                             {selectedGymDbSession && (
                               <span className={`inline-block h-2 w-2 rounded-full ${sessionDotColor(selectedGymDbSession.session_name)} mr-2`} />
@@ -959,7 +951,7 @@ export default function RegisterPage() {
 
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-slate-800 mt-2 md:mt-0">Time</div>
-                  <div className={`flex h-12 w-full items-center rounded-xl px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border border-border/60 bg-background text-muted-foreground'}`}>
+                  <div className={`flex h-12 w-full items-center rounded-lg px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500'}`}>
                     {selectedGymDbSession ? (
                       <>
                         <span className={`inline-block h-2 w-2 rounded-full ${sessionDotColor(selectedGymDbSession.session_name)} mr-2`} />
@@ -975,7 +967,7 @@ export default function RegisterPage() {
 
                 <div className="space-y-2">
                   <div className="text-sm font-medium text-slate-800 mt-2 md:mt-0">Available</div>
-                  <div className={`flex h-12 w-full items-center rounded-xl px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'border border-border/60 bg-background'}`}>
+                  <div className={`flex h-12 w-full items-center rounded-lg px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500'}`}>
                     {selectedGymDbSession ? (
                       availabilityLoading ? (
                         <span className="text-slate-600">Loading...</span>
@@ -1015,7 +1007,7 @@ export default function RegisterPage() {
 
               <Button
                 type="submit"
-                className="w-full h-12 rounded-xl bg-amber-400 hover:bg-amber-500 text-slate-900 font-semibold shadow-lg"
+                className="w-full h-12 rounded-lg bg-amber-400 hover:bg-amber-500 text-slate-900 font-semibold shadow-lg"
                 disabled={isSubmitting}
               >
                 {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -1134,7 +1126,19 @@ export default function RegisterPage() {
             </DialogContent>
           </Dialog>
         </div>
+        <div className="bg-card p-6 rounded-2xl shadow-sm border border-border/60">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Already have a reservation?</h3>
+              <p className="text-xs text-muted-foreground">Manage or cancel your existing gym sessions.</p>
+            </div>
+            <Button asChild variant="ghost" className="text-red-500 hover:text-red-600">
+              <Link to="/cancel-booking">Cancel Booking</Link>
+            </Button>
+          </div>
+        </div>
       </div>
+    </div>
     </div>
   );
 }

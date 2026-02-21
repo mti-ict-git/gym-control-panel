@@ -45,6 +45,11 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true,
         secure: false,
       },
+      "/gym-booking-cancel": {
+        target: process.env.VITE_BACKEND_URL || "http://localhost:5055",
+        changeOrigin: true,
+        secure: false,
+      },
     },
   },
   plugins: [react()],
