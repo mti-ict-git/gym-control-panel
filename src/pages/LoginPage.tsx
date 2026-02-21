@@ -18,6 +18,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const currentYear = new Date().getFullYear();
   const { user, login } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -232,7 +233,7 @@ export default function LoginPage() {
         </div>
       </div>
       <div className="fixed bottom-6 text-center text-slate-400 dark:text-slate-500 text-sm hidden md:block">
-        © 2024 GymFlow Management Solutions. All rights reserved.
+        {`Copyright © ${currentYear} Develop by Merdeka Tsingshan Indonesia v1.0.1`}
       </div>
     </div>
   );

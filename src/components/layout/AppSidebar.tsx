@@ -45,6 +45,7 @@ export function AppSidebar() {
   const { toast } = useToast();
   const isSuperAdmin = (user?.role || '').toLowerCase() === 'superadmin';
   const [isDark, setIsDark] = useState(false);
+  const currentYear = new Date().getFullYear();
 
   useEffect(() => {
     const stored = localStorage.getItem('theme');
@@ -158,7 +159,7 @@ export function AppSidebar() {
           Logout
         </Button>
         <div className="mt-3 text-xs text-muted-foreground text-center">
-          Copyright © 2026, Develop by Merdeka Tsingshan Indonesia v1.0.0
+          {`Copyright © ${currentYear} Develop by Merdeka Tsingshan Indonesia v1.0.1`}
         </div>
       </SidebarFooter>
     </Sidebar>

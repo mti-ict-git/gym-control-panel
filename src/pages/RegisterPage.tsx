@@ -122,6 +122,7 @@ export default function RegisterPage() {
   const [eulaText, setEulaText] = useState<string>(defaultEulaText);
   const [eulaScrolled, setEulaScrolled] = useState(false);
   const eulaBoxRef = useRef<HTMLDivElement | null>(null);
+  const currentYear = new Date().getFullYear();
 
   const renderEula = (text: string): JSX.Element => {
     const lines = String(text || '').split(/\r?\n/);
@@ -1132,7 +1133,7 @@ export default function RegisterPage() {
         </div>
       </div>
       <div className="fixed bottom-6 text-center text-slate-400 dark:text-slate-500 text-sm hidden md:block">
-        © 2024 GymFlow Management Solutions. All rights reserved.
+        {`Copyright © ${currentYear} Develop by Merdeka Tsingshan Indonesia v1.0.1`}
       </div>
     </div>
   );
