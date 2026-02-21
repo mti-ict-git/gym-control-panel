@@ -4,7 +4,7 @@ import { useForm, FieldErrors } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { format, addDays, startOfDay } from 'date-fns';
-import { CalendarIcon, Loader2 } from 'lucide-react';
+import { CalendarIcon, Loader2, Moon, Sun, Zap, Dumbbell, Timer, Target } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import gymIcon from '@/assets/gym-icon.png';
 import treadmillImg from '@/assets/treadmill.png';
@@ -74,7 +74,7 @@ export default function RegisterPage() {
   const defaultContactPhone = '+6281275000560';
   const [contactName, setContactName] = useState<string>(defaultContactName);
   const [contactPhone, setContactPhone] = useState<string>(defaultContactPhone);
-  const bookingToastClassName = 'rounded-2xl border border-slate-200/70 bg-white text-slate-900 shadow-[0_12px_30px_-18px_rgba(59,130,246,0.45)] ring-1 ring-blue-100/70 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100 dark:ring-slate-800';
+  const bookingToastClassName = 'rounded-2xl border border-blue-200/80 border-l-4 border-l-blue-400 bg-white text-slate-900 shadow-[0_10px_24px_-12px_rgba(59,130,246,0.6)] ring-1 ring-blue-100/70 dark:border-slate-800 dark:border-l-blue-500 dark:bg-slate-950 dark:text-slate-100 dark:ring-slate-800';
 
   useEffect(() => {
     const lsName = typeof window !== 'undefined' ? localStorage.getItem('gym_support_contact_name') : null;
@@ -664,85 +664,76 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-muted/40 to-muted/60 p-4 md:p-8">
-      <div className="max-w-7xl w-full grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
-        <div className="hidden lg:flex flex-col items-center justify-center p-12 bg-card rounded-2xl shadow-sm relative overflow-hidden border border-border/60">
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-72 h-72 border border-border/60 rounded-full absolute" />
-            <div className="w-96 h-96 border border-border/60 rounded-full absolute" />
-            <div className="w-[28rem] h-[28rem] border border-border/50 rounded-full absolute" />
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 lg:p-8">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="fixed top-6 right-6 rounded-full bg-white dark:bg-slate-800 shadow-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+        onClick={() => document.documentElement.classList.toggle('dark')}
+      >
+        <Sun className="h-4 w-4 dark:hidden" />
+        <Moon className="h-4 w-4 hidden dark:block" />
+      </Button>
+      <div className="w-full max-w-7xl h-auto lg:h-[940px] bg-white dark:bg-slate-900 rounded-2xl shadow-2xl flex flex-col lg:flex-row overflow-hidden border border-slate-200 dark:border-slate-800">
+        <div className="relative w-full lg:w-3/5 bg-slate-50 dark:bg-slate-800 flex items-center justify-center p-8 overflow-hidden">
+          <div className="absolute top-12 left-12 w-12 h-12 bg-green-400/20 rounded-full flex items-center justify-center text-green-500 animate-bounce" style={{ animationDelay: '0.5s' }}>
+            <Zap className="h-5 w-5" />
           </div>
-
-          <div className="absolute top-20 right-24 w-10 h-10 bg-amber-400 rounded-full flex items-center justify-center text-amber-900 font-bold text-sm shadow-md">
-            💪
+          <div className="absolute top-12 right-12 w-12 h-12 bg-amber-400/20 rounded-full flex items-center justify-center text-amber-500 animate-bounce" style={{ animationDelay: '1s' }}>
+            <Dumbbell className="h-5 w-5" />
           </div>
-          <div className="absolute bottom-32 left-20 w-10 h-10 bg-blue-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-            🏋️
+          <div className="absolute bottom-12 left-12 w-12 h-12 bg-blue-400/20 rounded-full flex items-center justify-center text-blue-500 animate-bounce" style={{ animationDelay: '1.5s' }}>
+            <Timer className="h-5 w-5" />
           </div>
-          <div className="absolute top-40 left-28 w-10 h-10 bg-green-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-            ⚡
+          <div className="absolute bottom-12 right-12 w-12 h-12 bg-purple-400/20 rounded-full flex items-center justify-center text-purple-500 animate-bounce" style={{ animationDelay: '2s' }}>
+            <Target className="h-5 w-5" />
           </div>
-          <div className="absolute bottom-40 right-28 w-10 h-10 bg-purple-400 rounded-full flex items-center justify-center text-white font-bold text-sm shadow-md">
-            🎯
-          </div>
-
-          <div className="flex-1" />
-
-          <div className="absolute inset-0 flex items-center justify-center z-10">
-            <div className="flex flex-col items-center">
-              <div className="w-72 h-72 flex items-center justify-center relative">
+          <div className="relative z-10 text-center max-w-lg">
+            <div className="mb-12 relative flex justify-center">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] border border-slate-200 dark:border-slate-700 rounded-full opacity-50" />
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] border border-slate-100 dark:border-slate-700/50 rounded-full opacity-50" />
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] border border-slate-50 dark:border-slate-700/20 rounded-full opacity-50" />
+              <div className="relative z-10 w-64 h-64 flex items-center justify-center">
                 {carouselImages.map((img, idx) => (
                   <img
                     key={idx}
                     src={img}
                     alt={`Fitness ${idx + 1}`}
-                    className={`absolute w-64 h-64 object-contain transition-all duration-500 ${
-                      idx === currentSlide
-                        ? 'opacity-100 scale-100'
-                        : 'opacity-0 scale-95'
+                    className={`absolute rounded-full w-full h-full object-contain border-8 border-white dark:border-slate-900 shadow-xl transition-all duration-500 ${
+                      idx === currentSlide ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
                     }`}
                   />
                 ))}
               </div>
             </div>
-          </div>
-          {/* Spacer */}
-          <div className="flex-1" />
-          <div className="relative z-10 text-center max-w-sm">
-            <h1 className="text-3xl font-bold text-foreground mb-4 leading-tight">
-              Book your gym session
-              <br />
-              quick and easy.
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-white mb-4">
+              Book your gym session <br /> quick and easy.
             </h1>
-            <p className="text-muted-foreground text-sm">
+            <p className="text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">
               Reserve your spot for tomorrow or the next day. Stay fit, stay healthy!
             </p>
-
-            <div className="flex justify-center gap-2 mt-8">
+            <div className="flex justify-center gap-2">
               {carouselImages.map((_, idx) => (
                 <button
                   key={idx}
                   onClick={() => setCurrentSlide(idx)}
-                  className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                    idx === currentSlide
-                      ? 'bg-slate-800'
-                      : 'bg-slate-300 hover:bg-slate-400'
-                  }`}
+                  className={`rounded-full transition-all duration-300 ${idx === currentSlide ? 'w-6 h-2 bg-amber-400' : 'w-2 h-2 bg-slate-400 dark:bg-slate-600'}`}
                   aria-label={`Go to slide ${idx + 1}`}
                 />
               ))}
             </div>
           </div>
         </div>
-        <div className="flex flex-col gap-6">
-          <div className="bg-card p-8 md:p-10 rounded-xl shadow-xl border border-border/60">
-            <div className="text-center mb-8">
-              <span className="inline-block px-3 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-semibold rounded-full mb-3 uppercase tracking-wider">
-                Super Gym
-              </span>
-              <h2 className="text-2xl font-bold text-foreground">Gym Booking</h2>
-              <p className="text-muted-foreground text-sm mt-1">Register for a gym session</p>
-            </div>
+        <div className="w-full lg:w-2/5 flex items-center justify-center p-8 bg-slate-50/50 dark:bg-slate-900/50">
+          <div className="w-full max-w-xl flex flex-col gap-6">
+            <div className="bg-white dark:bg-slate-800 p-10 lg:p-12 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-700">
+              <div className="text-center mb-8">
+                <div className="inline-flex items-center justify-center w-16 h-16 bg-slate-100 dark:bg-slate-700 rounded-2xl mb-4">
+                  <CalendarIcon className="h-7 w-7 text-amber-500" />
+                </div>
+                <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-1">Gym Booking</h2>
+                <p className="text-slate-500 dark:text-slate-400 text-sm">Register for a gym session</p>
+              </div>
 
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="space-y-5">
@@ -751,7 +742,7 @@ export default function RegisterPage() {
                 name="employeeType"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="text-slate-800">Employee Type</FormLabel>
+                    <FormLabel className="text-slate-700 dark:text-slate-300">Employee Type</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger className="h-12 rounded-lg bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white focus:ring-0 focus:ring-offset-0 focus:border-primary">
@@ -774,7 +765,7 @@ export default function RegisterPage() {
                 name="employeeId"
                 render={({ field }) => (
                   <FormItem className="relative">
-                    <FormLabel className="text-slate-800">Employee ID</FormLabel>
+                    <FormLabel className="text-slate-700 dark:text-slate-300">Employee ID</FormLabel>
                     <FormControl>
                       <Input
                         placeholder="Enter your Employee ID"
@@ -819,7 +810,7 @@ export default function RegisterPage() {
                 name="date"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
-                    <FormLabel className="text-slate-800">Date</FormLabel>
+                    <FormLabel className="text-slate-700 dark:text-slate-300">Date</FormLabel>
                     <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
                       <PopoverTrigger asChild>
                         <FormControl>
@@ -899,7 +890,7 @@ export default function RegisterPage() {
                   name="sessionId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel className="text-slate-800">Session</FormLabel>
+                      <FormLabel className="text-slate-700 dark:text-slate-300">Session</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
                           <SelectTrigger
@@ -950,12 +941,12 @@ export default function RegisterPage() {
                 />
 
                 <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-800 mt-2 md:mt-0">Time</div>
+                  <div className="text-sm font-medium text-slate-700 dark:text-slate-300 mt-2 md:mt-0">Time</div>
                   <div className={`flex h-12 w-full items-center rounded-lg px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500'}`}>
                     {selectedGymDbSession ? (
                       <>
                         <span className={`inline-block h-2 w-2 rounded-full ${sessionDotColor(selectedGymDbSession.session_name)} mr-2`} />
-                        <span className="font-medium text-slate-800">
+                        <span className="font-medium text-slate-800 dark:text-slate-100">
                           {selectedGymDbSession.time_start} - {timeEndForSession(selectedGymDbSession)}
                         </span>
                       </>
@@ -966,7 +957,7 @@ export default function RegisterPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-800 mt-2 md:mt-0">Available</div>
+                  <div className="text-sm font-medium text-slate-700 dark:text-slate-300 mt-2 md:mt-0">Available</div>
                   <div className={`flex h-12 w-full items-center rounded-lg px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500'}`}>
                     {selectedGymDbSession ? (
                       availabilityLoading ? (
@@ -1035,7 +1026,7 @@ export default function RegisterPage() {
                 >
                   {renderEula(eulaText)}
                 </div>
-                <label className="flex items-center gap-3 text-slate-800">
+                <label className="flex items-center gap-3 text-slate-700 dark:text-slate-300">
                   <Checkbox disabled={!eulaScrolled} checked={eulaAccepted} onCheckedChange={(v) => setEulaAccepted(Boolean(v))} />
                   <span>I accept the EULA terms</span>
                 </label>
@@ -1125,20 +1116,24 @@ export default function RegisterPage() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        </div>
-        <div className="bg-card p-6 rounded-2xl shadow-sm border border-border/60">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">Already have a reservation?</h3>
-              <p className="text-xs text-muted-foreground">Manage or cancel your existing gym sessions.</p>
             </div>
-            <Button asChild variant="ghost" className="text-red-500 hover:text-red-600">
-              <Link to="/cancel-booking">Cancel Booking</Link>
-            </Button>
+            <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Already have a reservation?</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Manage or cancel your existing gym sessions.</p>
+                </div>
+                <Button asChild variant="ghost" className="text-red-500 hover:text-red-600">
+                  <Link to="/cancel-booking">Cancel Booking</Link>
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+      <div className="fixed bottom-6 text-center text-slate-400 dark:text-slate-500 text-sm hidden md:block">
+        © 2024 GymFlow Management Solutions. All rights reserved.
+      </div>
     </div>
   );
 }
