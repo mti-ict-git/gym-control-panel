@@ -189,94 +189,134 @@ async function ensureGymControllerSettings(pool) {
   );
 }
 
+const resolveControllerSettings = (row) =>
+  row
+    ? {
+        enable_auto_organize: row.EnableAutoOrganize ? true : false,
+        enable_manager_all_session_access: row.EnableManagerAllSessionAccess ? true : false,
+        grace_before_min: Number(row.GraceBeforeMin ?? 0) || 0,
+        grace_after_min: Number(row.GraceAfterMin ?? 0) || 0,
+        worker_interval_ms: Number(row.WorkerIntervalMs ?? 60000) || 60000,
+      }
+    : {
+        enable_auto_organize: false,
+        enable_manager_all_session_access: false,
+        grace_before_min: 0,
+        grace_after_min: 0,
+        worker_interval_ms: 60000,
+      };
+
+const handleGetControllerSettings = async (_req, res) => {
+  const config = getDbConfig();
+  if (!config) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    await ensureGymControllerSettings(pool);
+    const r = await pool.request().query(
+      `SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs FROM dbo.gym_controller_settings WHERE Id = 1`
+    );
+    await pool.close();
+    const row = Array.isArray(r?.recordset) && r.recordset.length > 0 ? r.recordset[0] : null;
+    const settings = resolveControllerSettings(row);
+    return res.json({ ok: true, settings, ...settings });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+};
+
+const handlePostControllerSettings = async (req, res) => {
+  const config = getDbConfig();
+  if (!config) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+  const b = req.body || {};
+  const toBool = (v) => {
+    const s = String(v ?? '').trim().toLowerCase();
+    return ['1', 'true', 'yes', 'y'].includes(s);
+  };
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+  const enableAutoOrganize =
+    b.EnableAutoOrganize != null
+      ? toBool(b.EnableAutoOrganize)
+      : b.enable_auto_organize != null
+      ? toBool(b.enable_auto_organize)
+      : undefined;
+  const enableManagerAllSessionAccess =
+    b.EnableManagerAllSessionAccess != null
+      ? toBool(b.EnableManagerAllSessionAccess)
+      : b.enable_manager_all_session_access != null
+      ? toBool(b.enable_manager_all_session_access)
+      : undefined;
+  const graceBeforeMin =
+    b.GraceBeforeMin != null
+      ? clamp(Number(b.GraceBeforeMin) || 0, 0, 24 * 60)
+      : b.grace_before_min != null
+      ? clamp(Number(b.grace_before_min) || 0, 0, 24 * 60)
+      : undefined;
+  const graceAfterMin =
+    b.GraceAfterMin != null
+      ? clamp(Number(b.GraceAfterMin) || 0, 0, 24 * 60)
+      : b.grace_after_min != null
+      ? clamp(Number(b.grace_after_min) || 0, 0, 24 * 60)
+      : undefined;
+  const workerIntervalMs =
+    b.WorkerIntervalMs != null
+      ? clamp(Number(b.WorkerIntervalMs) || 60000, 5000, 60 * 60 * 1000)
+      : b.worker_interval_ms != null
+      ? clamp(Number(b.worker_interval_ms) || 60000, 5000, 60 * 60 * 1000)
+      : undefined;
+
+  try {
+    const pool = await new sql.ConnectionPool(config).connect();
+    await ensureGymControllerSettings(pool);
+    const req1 = pool.request();
+    req1.input('Id', sql.Int, 1);
+    if (enableAutoOrganize !== undefined) req1.input('EnableAutoOrganize', sql.Bit, enableAutoOrganize ? 1 : 0);
+    if (enableManagerAllSessionAccess !== undefined) req1.input('EnableManagerAllSessionAccess', sql.Bit, enableManagerAllSessionAccess ? 1 : 0);
+    if (graceBeforeMin !== undefined) req1.input('GraceBeforeMin', sql.Int, graceBeforeMin);
+    if (graceAfterMin !== undefined) req1.input('GraceAfterMin', sql.Int, graceAfterMin);
+    if (workerIntervalMs !== undefined) req1.input('WorkerIntervalMs', sql.Int, workerIntervalMs);
+
+    const sets = [];
+    if (enableAutoOrganize !== undefined) sets.push('EnableAutoOrganize = @EnableAutoOrganize');
+    if (enableManagerAllSessionAccess !== undefined) sets.push('EnableManagerAllSessionAccess = @EnableManagerAllSessionAccess');
+    if (graceBeforeMin !== undefined) sets.push('GraceBeforeMin = @GraceBeforeMin');
+    if (graceAfterMin !== undefined) sets.push('GraceAfterMin = @GraceAfterMin');
+    if (workerIntervalMs !== undefined) sets.push('WorkerIntervalMs = @WorkerIntervalMs');
+    sets.push('UpdatedAt = GETDATE()');
+
+    const setSql = sets.join(', ');
+    const sqlText =
+      `IF EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = @Id)
+       UPDATE dbo.gym_controller_settings SET ${setSql} WHERE Id = @Id
+       ELSE
+       INSERT INTO dbo.gym_controller_settings (Id${enableAutoOrganize !== undefined ? ', EnableAutoOrganize' : ''}${enableManagerAllSessionAccess !== undefined ? ', EnableManagerAllSessionAccess' : ''}${graceBeforeMin !== undefined ? ', GraceBeforeMin' : ''}${graceAfterMin !== undefined ? ', GraceAfterMin' : ''}${workerIntervalMs !== undefined ? ', WorkerIntervalMs' : ''})
+       VALUES (@Id${enableAutoOrganize !== undefined ? ', @EnableAutoOrganize' : ''}${enableManagerAllSessionAccess !== undefined ? ', @EnableManagerAllSessionAccess' : ''}${graceBeforeMin !== undefined ? ', @GraceBeforeMin' : ''}${graceAfterMin !== undefined ? ', @GraceAfterMin' : ''}${workerIntervalMs !== undefined ? ', @WorkerIntervalMs' : ''})`;
+
+    await req1.query(sqlText);
+    await pool.close();
+    return res.json({ ok: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+};
+
 router.get('/gym-controller/settings', (_req, res) => {
-  (async () => {
-    const config = getDbConfig();
-    if (!config) {
-      return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
-    }
-    try {
-      const pool = await new sql.ConnectionPool(config).connect();
-      await ensureGymControllerSettings(pool);
-      const r = await pool.request().query(
-        `SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs FROM dbo.gym_controller_settings WHERE Id = 1`
-      );
-      await pool.close();
-      const row = Array.isArray(r?.recordset) && r.recordset.length > 0 ? r.recordset[0] : null;
-      const settings = row
-        ? {
-            enable_auto_organize: row.EnableAutoOrganize ? true : false,
-            enable_manager_all_session_access: row.EnableManagerAllSessionAccess ? true : false,
-            grace_before_min: Number(row.GraceBeforeMin ?? 0) || 0,
-            grace_after_min: Number(row.GraceAfterMin ?? 0) || 0,
-            worker_interval_ms: Number(row.WorkerIntervalMs ?? 60000) || 60000,
-          }
-        : {
-            enable_auto_organize: false,
-            enable_manager_all_session_access: false,
-            grace_before_min: 0,
-            grace_after_min: 0,
-            worker_interval_ms: 60000,
-          };
-      return res.json({ ok: true, settings });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
-    }
-  })();
+  handleGetControllerSettings(_req, res);
+});
+
+router.get('/gym-controller-settings', (_req, res) => {
+  handleGetControllerSettings(_req, res);
 });
 
 router.post('/gym-controller/settings', (req, res) => {
-  (async () => {
-    const config = getDbConfig();
-    if (!config) {
-      return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
-    }
-    const b = req.body || {};
-    const toBool = (v) => {
-      const s = String(v ?? '').trim().toLowerCase();
-      return ['1', 'true', 'yes', 'y'].includes(s);
-    };
-    const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-    const enableAutoOrganize = b.EnableAutoOrganize != null ? toBool(b.EnableAutoOrganize) : undefined;
-    const enableManagerAllSessionAccess = b.EnableManagerAllSessionAccess != null ? toBool(b.EnableManagerAllSessionAccess) : undefined;
-    const graceBeforeMin = b.GraceBeforeMin != null ? clamp(Number(b.GraceBeforeMin) || 0, 0, 24 * 60) : undefined;
-    const graceAfterMin = b.GraceAfterMin != null ? clamp(Number(b.GraceAfterMin) || 0, 0, 24 * 60) : undefined;
-    const workerIntervalMs = b.WorkerIntervalMs != null ? clamp(Number(b.WorkerIntervalMs) || 60000, 5000, 60 * 60 * 1000) : undefined;
+  handlePostControllerSettings(req, res);
+});
 
-    try {
-      const pool = await new sql.ConnectionPool(config).connect();
-      await ensureGymControllerSettings(pool);
-      const req1 = pool.request();
-      req1.input('Id', sql.Int, 1);
-      if (enableAutoOrganize !== undefined) req1.input('EnableAutoOrganize', sql.Bit, enableAutoOrganize ? 1 : 0);
-      if (enableManagerAllSessionAccess !== undefined) req1.input('EnableManagerAllSessionAccess', sql.Bit, enableManagerAllSessionAccess ? 1 : 0);
-      if (graceBeforeMin !== undefined) req1.input('GraceBeforeMin', sql.Int, graceBeforeMin);
-      if (graceAfterMin !== undefined) req1.input('GraceAfterMin', sql.Int, graceAfterMin);
-      if (workerIntervalMs !== undefined) req1.input('WorkerIntervalMs', sql.Int, workerIntervalMs);
-
-      const sets = [];
-      if (enableAutoOrganize !== undefined) sets.push('EnableAutoOrganize = @EnableAutoOrganize');
-      if (enableManagerAllSessionAccess !== undefined) sets.push('EnableManagerAllSessionAccess = @EnableManagerAllSessionAccess');
-      if (graceBeforeMin !== undefined) sets.push('GraceBeforeMin = @GraceBeforeMin');
-      if (graceAfterMin !== undefined) sets.push('GraceAfterMin = @GraceAfterMin');
-      if (workerIntervalMs !== undefined) sets.push('WorkerIntervalMs = @WorkerIntervalMs');
-      sets.push('UpdatedAt = GETDATE()');
-
-      const setSql = sets.join(', ');
-      const sqlText =
-        `IF EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = @Id)
-         UPDATE dbo.gym_controller_settings SET ${setSql} WHERE Id = @Id
-         ELSE
-         INSERT INTO dbo.gym_controller_settings (Id${enableAutoOrganize !== undefined ? ', EnableAutoOrganize' : ''}${enableManagerAllSessionAccess !== undefined ? ', EnableManagerAllSessionAccess' : ''}${graceBeforeMin !== undefined ? ', GraceBeforeMin' : ''}${graceAfterMin !== undefined ? ', GraceAfterMin' : ''}${workerIntervalMs !== undefined ? ', WorkerIntervalMs' : ''})
-         VALUES (@Id${enableAutoOrganize !== undefined ? ', @EnableAutoOrganize' : ''}${enableManagerAllSessionAccess !== undefined ? ', @EnableManagerAllSessionAccess' : ''}${graceBeforeMin !== undefined ? ', @GraceBeforeMin' : ''}${graceAfterMin !== undefined ? ', @GraceAfterMin' : ''}${workerIntervalMs !== undefined ? ', @WorkerIntervalMs' : ''})`;
-
-      await req1.query(sqlText);
-      await pool.close();
-      return res.json({ ok: true });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: e?.message || String(e) });
-    }
-  })();
+router.post('/gym-controller-settings', (req, res) => {
+  handlePostControllerSettings(req, res);
 });
 
 export default router;

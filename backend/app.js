@@ -206,11 +206,8 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
   const isManagerRole = (role) => {
     const r = normRole(role);
     if (!r) return false;
-    if (r === 'GM') return true;
-    if (r === 'MANAGER') return true;
-    if (r === 'SR MANAGER' || r === 'SR. MANAGER' || r === 'SENIOR MANAGER') return true;
-    if (r.includes('SENIOR') && r.includes('MANAGER')) return true;
-    if (r.includes('SR') && r.includes('MANAGER')) return true;
+    if (r.includes('MANAGER')) return true;
+    if (r.includes('GM')) return true;
     return false;
   };
 
@@ -353,10 +350,6 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
             const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
             const empIdCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
             const roleCol = pickColumn(cols, [
-              'grade',
-              'Grade',
-              'job_grade',
-              'JobGrade',
               'job_title',
               'JobTitle',
               'title',
@@ -372,6 +365,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
               'rank',
               'Rank',
             ]);
+            const gradeCol = pickColumn(cols, ['grade', 'Grade', 'job_grade', 'JobGrade']);
             const statusCol = pickColumn(cols, ['status', 'Status', 'employment_status', 'EmploymentStatus', 'is_active', 'IsActive', 'active', 'Active']);
             const endDateCol = pickColumn(cols, ['end_date', 'EndDate', 'enddate', 'termination_date', 'TerminationDate']);
             const startDateCol = pickColumn(cols, ['start_date', 'StartDate', 'startdate', 'effective_date', 'EffectiveDate']);
@@ -384,11 +378,8 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
               if (statusCol) whereParts.push(`UPPER(LTRIM(RTRIM([${statusCol}]))) = UPPER(@active)`);
               if (endDateCol) whereParts.push(`([${endDateCol}] IS NULL OR [${endDateCol}] >= @today)`);
               if (startDateCol) whereParts.push(`([${startDateCol}] IS NULL OR [${startDateCol}] <= @today)`);
-              whereParts.push(
-                `(UPPER(LTRIM(RTRIM([${roleCol}]))) IN ('MANAGER','GM','SR MANAGER','SR. MANAGER','SENIOR MANAGER')
-                  OR UPPER(LTRIM(RTRIM([${roleCol}]))) LIKE '%SR%MANAGER%'
-                  OR UPPER(LTRIM(RTRIM([${roleCol}]))) LIKE '%SENIOR%MANAGER%')`
-              );
+              whereParts.push(`(UPPER(LTRIM(RTRIM([${roleCol}]))) LIKE '%GM%' OR UPPER(LTRIM(RTRIM([${roleCol}]))) LIKE '%MANAGER%')`);
+              if (gradeCol) whereParts.push(`UPPER(LTRIM(RTRIM([${gradeCol}]))) NOT LIKE '%SUPERVISOR%'`);
 
               const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
               const q = `SELECT TOP 5000 [${empIdCol}] AS employee_id, [${roleCol}] AS role_value FROM [${employmentSchema}].[employee_employment] ${whereSql}`;

@@ -5,17 +5,19 @@ import { envBool, envTrim } from '../lib/env.js';
 dotenv.config();
 
 function parseArgs(argv) {
-  const args = { employee: 'MTI230279', unit: '0031', tz: '01', showCard: false };
+  const args = { employee: 'MTI230279', unit: '0031', tz: '01', showCard: false, cardNo: '' };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--employee' || a === '-e') args.employee = String(argv[i + 1] ?? '');
     if (a === '--unit' || a === '-u') args.unit = String(argv[i + 1] ?? '');
     if (a === '--tz') args.tz = String(argv[i + 1] ?? '');
     if (a === '--show-card') args.showCard = true;
+    if (a === '--card' || a === '--card-no') args.cardNo = String(argv[i + 1] ?? '');
   }
   args.employee = envTrim(args.employee);
   args.unit = envTrim(args.unit);
   args.tz = envTrim(args.tz);
+  args.cardNo = envTrim(args.cardNo);
   return args;
 }
 
@@ -61,6 +63,37 @@ async function tryCardNoFromGymDb(employeeId) {
       .input('emp', sql.NVarChar(50), employeeId)
       .query(
         "SELECT TOP 1 CardNo FROM dbo.gym_live_taps WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY TxnTime DESC"
+      );
+    const cardNo = r?.recordset?.[0]?.CardNo != null ? String(r.recordset[0].CardNo).trim() : null;
+    return cardNo && cardNo.length > 0 ? cardNo : null;
+  } catch (_) {
+    return null;
+  } finally {
+    try {
+      if (pool) await pool.close();
+    } catch (_) {}
+  }
+}
+
+async function tryCardNoFromGymBooking(employeeId) {
+  const config = mssqlConfigFromEnv({
+    server: process.env.DB_SERVER,
+    port: process.env.DB_PORT,
+    database: process.env.DB_DATABASE,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    encrypt: process.env.DB_ENCRYPT,
+    trustServerCertificate: process.env.DB_TRUST_SERVER_CERTIFICATE,
+  });
+  if (!config) return null;
+  let pool;
+  try {
+    pool = await sql.connect(config);
+    const r = await pool
+      .request()
+      .input('emp', sql.NVarChar(50), employeeId)
+      .query(
+        "SELECT TOP 1 CardNo FROM dbo.gym_booking WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY BookingDate DESC"
       );
     const cardNo = r?.recordset?.[0]?.CardNo != null ? String(r.recordset[0].CardNo).trim() : null;
     return cardNo && cardNo.length > 0 ? cardNo : null;
@@ -170,7 +203,9 @@ async function main() {
   }
 
   const cardNo =
+    args.cardNo ||
     (await tryCardNoFromGymDb(args.employee)) ||
+    (await tryCardNoFromGymBooking(args.employee)) ||
     (await tryCardNoFromCardDbTransactions(args.employee));
 
   if (!cardNo) {
