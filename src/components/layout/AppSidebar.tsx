@@ -9,7 +9,8 @@ import {
   Dumbbell,
   Database,
   FileText,
-  UserCog
+  UserCog,
+  Ban
 } from 'lucide-react';
 import {
   Sidebar,
@@ -34,6 +35,7 @@ const menuItems = [
   { title: 'Gym Booking', url: '/gym_booking', icon: Database },
   { title: 'Schedules', url: '/schedules', icon: Calendar },
   { title: 'Reports', url: '/reports', icon: FileText },
+  { title: 'Ban List', url: '/ban-list', icon: Ban },
   { title: 'Management Account', url: '/management', icon: UserCog, superAdminOnly: true },
   { title: 'Settings', url: '/settings', icon: Settings },
 ];

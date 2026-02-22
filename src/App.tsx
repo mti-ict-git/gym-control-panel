@@ -16,6 +16,7 @@ import SchedulesPage from "./pages/SchedulesPage";
 import VaultPage from "./pages/VaultPage";
 import ReportsPage from "./pages/ReportsPage";
 import ManagementPage from "./pages/ManagementPage";
+import BanListPage from "./pages/BanListPage";
 import NotFound from "./pages/NotFound";
 
 // Settings pages
@@ -97,6 +98,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <ManagementPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/ban-list"
+              element={
+                <ProtectedRoute>
+                  <BanListPage />
                 </ProtectedRoute>
               }
             />

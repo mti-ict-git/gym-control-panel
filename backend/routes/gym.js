@@ -24,6 +24,24 @@ async function ensureGymScheduleIsActiveColumn(pool) {
   );
 }
 
+async function ensureGymBookingBanTable(pool) {
+  await pool.request().query(
+    `IF OBJECT_ID('dbo.gym_booking_ban','U') IS NULL BEGIN
+       CREATE TABLE dbo.gym_booking_ban (
+         EmployeeID VARCHAR(20) NOT NULL PRIMARY KEY,
+         BannedUntil DATE NOT NULL,
+         Reason VARCHAR(255) NULL,
+         ConsecutiveNoShow INT NOT NULL CONSTRAINT DF_gym_booking_ban_ConsecutiveNoShow DEFAULT 0,
+         CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_booking_ban_CreatedAt DEFAULT GETDATE(),
+         UpdatedAt DATETIME NULL
+       );
+     END`
+  );
+  await pool.request().query(
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_booking_ban_BannedUntil' AND object_id = OBJECT_ID('dbo.gym_booking_ban')) BEGIN CREATE INDEX IX_gym_booking_ban_BannedUntil ON dbo.gym_booking_ban(BannedUntil); END"
+  );
+}
+
 const gymBookingsCache = new Map();
 const gymSessionsCache = new Map();
 const gymReportsCache = new Map();
@@ -1643,6 +1661,75 @@ router.post('/gym-booking-create', async (req, res) => {
     return schemaName && schemaName.trim().length > 0 ? schemaName : null;
   };
 
+  const normRole = (v) =>
+    String(v ?? '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toUpperCase();
+
+  const isManagerRole = (role) => {
+    const r = normRole(role);
+    if (!r) return false;
+    if (r === 'GM') return true;
+    if (r === 'MANAGER') return true;
+    if (r === 'SR MANAGER' || r === 'SR. MANAGER' || r === 'SENIOR MANAGER') return true;
+    if (r.includes('SENIOR') && r.includes('MANAGER')) return true;
+    if (r.includes('SR') && r.includes('MANAGER')) return true;
+    return false;
+  };
+
+  const isEmployeeManager = async (empId) => {
+    let masterPool = null;
+    try {
+      masterPool = await new sql.ConnectionPool(masterConfig).connect();
+      const employmentSchema = await pickSchemaForTable(masterPool, 'employee_employment');
+      if (!employmentSchema) {
+        await masterPool.close();
+        return false;
+      }
+      const colsRes = await masterPool.request().query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'employee_employment' AND TABLE_SCHEMA = '${employmentSchema.replace(/'/g, "''")}'`
+      );
+      const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+      const empIdCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
+      const roleCol = pickColumn(cols, [
+        'grade',
+        'Grade',
+        'job_grade',
+        'JobGrade',
+        'job_title',
+        'JobTitle',
+        'title',
+        'Title',
+        'position',
+        'Position',
+        'job_position',
+        'JobPosition',
+        'level',
+        'Level',
+        'band',
+        'Band',
+        'rank',
+        'Rank',
+      ]);
+      if (!empIdCol || !roleCol) {
+        await masterPool.close();
+        return false;
+      }
+      const req = masterPool.request();
+      req.input('id', sql.VarChar(100), String(empId));
+      const r = await req.query(
+        `SELECT TOP 1 [${roleCol}] AS role_value FROM [${employmentSchema}].[employee_employment] WHERE [${empIdCol}] = @id`
+      );
+      await masterPool.close();
+      const roleVal = r?.recordset?.[0]?.role_value;
+      return isManagerRole(roleVal);
+    } catch (_) {
+      try { if (masterPool) await masterPool.close(); } catch (_) {}
+      return false;
+    }
+  };
+
   const tryLoadActiveCardNo = async (empId) => {
     const cardServer = envTrim(CARD_DB_SERVER) || envTrim(CARDDB_SERVER);
     const cardDatabase = envTrim(CARD_DB_DATABASE) || envTrim(CARDDB_NAME);
@@ -1854,6 +1941,101 @@ router.post('/gym-booking-create', async (req, res) => {
 
     const gymPool = await new sql.ConnectionPool(gymConfig).connect();
     await ensureGymScheduleIsActiveColumn(gymPool);
+    await ensureGymBookingBanTable(gymPool);
+    const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+    const unitNo = envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+    const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
+    const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
+    let isCommittee = false;
+    const committeeExistsRes = await gymPool.request().query("SELECT OBJECT_ID('dbo.gym_access_committee','U') AS id;");
+    if (committeeExistsRes?.recordset?.[0]?.id) {
+      const committeeReq = gymPool.request();
+      committeeReq.input('employee_id', sql.VarChar(20), employeeId);
+      committeeReq.input('unit', sql.VarChar(20), unitNo);
+      const committeeRes = await committeeReq.query(
+        "SELECT TOP 1 EmployeeID FROM dbo.gym_access_committee WHERE EmployeeID = @employee_id AND UnitNo = @unit AND IsActive = 1"
+      );
+      isCommittee = Array.isArray(committeeRes?.recordset) && committeeRes.recordset.length > 0;
+    }
+    const isManager = await isEmployeeManager(employeeId);
+    if (!isCommittee && !isManager) {
+      const banCheckReq = gymPool.request();
+      banCheckReq.input('employee_id', sql.VarChar(20), employeeId);
+      banCheckReq.input('today', sql.Date, todayDate);
+      const banCheck = await banCheckReq.query(
+        "SELECT TOP 1 BannedUntil FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id AND BannedUntil >= @today"
+      );
+      const banRow = Array.isArray(banCheck?.recordset) ? banCheck.recordset[0] : null;
+      if (banRow?.BannedUntil) {
+        const bannedUntil = banRow.BannedUntil instanceof Date ? banRow.BannedUntil : new Date(String(banRow.BannedUntil));
+        const bannedStr = isNaN(bannedUntil.getTime()) ? null : bannedUntil.toISOString().slice(0, 10);
+        await gymPool.close();
+        return res.status(200).json({ ok: false, error: `You are banned from booking until ${bannedStr || 'a later date'}` });
+      }
+      const tapsExistsRes = await gymPool.request().query("SELECT OBJECT_ID('dbo.gym_live_taps','U') AS id;");
+      const tapsTableExists = Boolean(tapsExistsRes?.recordset?.[0]?.id);
+      if (tapsTableExists) {
+        const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
+        const exitPattern = (envTrim(process.env.GYM_EXIT_EVENT) || 'VALID EXIT ACCESS').toUpperCase();
+        const noShowReq = gymPool.request();
+        noShowReq.input('employee_id', sql.VarChar(20), employeeId);
+        noShowReq.input('today', sql.Date, todayDate);
+        noShowReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
+        noShowReq.input('exitPat', sql.VarChar(120), `%${exitPattern}%`);
+        const noShowRes = await noShowReq.query(
+          `SELECT TOP 2 gb.BookingDate AS booking_date,
+             CASE WHEN EXISTS (
+               SELECT 1 FROM dbo.gym_live_taps t
+               WHERE t.EmployeeID = @employee_id
+                 AND CONVERT(date, t.TxnTime) = gb.BookingDate
+                 AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @entryPat
+             ) THEN 1 ELSE 0 END AS has_entry_tap,
+             CASE WHEN EXISTS (
+               SELECT 1 FROM dbo.gym_live_taps t
+               WHERE t.EmployeeID = @employee_id
+                 AND CONVERT(date, t.TxnTime) = gb.BookingDate
+                 AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @exitPat
+             ) THEN 1 ELSE 0 END AS has_exit_tap
+           FROM dbo.gym_booking gb
+           WHERE gb.EmployeeID = @employee_id
+             AND gb.BookingDate < @today
+             AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+           ORDER BY gb.BookingDate DESC`
+        );
+        const noShowRows = Array.isArray(noShowRes?.recordset) ? noShowRes.recordset : [];
+        const shouldBan =
+          noShowRows.length === 2 &&
+          noShowRows.every(
+            (r) => Number(r?.has_entry_tap || 0) === 0 || Number(r?.has_exit_tap || 0) === 0
+          );
+        if (shouldBan) {
+          const banReq = gymPool.request();
+          banReq.input('employee_id', sql.VarChar(20), employeeId);
+          banReq.input('today', sql.Date, todayDate);
+          banReq.input('reason', sql.VarChar(255), 'NO_SHOW_2X');
+          await banReq.query(
+            `IF EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id)
+             BEGIN
+               UPDATE dbo.gym_booking_ban
+               SET BannedUntil = DATEADD(day, 7, @today),
+                   Reason = @reason,
+                   ConsecutiveNoShow = 2,
+                   UpdatedAt = GETDATE()
+               WHERE EmployeeID = @employee_id;
+             END
+             ELSE
+             BEGIN
+               INSERT INTO dbo.gym_booking_ban (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow)
+               VALUES (@employee_id, DATEADD(day, 7, @today), @reason, 2);
+             END`
+          );
+          const bannedUntil = new Date(todayDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+          const bannedStr = isNaN(bannedUntil.getTime()) ? null : bannedUntil.toISOString().slice(0, 10);
+          await gymPool.close();
+          return res.status(200).json({ ok: false, error: `You are banned from booking until ${bannedStr || 'a later date'}` });
+        }
+      }
+    }
     const scheduleReq = gymPool.request();
     scheduleReq.input('session_name', sql.VarChar(50), sessionName);
     scheduleReq.input('time_start', sql.VarChar(5), timeStart);
@@ -2207,6 +2389,20 @@ router.post('/gym-booking-init', async (req, res) => {
           "CREATE INDEX IX_gym_booking_today ON dbo.gym_booking (BookingDate, ApprovalStatus, Status) INCLUDE (EmployeeName, Department, SessionName)"
         );
       }
+
+      await exec(`IF OBJECT_ID('dbo.gym_booking_ban','U') IS NULL BEGIN
+        CREATE TABLE dbo.gym_booking_ban (
+          EmployeeID VARCHAR(20) NOT NULL PRIMARY KEY,
+          BannedUntil DATE NOT NULL,
+          Reason VARCHAR(255) NULL,
+          ConsecutiveNoShow INT NOT NULL CONSTRAINT DF_gym_booking_ban_ConsecutiveNoShow DEFAULT 0,
+          CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_booking_ban_CreatedAt DEFAULT GETDATE(),
+          UpdatedAt DATETIME NULL
+        );
+      END`);
+      await exec(
+        "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_booking_ban_BannedUntil' AND object_id = OBJECT_ID('dbo.gym_booking_ban')) BEGIN CREATE INDEX IX_gym_booking_ban_BannedUntil ON dbo.gym_booking_ban(BannedUntil); END"
+      );
 
       await tx.commit();
     } catch (e) {
@@ -4256,6 +4452,65 @@ router.get('/gym-live-status', async (req, res) => {
     return v ? v : null;
   };
 
+  const pickColumn = (columns, candidates) => {
+    const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
+    for (const cand of candidates) {
+      const hit = map.get(String(cand).toLowerCase());
+      if (hit) return hit;
+    }
+    return null;
+  };
+
+  const pickSchemaForTable = async (pool, tableName, dbName) => {
+    const safeDb = String(dbName || '').trim();
+    const safeTable = String(tableName || '').trim();
+    if (!safeDb || !/^[A-Za-z0-9_]+$/.test(safeDb)) return null;
+    if (!safeTable || !/^[A-Za-z0-9_]+$/.test(safeTable)) return null;
+    const req = pool.request();
+    req.input('tableName', sql.VarChar(128), safeTable);
+    const r = await req.query(
+      `SELECT TOP 1 TABLE_SCHEMA AS schema_name FROM [${safeDb}].INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = @tableName ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA`
+    );
+    const schemaName = r?.recordset?.[0]?.schema_name ? String(r.recordset[0].schema_name) : null;
+    return schemaName && schemaName.trim().length > 0 ? schemaName : null;
+  };
+
+  const normRole = (v) =>
+    String(v ?? '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toUpperCase();
+
+  const isManagerRole = (role) => {
+    const r = normRole(role);
+    if (!r) return false;
+    if (r === 'GM') return true;
+    if (r === 'MANAGER') return true;
+    if (r === 'SR MANAGER' || r === 'SR. MANAGER' || r === 'SENIOR MANAGER') return true;
+    if (r.includes('SENIOR') && r.includes('MANAGER')) return true;
+    if (r.includes('SR') && r.includes('MANAGER')) return true;
+    return false;
+  };
+
+  const normalizeSessionName = (value) => String(value ?? '').trim();
+  const normalizeSessionKey = (value) => normalizeSessionName(value).toLowerCase().replace(/\s+/g, ' ').trim();
+  const resolveEndForSession = (value) => {
+    const key = normalizeSessionKey(value);
+    if (!key) return null;
+    if (key === 'morning') return '06:30';
+    if (key === 'night 1' || key === 'night-1' || key === 'night - 1') return '20:00';
+    if (key === 'night 2' || key === 'night-2' || key === 'night - 2') return '22:00';
+    return null;
+  };
+  const resolveTimeEnd = (sessionName, timeStart, timeEnd) => {
+    const te = timeEnd != null ? String(timeEnd).trim() : '';
+    if (te) return te;
+    const fallback = resolveEndForSession(sessionName);
+    if (fallback) return fallback;
+    const ts = timeStart != null ? String(timeStart).trim() : '';
+    return ts || null;
+  };
+
   const config = {
     server,
     port: Number(DB_PORT || 1433),
@@ -4472,6 +4727,55 @@ router.get('/gym-live-status', async (req, res) => {
         } catch (_) {}
       }
 
+      const managerSet = new Set();
+      if (masterDbSafe && additionalEmpIds.length > 0) {
+        try {
+          const employmentSchema = await pickSchemaForTable(pool, 'employee_employment', masterDbSafe);
+          if (employmentSchema) {
+            const colsRes = await pool.request().query(
+              `SELECT COLUMN_NAME FROM [${masterDbSafe}].INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'employee_employment' AND TABLE_SCHEMA = '${employmentSchema.replace(/'/g, "''")}'`
+            );
+            const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
+            const empIdCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
+            const roleCol = pickColumn(cols, [
+              'grade',
+              'Grade',
+              'job_grade',
+              'JobGrade',
+              'job_title',
+              'JobTitle',
+              'title',
+              'Title',
+              'position',
+              'Position',
+              'job_position',
+              'JobPosition',
+              'level',
+              'Level',
+              'band',
+              'Band',
+              'rank',
+              'Rank',
+            ]);
+            if (empIdCol && roleCol) {
+              const req4 = pool.request();
+              additionalEmpIds.forEach((id, idx) => req4.input(`m${idx}`, sql.VarChar(100), id));
+              const inList4 = additionalEmpIds.map((_, idx) => `@m${idx}`).join(',');
+              const roleRes = await req4.query(
+                `SELECT [${empIdCol}] AS employee_id, [${roleCol}] AS role_value FROM [${masterDbSafe}].[${employmentSchema}].[employee_employment] WHERE [${empIdCol}] IN (${inList4})`
+              );
+              const rows = Array.isArray(roleRes?.recordset) ? roleRes.recordset : [];
+              for (const row of rows) {
+                const rawId = row?.employee_id != null ? String(row.employee_id).trim() : '';
+                const idKey = normalizeEmployeeId(rawId);
+                if (!idKey) continue;
+                if (isManagerRole(row?.role_value)) managerSet.add(idKey);
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
       const accessRequiredByKey = new Map();
       for (const r of bookingRows) {
         const empIdRaw = trimOrNull(r?.employee_id);
@@ -4481,8 +4785,9 @@ router.get('/gym-live-status', async (req, res) => {
           accessRequiredByKey.set(empKey, true);
           continue;
         }
+        const sess = r?.session_name != null ? String(r.session_name).trim() : '';
         const ts = r?.time_start != null ? String(r.time_start).trim() : '';
-        const te = r?.time_end != null ? String(r.time_end).trim() : '';
+        const te = resolveTimeEnd(sess, ts, r?.time_end);
         const start = parseHHMM(ts);
         const end = parseHHMM(te);
         if (!start) {
@@ -4507,7 +4812,7 @@ router.get('/gym-live-status', async (req, res) => {
         const dept = r?.department != null ? String(r.department).trim() : null;
         const sess = r?.session_name != null ? String(r.session_name).trim() : '';
         const ts = r?.time_start != null ? String(r.time_start).trim() : null;
-        const te = r?.time_end != null ? String(r.time_end).trim() : null;
+        const te = resolveTimeEnd(sess, ts, r?.time_end);
         const sched = sess ? (ts && te ? `${sess} ${ts}-${te}` : sess) : null;
         const bookingStatus = r?.booking_status != null ? String(r.booking_status).trim().toUpperCase() : '';
         const tap = empKey ? tapMap.get(empKey) || { time_in: null, time_out: null } : { time_in: null, time_out: null };
@@ -4534,7 +4839,8 @@ router.get('/gym-live-status', async (req, res) => {
         const override_allow = empKey ? String(overrideMap.get(empKey) || '').trim() === tzAllow : false;
         const access_granted = Boolean(override_allow);
         const access_indicator = toAccessIndicator(access_granted);
-        return { name: info.name, employee_id: rawId || null, department: info.department, schedule: null, time_in: tap.time_in, time_out: tap.time_out, status: fallbackStatus, access_required, access_granted, access_indicator };
+        const schedule = empKey && managerSet.has(empKey) ? 'MANAGER' : null;
+        return { name: info.name, employee_id: rawId || null, department: info.department, schedule, time_in: tap.time_in, time_out: tap.time_out, status: fallbackStatus, access_required, access_granted, access_indicator };
       });
 
       const merged = people.concat(extra);
@@ -4570,6 +4876,25 @@ router.get('/gym-live-status-range', async (req, res) => {
   const toOk = toDate instanceof Date && !isNaN(toDate.getTime());
   const fromSafe = fromOk ? fromDate : defaultDay;
   const toSafe = toOk ? toDate : defaultDay;
+
+  const normalizeSessionName = (value) => String(value ?? '').trim();
+  const normalizeSessionKey = (value) => normalizeSessionName(value).toLowerCase().replace(/\s+/g, ' ').trim();
+  const resolveEndForSession = (value) => {
+    const key = normalizeSessionKey(value);
+    if (!key) return null;
+    if (key === 'morning') return '06:30';
+    if (key === 'night 1' || key === 'night-1' || key === 'night - 1') return '20:00';
+    if (key === 'night 2' || key === 'night-2' || key === 'night - 2') return '22:00';
+    return null;
+  };
+  const resolveTimeEnd = (sessionName, timeStart, timeEnd) => {
+    const te = timeEnd != null ? String(timeEnd).trim() : '';
+    if (te) return te;
+    const fallback = resolveEndForSession(sessionName);
+    if (fallback) return fallback;
+    const ts = timeStart != null ? String(timeStart).trim() : '';
+    return ts || null;
+  };
 
   const config = {
     server,
@@ -4667,7 +4992,7 @@ router.get('/gym-live-status-range', async (req, res) => {
           const key = empId && dt ? `${empId}__${toYmd(dt)}` : '';
           const sess = b?.session_name != null ? String(b.session_name).trim() : null;
           const ts = b?.time_start != null ? String(b.time_start).trim() : null;
-          const te = b?.time_end != null ? String(b.time_end).trim() : null;
+          const te = resolveTimeEnd(sess, ts, b?.time_end);
           return [key, { session_name: sess, time_start: ts, time_end: te }];
         })
       );
@@ -4873,6 +5198,121 @@ router.post('/gym-reports-sync', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  }
+});
+
+router.get('/gym-booking-ban-list', async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', bans: [] });
+  }
+
+  const includeExpiredRaw = String(req.query.include_expired || '').trim().toLowerCase();
+  const includeExpired = ['1', 'true', 'yes', 'y'].includes(includeExpiredRaw);
+  const q = String(req.query.q || '').trim();
+  const pageRaw = Number(String(req.query.page || '').trim());
+  const limitRaw = Number(String(req.query.limit || '').trim());
+  const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.floor(pageRaw) : 1;
+  const limit = Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(Math.floor(limitRaw), 200) : 100;
+  const offset = (page - 1) * limit;
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: envBool(DB_ENCRYPT, false),
+      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    await ensureGymBookingBanTable(pool);
+    const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
+    const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
+
+    const masterDbRaw = envTrim(process.env.MASTER_DB_DATABASE);
+    const masterDbSafe = masterDbRaw && /^[A-Za-z0-9_]+$/.test(masterDbRaw) ? masterDbRaw : '';
+    const selectName = masterDbSafe ? 'ec.name AS name,' : 'CAST(NULL AS varchar(255)) AS name,';
+    const selectDept = masterDbSafe ? 'eem.department AS department,' : 'CAST(NULL AS varchar(255)) AS department,';
+    const joinMaster = masterDbSafe
+      ? `LEFT JOIN [${masterDbSafe}].dbo.employee_core ec ON b.EmployeeID = ec.employee_id
+         OUTER APPLY (
+           SELECT TOP 1 ee.department AS department
+           FROM [${masterDbSafe}].dbo.employee_employment ee
+           WHERE ee.employee_id = b.EmployeeID
+           ORDER BY CASE WHEN UPPER(CAST(ee.status AS varchar(50))) IN ('ACTIVE','AKTIF','A','1','TRUE') THEN 0 ELSE 1 END
+         ) eem`
+      : '';
+
+    const reqCount = pool.request();
+    const reqData = pool.request();
+    reqCount.input('today', sql.Date, todayDate);
+    reqData.input('today', sql.Date, todayDate);
+    reqData.input('offset', sql.Int, offset);
+    reqData.input('limit', sql.Int, limit);
+
+    const whereParts = [];
+    if (!includeExpired) whereParts.push('b.BannedUntil >= @today');
+    if (q) {
+      reqCount.input('q', sql.VarChar(100), `%${q}%`);
+      reqData.input('q', sql.VarChar(100), `%${q}%`);
+      if (masterDbSafe) {
+        whereParts.push('(b.EmployeeID LIKE @q OR COALESCE(ec.name, \'\') LIKE @q)');
+      } else {
+        whereParts.push('b.EmployeeID LIKE @q');
+      }
+    }
+    const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    const countRes = await reqCount.query(
+      `SELECT COUNT(1) AS total,
+        SUM(CASE WHEN b.BannedUntil >= @today THEN 1 ELSE 0 END) AS active_total
+       FROM dbo.gym_booking_ban b
+       ${joinMaster}
+       ${whereSql}`
+    );
+
+    const dataRes = await reqData.query(
+      `SELECT b.EmployeeID AS employee_id,
+        ${selectName}
+        ${selectDept}
+        CONVERT(varchar(10), b.BannedUntil, 23) AS banned_until,
+        CASE WHEN b.BannedUntil >= @today THEN 'ACTIVE' ELSE 'EXPIRED' END AS status,
+        b.Reason AS reason,
+        b.ConsecutiveNoShow AS consecutive_no_show,
+        b.UpdatedAt AS updated_at,
+        b.CreatedAt AS created_at
+       FROM dbo.gym_booking_ban b
+       ${joinMaster}
+       ${whereSql}
+       ORDER BY b.BannedUntil DESC, b.EmployeeID ASC
+       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`
+    );
+
+    await pool.close();
+    const rows = Array.isArray(dataRes?.recordset) ? dataRes.recordset : [];
+    const bans = rows.map((r) => ({
+      employee_id: String(r.employee_id ?? '').trim(),
+      name: r.name != null ? String(r.name).trim() : null,
+      department: r.department != null ? String(r.department).trim() : null,
+      banned_until: r.banned_until != null ? String(r.banned_until).trim() : null,
+      status: r.status != null ? String(r.status).trim() : null,
+      reason: r.reason != null ? String(r.reason).trim() : null,
+      consecutive_no_show: Number(r.consecutive_no_show ?? 0) || 0,
+      updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : null,
+      created_at: r.created_at ? new Date(r.created_at).toISOString() : null,
+    })).filter((b) => b.employee_id);
+    const total = Number(countRes?.recordset?.[0]?.total || 0);
+    const activeTotal = Number(countRes?.recordset?.[0]?.active_total || 0);
+    return res.json({ ok: true, total, active_total: activeTotal, page, limit, bans });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, bans: [] });
   }
 });
 

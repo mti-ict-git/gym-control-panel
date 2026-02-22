@@ -14,14 +14,17 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-type SessionFilter = 'ALL' | 'Morning' | 'Afternoon' | 'Night - 1' | 'Night - 2';
+type SessionFilter = string;
 type StatusFilter = 'ALL' | 'BOOKED' | 'IN_GYM' | 'LEFT';
 type AccessFilter = 'ALL' | 'GRANTED' | 'NO_ACCESS';
 
 export default function GymUsersPage() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
-  const [sessionFilter, setSessionFilter] = useState<SessionFilter>('ALL');
+  const allSessionValue = 'ALL';
+  const committeeLabel = 'COMITTE';
+  const managerLabel = 'MANAGER';
+  const [sessionFilter, setSessionFilter] = useState<SessionFilter>(allSessionValue);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [accessFilter, setAccessFilter] = useState<AccessFilter>('ALL');
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -37,24 +40,26 @@ export default function GymUsersPage() {
     return d.toLocaleTimeString(undefined, { timeZone: 'Asia/Singapore' });
   };
 
-  const normalizeSession = (s: string | null): string => {
-    const v = String(s || '').trim().toLowerCase();
+  const extractSessionName = (s: string | null): string => {
+    const v = String(s || '').trim();
     if (!v) return '';
-    if (v.startsWith('morning')) return 'Morning';
-    if (v.startsWith('afternoon')) return 'Afternoon';
-    if (v.startsWith('night - 1') || v.startsWith('night-1') || v.startsWith('night 1') || v.startsWith('night1')) return 'Night - 1';
-    if (v.startsWith('night - 2') || v.startsWith('night-2') || v.startsWith('night 2') || v.startsWith('night2')) return 'Night - 2';
-    return (s || '').split(/\s+\d/)[0]?.trim() || (s || '');
+    const m = v.match(/^(.*?)(\s+\d{1,2}:\d{2}\s*[-–]\s*\d{1,2}:\d{2})$/);
+    if (m) return m[1].trim();
+    const parts = v.split(/\s+\d{1,2}:\d{2}/);
+    const base = parts[0] ? parts[0].trim() : v;
+    return base || v;
   };
 
-  const getSessionChip = (session: string | null) => {
-    const s = String(session || '').trim();
-    if (!s) return <span className="inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium bg-pink-100 text-pink-700 border-pink-200">COMITTE</span>;
+  const getSessionChip = (schedule: string | null) => {
+    const s = extractSessionName(schedule);
+    if (!s) return <span className="inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium bg-pink-100 text-pink-700 border-pink-200">{committeeLabel}</span>;
     const lower = s.toLowerCase();
     const color = lower.startsWith('morning')
       ? 'bg-green-100 text-green-700 border-green-200'
       : lower.startsWith('afternoon')
       ? 'bg-blue-100 text-blue-700 border-blue-200'
+      : lower === 'manager'
+      ? 'bg-teal-100 text-teal-700 border-teal-200'
       : lower.includes('evening')
       ? 'bg-purple-100 text-purple-700 border-purple-200'
       : lower.includes('night') && lower.includes('1')
@@ -78,6 +83,7 @@ export default function GymUsersPage() {
   const getTimeSchedule = (s: string | null): string => {
     const v = String(s || '').trim();
     if (!v) return 'COMITTE';
+    if (v.toUpperCase() === managerLabel) return managerLabel;
     const m = v.match(/(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/);
     if (m) return `${m[1]}-${m[2]}`;
     const arr = v.match(/\d{1,2}:\d{2}/g);
@@ -87,12 +93,14 @@ export default function GymUsersPage() {
 
   const getScheduleChip = (schedule: string | null) => {
     const text = getTimeSchedule(schedule);
-    const label = normalizeSession(schedule);
+    const label = extractSessionName(schedule);
     const lower = label.toLowerCase();
     const color = lower.startsWith('morning')
       ? 'bg-green-100 text-green-700 border-green-200'
       : lower.startsWith('afternoon')
       ? 'bg-blue-100 text-blue-700 border-blue-200'
+      : lower === 'manager'
+      ? 'bg-teal-100 text-teal-700 border-teal-200'
       : lower.includes('evening')
       ? 'bg-purple-100 text-purple-700 border-purple-200'
       : lower.includes('night') && lower.includes('1')
@@ -122,6 +130,8 @@ export default function GymUsersPage() {
       ? 'bg-green-100 text-green-700 border-green-200'
       : lower.startsWith('afternoon')
       ? 'bg-blue-100 text-blue-700 border-blue-200'
+      : lower === 'manager'
+      ? 'bg-teal-100 text-teal-700 border-teal-200'
       : lower.includes('evening')
       ? 'bg-purple-100 text-purple-700 border-purple-200'
       : lower.includes('night') && lower.includes('1')
@@ -167,23 +177,29 @@ export default function GymUsersPage() {
   }, [bookingMap, liveStatus]);
 
   const sessionCounts = useMemo(() => {
-    const counts: Record<'Morning' | 'Afternoon' | 'Night - 1' | 'Night - 2' | 'COMITTE', number> = {
-      'Morning': 0,
-      'Afternoon': 0,
-      'Night - 1': 0,
-      'Night - 2': 0,
-      'COMITTE': 0,
-    };
+    const counts = new Map<string, number>();
     (enrichedLive ?? []).forEach((p) => {
-      const label = normalizeSession(p.schedule);
-      if (label === '') counts['COMITTE']++;
-      else if (label === 'Morning') counts['Morning']++;
-      else if (label === 'Afternoon') counts['Afternoon']++;
-      else if (label === 'Night - 1') counts['Night - 1']++;
-      else if (label === 'Night - 2') counts['Night - 2']++;
+      const label = extractSessionName(p.schedule);
+      const key = label || committeeLabel;
+      counts.set(key, (counts.get(key) || 0) + 1);
     });
     return counts;
-  }, [enrichedLive]);
+  }, [committeeLabel, enrichedLive]);
+
+  const sessionOptions = useMemo(() => {
+    const labels = Array.from(sessionCounts.keys());
+    const hasCommittee = labels.includes(committeeLabel);
+    const regular = labels.filter((l) => l && l !== committeeLabel).sort((a, b) => a.localeCompare(b));
+    const tail = hasCommittee ? [committeeLabel] : [];
+    return [allSessionValue, ...regular, ...tail];
+  }, [allSessionValue, committeeLabel, sessionCounts]);
+
+  const sessionCountEntries = useMemo(() => {
+    const entries = Array.from(sessionCounts.entries()).filter(([name]) => name && name !== committeeLabel);
+    entries.sort((a, b) => a[0].localeCompare(b[0]));
+    const committeeCount = sessionCounts.get(committeeLabel) || 0;
+    return { entries, committeeCount };
+  }, [committeeLabel, sessionCounts]);
 
   const toggleSort = (key: typeof sortBy) => {
     if (sortBy === key) {
@@ -203,14 +219,9 @@ export default function GymUsersPage() {
     const q = search.trim().toLowerCase();
     const list: LivePersonStatus[] = Array.isArray(enrichedLive) ? enrichedLive : [];
     return list.filter((p) => {
-      const session = normalizeSession(p.schedule);
-      const sessionBucket =
-        session === ''
-          ? 'COMITTE'
-          : session === 'Morning' || session === 'Afternoon' || session === 'Night - 1' || session === 'Night - 2'
-            ? session
-            : 'Other';
-      if (sessionFilter !== 'ALL' && sessionBucket !== sessionFilter && sessionBucket !== 'COMITTE') return false;
+      const session = extractSessionName(p.schedule);
+      const sessionBucket = session === '' ? committeeLabel : session;
+      if (sessionFilter !== allSessionValue && sessionBucket !== sessionFilter && sessionBucket !== committeeLabel) return false;
       if (statusFilter !== 'ALL' && p.status !== statusFilter) return false;
       if (accessFilter === 'GRANTED' && p.access_indicator.color !== 'green') return false;
       if (accessFilter === 'NO_ACCESS' && p.access_indicator.color !== 'red') return false;
@@ -270,7 +281,7 @@ export default function GymUsersPage() {
 
   const resetFilters = () => {
     setSearch('');
-    setSessionFilter('ALL');
+    setSessionFilter(allSessionValue);
     setStatusFilter('ALL');
     setAccessFilter('ALL');
   };
@@ -281,6 +292,8 @@ export default function GymUsersPage() {
       ? 'border-green-200 bg-green-50 text-green-700'
       : lower.startsWith('afternoon')
       ? 'border-blue-200 bg-blue-50 text-blue-700'
+      : lower === 'manager'
+      ? 'border-teal-200 bg-teal-50 text-teal-700'
       : lower.includes('night') && lower.includes('1')
       ? 'border-purple-200 bg-purple-50 text-purple-700'
       : lower.includes('night') && lower.includes('2')
@@ -301,7 +314,7 @@ export default function GymUsersPage() {
       String(getDisplayName(p)),
       String(p.employee_id ?? ''),
       String(getDisplayDepartment(p)),
-      String(normalizeSession(p.schedule)),
+      String(extractSessionName(p.schedule) || committeeLabel),
       String(getTimeSchedule(p.schedule)),
       String(formatDateUtc8(p.time_in, p.time_out)),
       String(formatTimeUtc8(p.time_in)),
@@ -407,11 +420,12 @@ export default function GymUsersPage() {
                     <div>
                       <div className="text-sm text-muted-foreground mb-2">Session & Count</div>
                       <div className="flex flex-wrap gap-2">
-                        {sessionCountButton('All', stats.total, sessionFilter === 'ALL', () => setSessionFilter('ALL'))}
-                        {sessionCountButton('Morning', sessionCounts['Morning'] + sessionCounts['COMITTE'], sessionFilter === 'Morning', () => setSessionFilter('Morning'))}
-                        {sessionCountButton('Afternoon', sessionCounts['Afternoon'] + sessionCounts['COMITTE'], sessionFilter === 'Afternoon', () => setSessionFilter('Afternoon'))}
-                        {sessionCountButton('Night - 1', sessionCounts['Night - 1'] + sessionCounts['COMITTE'], sessionFilter === 'Night - 1', () => setSessionFilter('Night - 1'))}
-                        {sessionCountButton('Night - 2', sessionCounts['Night - 2'] + sessionCounts['COMITTE'], sessionFilter === 'Night - 2', () => setSessionFilter('Night - 2'))}
+                        {sessionCountButton('All', stats.total, sessionFilter === allSessionValue, () => setSessionFilter(allSessionValue))}
+                        {sessionCountEntries.entries.map(([name, count]) => (
+                          <span key={name}>
+                            {sessionCountButton(name, count + sessionCountEntries.committeeCount, sessionFilter === name, () => setSessionFilter(name))}
+                          </span>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -449,11 +463,9 @@ export default function GymUsersPage() {
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="ALL">All</SelectItem>
-                            <SelectItem value="Morning">Morning</SelectItem>
-                            <SelectItem value="Afternoon">Afternoon</SelectItem>
-                            <SelectItem value="Night - 1">Night - 1</SelectItem>
-                            <SelectItem value="Night - 2">Night - 2</SelectItem>
+                            {sessionOptions.map((name) => (
+                              <SelectItem key={name} value={name}>{name === allSessionValue ? 'All' : name}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -490,7 +502,7 @@ export default function GymUsersPage() {
                         </Button>
                       </div>
                     </div>
-                    {(search || sessionFilter !== 'ALL' || statusFilter !== 'ALL' || accessFilter !== 'ALL') && (
+                    {(search || sessionFilter !== allSessionValue || statusFilter !== 'ALL' || accessFilter !== 'ALL') && (
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs text-muted-foreground">Active Filters</span>
                         {search ? (
@@ -498,8 +510,8 @@ export default function GymUsersPage() {
                             Search: {search}
                           </Button>
                         ) : null}
-                        {sessionFilter !== 'ALL' ? (
-                          <Button variant="secondary" size="sm" onClick={() => setSessionFilter('ALL')}>
+                        {sessionFilter !== allSessionValue ? (
+                          <Button variant="secondary" size="sm" onClick={() => setSessionFilter(allSessionValue)}>
                             Session: {sessionFilter}
                           </Button>
                         ) : null}
@@ -539,7 +551,7 @@ export default function GymUsersPage() {
                       ) : (
                         sorted.map((p, idx) => {
                           const key = `${p.employee_id}-${p.time_in}-${idx}`;
-                          const sessionLabel = normalizeSession(p.schedule);
+                          const sessionLabel = extractSessionName(p.schedule);
                           return (
                             <div
                               key={key}
@@ -630,7 +642,7 @@ export default function GymUsersPage() {
                               <TableCell className="font-medium">{getDisplayName(p)}</TableCell>
                               <TableCell>{p.employee_id ?? '-'}</TableCell>
                               <TableCell>{getDisplayDepartment(p)}</TableCell>
-                              <TableCell>{getSessionChip(normalizeSession(p.schedule))}</TableCell>
+                              <TableCell>{getSessionChip(p.schedule)}</TableCell>
                               <TableCell>{getScheduleChip(p.schedule)}</TableCell>
                               <TableCell>{formatDateUtc8(p.time_in, p.time_out)}</TableCell>
                               <TableCell>{formatTimeUtc8(p.time_in)}</TableCell>

@@ -10,9 +10,48 @@ function envTrim(value) {
   return t.length > 0 ? t : '';
 }
 
+function envBool(value, defaultValue) {
+  const v = value == null ? undefined : String(value).toLowerCase();
+  if (v === 'true' || v === '1' || v === 'yes') return true;
+  if (v === 'false' || v === '0' || v === 'no') return false;
+  return !!defaultValue;
+}
+
+function envInt(value, defaultValue) {
+  const v = envTrim(value);
+  if (!v) return defaultValue;
+  const n = Number.parseInt(v, 10);
+  return Number.isFinite(n) ? n : defaultValue;
+}
+
+function startOfDayUtcDateForOffsetMinutes(offsetMinutes) {
+  const off = Number.isFinite(offsetMinutes) ? offsetMinutes : 0;
+  const nowUtcMs = Date.now();
+  const inOffset = new Date(nowUtcMs + off * 60_000);
+  return new Date(Date.UTC(inOffset.getUTCFullYear(), inOffset.getUTCMonth(), inOffset.getUTCDate()));
+}
+
 async function ensureGymScheduleIsActiveColumn(pool) {
   await pool.request().query(
     "IF COL_LENGTH('dbo.gym_schedule', 'IsActive') IS NULL BEGIN ALTER TABLE dbo.gym_schedule ADD IsActive BIT NOT NULL CONSTRAINT DF_gym_schedule_IsActive DEFAULT 1; END ELSE BEGIN UPDATE dbo.gym_schedule SET IsActive = 1 WHERE IsActive IS NULL; END"
+  );
+}
+
+async function ensureGymBookingBanTable(pool) {
+  await pool.request().query(
+    `IF OBJECT_ID('dbo.gym_booking_ban','U') IS NULL BEGIN
+       CREATE TABLE dbo.gym_booking_ban (
+         EmployeeID VARCHAR(20) NOT NULL PRIMARY KEY,
+         BannedUntil DATE NOT NULL,
+         Reason VARCHAR(255) NULL,
+         ConsecutiveNoShow INT NOT NULL CONSTRAINT DF_gym_booking_ban_ConsecutiveNoShow DEFAULT 0,
+         CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_booking_ban_CreatedAt DEFAULT GETDATE(),
+         UpdatedAt DATETIME NULL
+       );
+     END`
+  );
+  await pool.request().query(
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_booking_ban_BannedUntil' AND object_id = OBJECT_ID('dbo.gym_booking_ban')) BEGIN CREATE INDEX IX_gym_booking_ban_BannedUntil ON dbo.gym_booking_ban(BannedUntil); END"
   );
 }
 
@@ -828,6 +867,135 @@ app.get('/gym-bookings', async (req, res) => {
     return res.status(200).json({ ok: false, error: message, bookings: [] });
   }
 });
+
+const handleGymBookingBanList = async (req, res) => {
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', bans: [] });
+  }
+
+  const includeExpiredRaw = String(req.query.include_expired || '').trim().toLowerCase();
+  const includeExpired = ['1', 'true', 'yes', 'y'].includes(includeExpiredRaw);
+  const q = String(req.query.q || '').trim();
+  const pageRaw = Number(String(req.query.page || '').trim());
+  const limitRaw = Number(String(req.query.limit || '').trim());
+  const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.floor(pageRaw) : 1;
+  const limit = Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(Math.floor(limitRaw), 200) : 100;
+  const offset = (page - 1) * limit;
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: envBool(DB_ENCRYPT, false),
+      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    await ensureGymBookingBanTable(pool);
+    const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
+    const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
+
+    const masterDbRaw = envTrim(process.env.MASTER_DB_DATABASE);
+    const masterDbSafe = masterDbRaw && /^[A-Za-z0-9_]+$/.test(masterDbRaw) ? masterDbRaw : '';
+    const selectName = masterDbSafe ? 'ec.name AS name,' : 'CAST(NULL AS varchar(255)) AS name,';
+    const selectDept = masterDbSafe ? 'eem.department AS department,' : 'CAST(NULL AS varchar(255)) AS department,';
+    const joinMaster = masterDbSafe
+      ? `LEFT JOIN [${masterDbSafe}].dbo.employee_core ec ON b.EmployeeID = ec.employee_id
+         OUTER APPLY (
+           SELECT TOP 1 ee.department AS department
+           FROM [${masterDbSafe}].dbo.employee_employment ee
+           WHERE ee.employee_id = b.EmployeeID
+           ORDER BY CASE WHEN UPPER(CAST(ee.status AS varchar(50))) IN ('ACTIVE','AKTIF','A','1','TRUE') THEN 0 ELSE 1 END
+         ) eem`
+      : '';
+
+    const reqCount = pool.request();
+    const reqData = pool.request();
+    reqCount.input('today', sql.Date, todayDate);
+    reqData.input('today', sql.Date, todayDate);
+    reqData.input('offset', sql.Int, offset);
+    reqData.input('limit', sql.Int, limit);
+
+    const whereParts = [];
+    if (!includeExpired) whereParts.push('b.BannedUntil >= @today');
+    if (q) {
+      reqCount.input('q', sql.VarChar(100), `%${q}%`);
+      reqData.input('q', sql.VarChar(100), `%${q}%`);
+      if (masterDbSafe) {
+        whereParts.push('(b.EmployeeID LIKE @q OR COALESCE(ec.name, \'\') LIKE @q)');
+      } else {
+        whereParts.push('b.EmployeeID LIKE @q');
+      }
+    }
+    const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+
+    const countRes = await reqCount.query(
+      `SELECT COUNT(1) AS total,
+        SUM(CASE WHEN b.BannedUntil >= @today THEN 1 ELSE 0 END) AS active_total
+       FROM dbo.gym_booking_ban b
+       ${joinMaster}
+       ${whereSql}`
+    );
+
+    const dataRes = await reqData.query(
+      `SELECT b.EmployeeID AS employee_id,
+        ${selectName}
+        ${selectDept}
+        CONVERT(varchar(10), b.BannedUntil, 23) AS banned_until,
+        CASE WHEN b.BannedUntil >= @today THEN 'ACTIVE' ELSE 'EXPIRED' END AS status,
+        b.Reason AS reason,
+        b.ConsecutiveNoShow AS consecutive_no_show,
+        b.UpdatedAt AS updated_at,
+        b.CreatedAt AS created_at
+       FROM dbo.gym_booking_ban b
+       ${joinMaster}
+       ${whereSql}
+       ORDER BY b.BannedUntil DESC, b.EmployeeID ASC
+       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`
+    );
+
+    await pool.close();
+    const rows = Array.isArray(dataRes?.recordset) ? dataRes.recordset : [];
+    const bans = rows
+      .map((r) => ({
+        employee_id: String(r.employee_id ?? '').trim(),
+        name: r.name != null ? String(r.name).trim() : null,
+        department: r.department != null ? String(r.department).trim() : null,
+        banned_until: r.banned_until != null ? String(r.banned_until).trim() : null,
+        status: r.status != null ? String(r.status).trim() : null,
+        reason: r.reason != null ? String(r.reason).trim() : null,
+        consecutive_no_show: Number(r.consecutive_no_show ?? 0) || 0,
+        updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : null,
+        created_at: r.created_at ? new Date(r.created_at).toISOString() : null,
+      }))
+      .filter((b) => b.employee_id);
+    const total = Number(countRes?.recordset?.[0]?.total || 0);
+    const activeTotal = Number(countRes?.recordset?.[0]?.active_total || 0);
+    return res.json({ ok: true, total, active_total: activeTotal, page, limit, bans });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, bans: [] });
+  }
+};
+
+app.get('/gym-booking-ban-list', handleGymBookingBanList);
+app.get('/api/gym-booking-ban-list', handleGymBookingBanList);
 
 app.post('/gym-booking-update-status', async (req, res) => {
   const {

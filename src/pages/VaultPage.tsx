@@ -267,7 +267,7 @@ export default function VaultPage() {
     return (s || '').split(/\s+\d/)[0]?.trim() || (s || '');
   };
 
-  const getSessionCountChip = (name: string, count: number) => {
+  const getSessionCountChip = (name: string, count: number, key: string) => {
     const lower = name.toLowerCase();
     const color = lower.startsWith('morning')
       ? 'bg-green-100 text-green-700 border-green-200'
@@ -280,17 +280,17 @@ export default function VaultPage() {
       : lower.includes('night') && (lower.includes('2') || lower.includes('ramadhan'))
       ? 'bg-amber-100 text-amber-700 border-amber-200'
       : 'bg-slate-100 text-slate-700 border-slate-200';
-    return <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${color}`}>{name}: {count}</span>;
+    return <span key={key} className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${color}`}>{name}: {count}</span>;
   };
 
-  const getStatusCountChip = (name: string, count: number) => {
+  const getStatusCountChip = (name: string, count: number, key: string) => {
     const lower = name.toLowerCase();
     const color = lower === 'booked'
       ? 'bg-yellow-100 text-yellow-700 border-yellow-200'
       : lower === 'in_gym'
       ? 'bg-green-100 text-green-700 border-green-200'
       : 'bg-slate-100 text-slate-700 border-slate-200';
-    return <span className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${color}`}>{name}: {count}</span>;
+    return <span key={key} className={`inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium ${color}`}>{name}: {count}</span>;
   };
 
   const sessionCounts = useMemo(() => {
@@ -376,7 +376,7 @@ export default function VaultPage() {
                 <CardDescription>Booking list created from the Register page.</CardDescription>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                {Object.entries(sessionCounts).map(([name, count]) => getSessionCountChip(name, count))}
+                {Object.entries(sessionCounts).map(([name, count]) => getSessionCountChip(name, count, name))}
               </div>
             </div>
           </CardHeader>
@@ -496,7 +496,7 @@ export default function VaultPage() {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                {Object.entries(statusCounts).map(([name, count]) => getStatusCountChip(name, count))}
+                {Object.entries(statusCounts).map(([name, count]) => getStatusCountChip(name, count, name))}
               </div>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
