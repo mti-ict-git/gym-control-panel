@@ -14,6 +14,8 @@ Bahasa Indonesia
 8. Setiap kerusakan atau potensi bahaya pada peralatan harus segera dilaporkan kepada penanggung jawab atau Komite Gym.
 9. Seluruh pengguna wajib mematuhi tata tertib ini demi menjaga keselamatan, keamanan, dan kenyamanan bersama.
 10. Setiap pengguna wajib menjaga kebersihan diri dan tidak menimbulkan bau badan yang dapat mengganggu kenyamanan pengguna lain.
+11. Demi kenyamanan dan ketertiban bersama, pendaftar yang tercatat tidak hadir sebanyak 2 (dua) kali dalam kurun waktu 7 (tujuh) hari akan dikenakan sanksi berupa penangguhan akses pendaftaran selama 1 (satu) minggu berikutnya. Perhitungan ketidakhadiran akan di-reset (kembali ke nol) apabila pendaftar kembali hadir sebelum mencapai 2 (dua) kali ketidakhadiran dalam periode tersebut. Contoh : Selasa (Hadir), Jum'at (Tidak Hadir), Minggu (Hadir) Maka perhitungan ketidakhadiran di-reset dan tidak dikenakan penangguhan.
+12. Kehadiran hanya dianggap sah apabila pendaftar melakukan tapping in dan tapping out sesuai prosedur. Kelalaian dalam melakukan tapping (tidak melakukan tapping in dan/atau tapping out) akan tercatat sebagai tidak hadir (absen) dan diperhitungkan dalam akumulasi ketidakhadiran.
 
 ---
 
@@ -29,6 +31,8 @@ English
 8. Any damage or potential hazard involving equipment must be reported immediately to the person in charge or the Gym Committee.
 9. All users must comply with these regulations to ensure collective safety, security, and comfort.
 10. Users must maintain personal hygiene and ensure that they do not cause body odor that may disturb others’ comfort.
+11. For shared comfort and order, registrants recorded as absent 2 (two) times within 7 (seven) days will be sanctioned with a suspension of registration access for the following 1 (one) week. The absence count will be reset to zero if the registrant attends again before reaching 2 (two) absences in that period. Example: Tuesday (Attended), Friday (Absent), Sunday (Attended). Then the absence count is reset and no suspension is applied.
+12. Attendance is only considered valid if the registrant performs both tapping in and tapping out according to the procedure. Failure to tap (not tapping in and/or tapping out) will be recorded as absent and counted toward the absence accumulation.
 
 ---
 
