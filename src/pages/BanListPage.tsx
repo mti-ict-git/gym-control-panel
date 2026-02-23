@@ -2,12 +2,26 @@ import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useQuery } from '@tanstack/react-query';
+import { Textarea } from '@/components/ui/textarea';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface BanRecord {
   employee_id: string;
@@ -16,6 +30,8 @@ interface BanRecord {
   banned_until: string | null;
   status: string | null;
   reason: string | null;
+  unban_remark: string | null;
+  action_by: string | null;
   consecutive_no_show: number;
   updated_at: string | null;
   created_at: string | null;
@@ -47,18 +63,32 @@ export default function BanListPage() {
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<'active' | 'all'>('active');
   const [now, setNow] = useState(new Date());
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+  const [unbanOpen, setUnbanOpen] = useState(false);
+  const [unbanEmployee, setUnbanEmployee] = useState<BanRecord | null>(null);
+  const [unbanRemark, setUnbanRemark] = useState('');
+  const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const canUnbanByRole = user?.role === 'superadmin' || user?.role === 'committee';
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    setPage(1);
+  }, [query, scope]);
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['gym-ban-list', query, scope],
+    queryKey: ['gym-ban-list', query, scope, page, pageSize],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (query.trim()) params.set('q', query.trim());
       if (scope === 'all') params.set('include_expired', '1');
+      params.set('page', String(page));
+      params.set('limit', String(pageSize));
       const qs = params.toString();
       const tryFetch = async (base: string) => {
         const resp = await fetch(`${base}/gym-booking-ban-list${qs ? `?${qs}` : ''}`);
@@ -77,9 +107,52 @@ export default function BanListPage() {
     retry: 1,
   });
 
+  const unbanMutation = useMutation({
+    mutationFn: async ({ employeeId, remark }: { employeeId: string; remark: string }) => {
+      const token = localStorage.getItem('auth_token') || '';
+      const post = async (url: string) => {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ employee_id: employeeId, remark }),
+        });
+        const json = (await resp.json()) as { ok: boolean; error?: string };
+        if (resp.status >= 500) throw new Error(json?.error || 'Server error');
+        if (!json?.ok) throw new Error(json?.error || 'Failed to reset ban');
+        return true;
+      };
+      try {
+        return await post('/api/gym-booking-ban-reset');
+      } catch (_) {
+        return await post('/gym-booking-ban-reset');
+      }
+    },
+    onSuccess: async () => {
+      toast.success('Ban direset');
+      setUnbanOpen(false);
+      setUnbanEmployee(null);
+      setUnbanRemark('');
+      await queryClient.invalidateQueries({ queryKey: ['gym-ban-list'] });
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Gagal reset ban');
+    },
+  });
+
   const bans = Array.isArray(data?.bans) ? data?.bans : [];
   const total = Number(data?.total || 0);
   const activeTotal = Number(data?.active_total || 0);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const startIndex = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const endIndex = total === 0 ? 0 : Math.min(safePage * pageSize, total);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   const countdownFor = (value: string | null | undefined) => {
     const s = parseDateOnly(value);
@@ -180,34 +253,140 @@ export default function BanListPage() {
                       <TableHead>Banned Until</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Reason</TableHead>
+                      <TableHead>Unban Remark</TableHead>
+                      <TableHead>Action By</TableHead>
                       <TableHead>Consecutive No-Show</TableHead>
                       <TableHead>Updated At</TableHead>
                       <TableHead>Countdown</TableHead>
+                      <TableHead>Aksi</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {bans.map((row) => (
-                      <TableRow key={`${row.employee_id}-${row.banned_until}`}>
-                        <TableCell className="font-mono text-sm">{row.employee_id || '-'}</TableCell>
-                        <TableCell className="text-sm">{row.name || '-'}</TableCell>
-                        <TableCell className="text-sm">{row.department || '-'}</TableCell>
-                        <TableCell className="font-mono text-sm">{formatDateOnly(row.banned_until)}</TableCell>
-                        <TableCell>{statusBadge(row.status)}</TableCell>
-                        <TableCell className="text-sm">{row.reason || '-'}</TableCell>
-                        <TableCell className="font-mono text-sm">{Number(row.consecutive_no_show || 0)}</TableCell>
-                        <TableCell className="font-mono text-sm">
-                          {row.updated_at ? format(new Date(row.updated_at), 'yyyy-MM-dd HH:mm') : row.created_at ? format(new Date(row.created_at), 'yyyy-MM-dd HH:mm') : '-'}
-                        </TableCell>
-                        <TableCell className="font-mono text-sm">{countdownFor(row.banned_until)}</TableCell>
-                      </TableRow>
-                    ))}
+                    {bans.map((row) => {
+                      const status = String(row.status || '').toUpperCase();
+                      const canUnban = status === 'ACTIVE' && canUnbanByRole;
+                      return (
+                        <TableRow key={`${row.employee_id}-${row.banned_until}`}>
+                          <TableCell className="font-mono text-sm">{row.employee_id || '-'}</TableCell>
+                          <TableCell className="text-sm">{row.name || '-'}</TableCell>
+                          <TableCell className="text-sm">{row.department || '-'}</TableCell>
+                          <TableCell className="font-mono text-sm">{formatDateOnly(row.banned_until)}</TableCell>
+                          <TableCell>{statusBadge(row.status)}</TableCell>
+                          <TableCell className="text-sm">{row.reason || '-'}</TableCell>
+                          <TableCell className="text-sm">{row.unban_remark || '-'}</TableCell>
+                          <TableCell className="text-sm">{row.action_by || '-'}</TableCell>
+                          <TableCell className="font-mono text-sm">{Number(row.consecutive_no_show || 0)}</TableCell>
+                          <TableCell className="font-mono text-sm">
+                            {row.updated_at ? format(new Date(row.updated_at), 'yyyy-MM-dd HH:mm') : row.created_at ? format(new Date(row.created_at), 'yyyy-MM-dd HH:mm') : '-'}
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">{countdownFor(row.banned_until)}</TableCell>
+                          <TableCell>
+                            {canUnban ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setUnbanEmployee(row);
+                                  setUnbanRemark('');
+                                  setUnbanOpen(true);
+                                }}
+                                disabled={unbanMutation.isPending}
+                              >
+                                Unban
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
+              </div>
+            )}
+            {!isLoading && !isError && total > 0 && (
+              <div className="mt-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="text-sm text-muted-foreground">
+                  Menampilkan {startIndex}-{endIndex} dari {total}
+                </div>
+                <Pagination className="md:justify-end">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        href="#"
+                        className={safePage <= 1 ? 'pointer-events-none opacity-50' : undefined}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (safePage > 1) setPage(safePage - 1);
+                        }}
+                      />
+                    </PaginationItem>
+                    <PaginationItem>
+                      <PaginationLink href="#" isActive onClick={(e) => e.preventDefault()}>
+                        {safePage}
+                      </PaginationLink>
+                    </PaginationItem>
+                    <PaginationItem>
+                      <PaginationNext
+                        href="#"
+                        className={safePage >= totalPages ? 'pointer-events-none opacity-50' : undefined}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (safePage < totalPages) setPage(safePage + 1);
+                        }}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
               </div>
             )}
           </CardContent>
         </Card>
       </div>
+      <Dialog
+        open={unbanOpen}
+        onOpenChange={(open) => {
+          setUnbanOpen(open);
+          if (!open) {
+            setUnbanEmployee(null);
+            setUnbanRemark('');
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Unban User</DialogTitle>
+            <DialogDescription>
+              {unbanEmployee ? `Employee ${unbanEmployee.employee_id}${unbanEmployee.name ? ` - ${unbanEmployee.name}` : ''}` : 'Pilih user untuk unban'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="unban-remark">Remark</Label>
+            <Textarea
+              id="unban-remark"
+              value={unbanRemark}
+              onChange={(e) => setUnbanRemark(e.target.value)}
+              placeholder="Alasan unban"
+              maxLength={255}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUnbanOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!unbanEmployee) return;
+                unbanMutation.mutate({ employeeId: unbanEmployee.employee_id, remark: unbanRemark.trim() });
+              }}
+              disabled={!unbanEmployee || unbanRemark.trim().length === 0 || unbanMutation.isPending}
+            >
+              {unbanMutation.isPending ? 'Saving...' : 'Unban'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   );
 }

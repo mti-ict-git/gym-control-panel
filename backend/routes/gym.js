@@ -1,6 +1,7 @@
 import express from 'express';
 import sql from 'mssql';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { envTrim, envBool, envInt, startOfDayUtcDateForOffsetMinutes } from '../lib/env.js';
 
 const router = express.Router();
@@ -31,6 +32,8 @@ async function ensureGymBookingBanTable(pool) {
          EmployeeID VARCHAR(20) NOT NULL PRIMARY KEY,
          BannedUntil DATE NOT NULL,
          Reason VARCHAR(255) NULL,
+         UnbanRemark VARCHAR(255) NULL,
+         ActionBy VARCHAR(100) NULL,
          ConsecutiveNoShow INT NOT NULL CONSTRAINT DF_gym_booking_ban_ConsecutiveNoShow DEFAULT 0,
          CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_booking_ban_CreatedAt DEFAULT GETDATE(),
          UpdatedAt DATETIME NULL
@@ -38,8 +41,20 @@ async function ensureGymBookingBanTable(pool) {
      END`
   );
   await pool.request().query(
+    "IF COL_LENGTH('dbo.gym_booking_ban', 'UnbanRemark') IS NULL BEGIN ALTER TABLE dbo.gym_booking_ban ADD UnbanRemark VARCHAR(255) NULL; END"
+  );
+  await pool.request().query(
+    "IF COL_LENGTH('dbo.gym_booking_ban', 'ActionBy') IS NULL BEGIN ALTER TABLE dbo.gym_booking_ban ADD ActionBy VARCHAR(100) NULL; END"
+  );
+  await pool.request().query(
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_booking_ban_BannedUntil' AND object_id = OBJECT_ID('dbo.gym_booking_ban')) BEGIN CREATE INDEX IX_gym_booking_ban_BannedUntil ON dbo.gym_booking_ban(BannedUntil); END"
   );
+}
+
+function getJwtSecret() {
+  const s = envTrim(process.env.JWT_SECRET);
+  if (!s) throw new Error('Missing JWT_SECRET');
+  return s;
 }
 
 const gymBookingsCache = new Map();
@@ -1999,15 +2014,32 @@ router.post('/gym-booking-create', async (req, res) => {
            FROM dbo.gym_booking gb
            WHERE gb.EmployeeID = @employee_id
              AND gb.BookingDate < @today
+             AND gb.BookingDate >= DATEADD(day, -7, @today)
              AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
            ORDER BY gb.BookingDate DESC`
         );
         const noShowRows = Array.isArray(noShowRes?.recordset) ? noShowRes.recordset : [];
-        const shouldBan =
-          noShowRows.length === 2 &&
-          noShowRows.every(
-            (r) => Number(r?.has_entry_tap || 0) === 0 || Number(r?.has_exit_tap || 0) === 0
-          );
+        let consecutiveNoShow = 0;
+        for (const row of noShowRows) {
+          const hasEntry = Number(row?.has_entry_tap || 0) === 1;
+          const hasExit = Number(row?.has_exit_tap || 0) === 1;
+          const isNoShow = !(hasEntry && hasExit);
+          if (!isNoShow) break;
+          consecutiveNoShow += 1;
+        }
+        const updateCountReq = gymPool.request();
+        updateCountReq.input('employee_id', sql.VarChar(20), employeeId);
+        updateCountReq.input('consecutive_no_show', sql.Int, consecutiveNoShow);
+        await updateCountReq.query(
+          `IF EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id)
+           BEGIN
+             UPDATE dbo.gym_booking_ban
+             SET ConsecutiveNoShow = @consecutive_no_show,
+                 UpdatedAt = GETDATE()
+             WHERE EmployeeID = @employee_id;
+           END`
+        );
+        const shouldBan = consecutiveNoShow >= 2;
         if (shouldBan) {
           const banReq = gymPool.request();
           banReq.input('employee_id', sql.VarChar(20), employeeId);
@@ -2395,6 +2427,8 @@ router.post('/gym-booking-init', async (req, res) => {
           EmployeeID VARCHAR(20) NOT NULL PRIMARY KEY,
           BannedUntil DATE NOT NULL,
           Reason VARCHAR(255) NULL,
+          UnbanRemark VARCHAR(255) NULL,
+          ActionBy VARCHAR(100) NULL,
           ConsecutiveNoShow INT NOT NULL CONSTRAINT DF_gym_booking_ban_ConsecutiveNoShow DEFAULT 0,
           CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_booking_ban_CreatedAt DEFAULT GETDATE(),
           UpdatedAt DATETIME NULL
@@ -5284,6 +5318,8 @@ router.get('/gym-booking-ban-list', async (req, res) => {
         CONVERT(varchar(10), b.BannedUntil, 23) AS banned_until,
         CASE WHEN b.BannedUntil >= @today THEN 'ACTIVE' ELSE 'EXPIRED' END AS status,
         b.Reason AS reason,
+        b.UnbanRemark AS unban_remark,
+        b.ActionBy AS action_by,
         b.ConsecutiveNoShow AS consecutive_no_show,
         b.UpdatedAt AS updated_at,
         b.CreatedAt AS created_at
@@ -5303,6 +5339,8 @@ router.get('/gym-booking-ban-list', async (req, res) => {
       banned_until: r.banned_until != null ? String(r.banned_until).trim() : null,
       status: r.status != null ? String(r.status).trim() : null,
       reason: r.reason != null ? String(r.reason).trim() : null,
+      unban_remark: r.unban_remark != null ? String(r.unban_remark).trim() : null,
+      action_by: r.action_by != null ? String(r.action_by).trim() : null,
       consecutive_no_show: Number(r.consecutive_no_show ?? 0) || 0,
       updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : null,
       created_at: r.created_at ? new Date(r.created_at).toISOString() : null,
@@ -5313,6 +5351,90 @@ router.get('/gym-booking-ban-list', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, bans: [] });
+  }
+});
+
+router.post('/gym-booking-ban-reset', async (req, res) => {
+  const auth = req.headers.authorization || '';
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  if (!m) return res.status(401).json({ ok: false, error: 'Missing bearer token' });
+  let payload;
+  try {
+    payload = jwt.verify(m[1], getJwtSecret());
+  } catch (e) {
+    return res.status(401).json({ ok: false, error: 'Invalid token' });
+  }
+  const role = String(payload?.role || '').toLowerCase();
+  if (!['superadmin', 'committee'].includes(role)) {
+    return res.status(403).json({ ok: false, error: 'Forbidden' });
+  }
+  const actionBy = String(payload?.username || payload?.email || '').trim();
+
+  const {
+    DB_SERVER,
+    DB_PORT,
+    DB_DATABASE,
+    DB_USER,
+    DB_PASSWORD,
+    DB_ENCRYPT,
+    DB_TRUST_SERVER_CERTIFICATE,
+  } = process.env;
+
+  if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
+  }
+
+  const employeeId = String(req.body?.employee_id || '').trim();
+  const remark = String(req.body?.remark || '').trim();
+  if (!employeeId) {
+    return res.status(400).json({ ok: false, error: 'employee_id is required' });
+  }
+  if (!remark) {
+    return res.status(400).json({ ok: false, error: 'remark is required' });
+  }
+
+  const config = {
+    server: DB_SERVER,
+    port: Number(DB_PORT || 1433),
+    database: DB_DATABASE,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    options: {
+      encrypt: envBool(DB_ENCRYPT, false),
+      trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
+  };
+
+  try {
+    const pool = await sql.connect(config);
+    await ensureGymBookingBanTable(pool);
+    const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
+    const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
+    const req1 = pool.request();
+    req1.input('employee_id', sql.VarChar(20), employeeId);
+    req1.input('today', sql.Date, todayDate);
+    req1.input('remark', sql.VarChar(255), remark);
+    req1.input('action_by', sql.VarChar(100), actionBy || null);
+    const result = await req1.query(`
+      UPDATE dbo.gym_booking_ban
+      SET BannedUntil = DATEADD(day, -1, @today),
+          ConsecutiveNoShow = 0,
+          Reason = NULL,
+          UnbanRemark = @remark,
+          ActionBy = @action_by,
+          UpdatedAt = GETDATE()
+      WHERE EmployeeID = @employee_id
+    `);
+    await pool.close();
+    const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
+    if (affected < 1) {
+      return res.status(200).json({ ok: false, error: 'Employee ban not found' });
+    }
+    return res.json({ ok: true, affected });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message });
   }
 });
 
