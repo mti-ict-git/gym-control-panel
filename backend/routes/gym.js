@@ -33,6 +33,7 @@ async function ensureGymBookingBanTable(pool) {
          BannedUntil DATE NOT NULL,
          Reason VARCHAR(255) NULL,
          UnbanRemark VARCHAR(255) NULL,
+         UnbanAt DATETIME NULL,
          ActionBy VARCHAR(100) NULL,
          ConsecutiveNoShow INT NOT NULL CONSTRAINT DF_gym_booking_ban_ConsecutiveNoShow DEFAULT 0,
          CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_booking_ban_CreatedAt DEFAULT GETDATE(),
@@ -45,6 +46,9 @@ async function ensureGymBookingBanTable(pool) {
   );
   await pool.request().query(
     "IF COL_LENGTH('dbo.gym_booking_ban', 'ActionBy') IS NULL BEGIN ALTER TABLE dbo.gym_booking_ban ADD ActionBy VARCHAR(100) NULL; END"
+  );
+  await pool.request().query(
+    "IF COL_LENGTH('dbo.gym_booking_ban', 'UnbanAt') IS NULL BEGIN ALTER TABLE dbo.gym_booking_ban ADD UnbanAt DATETIME NULL; END"
   );
   await pool.request().query(
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_booking_ban_BannedUntil' AND object_id = OBJECT_ID('dbo.gym_booking_ban')) BEGIN CREATE INDEX IX_gym_booking_ban_BannedUntil ON dbo.gym_booking_ban(BannedUntil); END"
@@ -1978,14 +1982,32 @@ router.post('/gym-booking-create', async (req, res) => {
       banCheckReq.input('employee_id', sql.VarChar(20), employeeId);
       banCheckReq.input('today', sql.Date, todayDate);
       const banCheck = await banCheckReq.query(
-        "SELECT TOP 1 BannedUntil FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id AND BannedUntil >= @today"
+        "SELECT TOP 1 BannedUntil, UnbanRemark, UnbanAt, ActionBy, UpdatedAt FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id"
       );
       const banRow = Array.isArray(banCheck?.recordset) ? banCheck.recordset[0] : null;
-      if (banRow?.BannedUntil) {
-        const bannedUntil = banRow.BannedUntil instanceof Date ? banRow.BannedUntil : new Date(String(banRow.BannedUntil));
+      const bannedUntil = banRow?.BannedUntil
+        ? (banRow.BannedUntil instanceof Date ? banRow.BannedUntil : new Date(String(banRow.BannedUntil)))
+        : null;
+      if (bannedUntil && bannedUntil.getTime() >= todayDate.getTime()) {
         const bannedStr = isNaN(bannedUntil.getTime()) ? null : bannedUntil.toISOString().slice(0, 10);
         await gymPool.close();
         return res.status(200).json({ ok: false, error: `You are banned from booking until ${bannedStr || 'a later date'}` });
+      }
+      let noShowSinceDate = null;
+      const unbanRemark = banRow?.UnbanRemark != null ? String(banRow.UnbanRemark).trim() : '';
+      const unbanAt = banRow?.UnbanAt
+        ? (banRow.UnbanAt instanceof Date ? banRow.UnbanAt : new Date(String(banRow.UnbanAt)))
+        : null;
+      const unbanUpdatedAt = banRow?.UpdatedAt
+        ? (banRow.UpdatedAt instanceof Date ? banRow.UpdatedAt : new Date(String(banRow.UpdatedAt)))
+        : null;
+      const isUnbanned = !bannedUntil || bannedUntil.getTime() < todayDate.getTime();
+      if (isUnbanned) {
+        if (unbanAt && !isNaN(unbanAt.getTime())) {
+          noShowSinceDate = unbanAt;
+        } else if (unbanRemark) {
+          noShowSinceDate = unbanUpdatedAt && !isNaN(unbanUpdatedAt.getTime()) ? unbanUpdatedAt : todayDate;
+        }
       }
       const tapsExistsRes = await gymPool.request().query("SELECT OBJECT_ID('dbo.gym_live_taps','U') AS id;");
       const tapsTableExists = Boolean(tapsExistsRes?.recordset?.[0]?.id);
@@ -1997,6 +2019,10 @@ router.post('/gym-booking-create', async (req, res) => {
         noShowReq.input('today', sql.Date, todayDate);
         noShowReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
         noShowReq.input('exitPat', sql.VarChar(120), `%${exitPattern}%`);
+        const sinceWhere = noShowSinceDate ? 'AND gb.BookingDate >= @since' : '';
+        if (noShowSinceDate) {
+          noShowReq.input('since', sql.Date, noShowSinceDate);
+        }
         const noShowRes = await noShowReq.query(
           `SELECT TOP 2 gb.BookingDate AS booking_date,
              CASE WHEN EXISTS (
@@ -2015,6 +2041,7 @@ router.post('/gym-booking-create', async (req, res) => {
            WHERE gb.EmployeeID = @employee_id
              AND gb.BookingDate < @today
              AND gb.BookingDate >= DATEADD(day, -7, @today)
+             ${sinceWhere}
              AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
            ORDER BY gb.BookingDate DESC`
         );
@@ -2034,8 +2061,7 @@ router.post('/gym-booking-create', async (req, res) => {
           `IF EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id)
            BEGIN
              UPDATE dbo.gym_booking_ban
-             SET ConsecutiveNoShow = @consecutive_no_show,
-                 UpdatedAt = GETDATE()
+             SET ConsecutiveNoShow = @consecutive_no_show
              WHERE EmployeeID = @employee_id;
            END`
         );
@@ -2052,6 +2078,9 @@ router.post('/gym-booking-create', async (req, res) => {
                SET BannedUntil = DATEADD(day, 7, @today),
                    Reason = @reason,
                    ConsecutiveNoShow = 2,
+                  UnbanRemark = NULL,
+                  UnbanAt = NULL,
+                  ActionBy = NULL,
                    UpdatedAt = GETDATE()
                WHERE EmployeeID = @employee_id;
              END
@@ -5422,6 +5451,7 @@ router.post('/gym-booking-ban-reset', async (req, res) => {
           ConsecutiveNoShow = 0,
           Reason = NULL,
           UnbanRemark = @remark,
+          UnbanAt = GETDATE(),
           ActionBy = @action_by,
           UpdatedAt = GETDATE()
       WHERE EmployeeID = @employee_id
