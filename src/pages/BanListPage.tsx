@@ -71,6 +71,7 @@ export default function BanListPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const canUnbanByRole = user?.role === 'superadmin' || user?.role === 'committee';
+  const isCommittee = user?.role === 'committee';
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -254,7 +255,7 @@ export default function BanListPage() {
                       <TableHead>Status</TableHead>
                       <TableHead>Reason</TableHead>
                       <TableHead>Unban Remark</TableHead>
-                      <TableHead>Action By</TableHead>
+                      {!isCommittee && <TableHead>Action By</TableHead>}
                       <TableHead>Consecutive No-Show</TableHead>
                       <TableHead>Updated At</TableHead>
                       <TableHead>Countdown</TableHead>
@@ -274,7 +275,7 @@ export default function BanListPage() {
                           <TableCell>{statusBadge(row.status)}</TableCell>
                           <TableCell className="text-sm">{row.reason || '-'}</TableCell>
                           <TableCell className="text-sm">{row.unban_remark || '-'}</TableCell>
-                          <TableCell className="text-sm">{row.action_by || '-'}</TableCell>
+                          {!isCommittee && <TableCell className="text-sm">{row.action_by || '-'}</TableCell>}
                           <TableCell className="font-mono text-sm">{Number(row.consecutive_no_show || 0)}</TableCell>
                           <TableCell className="font-mono text-sm">
                             {row.updated_at ? format(new Date(row.updated_at), 'yyyy-MM-dd HH:mm') : row.created_at ? format(new Date(row.created_at), 'yyyy-MM-dd HH:mm') : '-'}
