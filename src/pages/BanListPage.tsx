@@ -22,6 +22,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
+import { Ban, Clock, Search, ShieldX } from 'lucide-react';
 
 interface BanRecord {
   employee_id: string;
@@ -181,44 +182,70 @@ export default function BanListPage() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Ban List</h1>
-            <p className="text-muted-foreground">Daftar user yang sedang kena ban</p>
-          </div>
-          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
-            <Input
-              placeholder="Cari EmployeeID atau Nama"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="md:w-64"
-            />
-            <Select value={scope} onValueChange={(v) => setScope(v as 'active' | 'all')}>
-              <SelectTrigger className="md:w-44">
-                <SelectValue placeholder="Filter status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="active">Active saja</SelectItem>
-                <SelectItem value="all">Semua riwayat</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+        <Card className="border bg-gradient-to-b from-white to-slate-50/50 shadow-sm">
+          <CardHeader className="pb-3">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
+                  <Ban className="h-5 w-5" />
+                </span>
+                <div>
+                  <CardTitle className="text-2xl">Ban List</CardTitle>
+                  <CardDescription>Daftar user yang sedang kena ban</CardDescription>
+                </div>
+              </div>
+              <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row">
+                <div className="relative md:w-72">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Cari EmployeeID atau Nama"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                <Select value={scope} onValueChange={(v) => setScope(v as 'active' | 'all')}>
+                  <SelectTrigger className="md:w-48">
+                    <SelectValue placeholder="Filter status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active saja</SelectItem>
+                    <SelectItem value="all">Semua riwayat</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardHeader>
+        </Card>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <Card>
+          <Card className="border-rose-200/60 bg-gradient-to-br from-rose-50 to-rose-100/40">
             <CardHeader>
-              <CardTitle>Total Ban</CardTitle>
-              <CardDescription>Jumlah data ban sesuai filter</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Total Ban</CardTitle>
+                  <CardDescription>Jumlah data ban sesuai filter</CardDescription>
+                </div>
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/70 text-rose-600 ring-1 ring-rose-200">
+                  <ShieldX className="h-5 w-5" />
+                </span>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-semibold">{total}</div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="border-amber-200/60 bg-gradient-to-br from-amber-50 to-amber-100/40">
             <CardHeader>
-              <CardTitle>Ban Aktif</CardTitle>
-              <CardDescription>Jumlah user yang masih diban</CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Ban Aktif</CardTitle>
+                  <CardDescription>Jumlah user yang masih diban</CardDescription>
+                </div>
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/70 text-amber-600 ring-1 ring-amber-200">
+                  <Clock className="h-5 w-5" />
+                </span>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-semibold">{activeTotal}</div>
@@ -228,8 +255,12 @@ export default function BanListPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Daftar Ban</CardTitle>
-            <CardDescription>Data ban berdasarkan booking no-show</CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Daftar Ban</CardTitle>
+                <CardDescription>Data ban berdasarkan booking no-show</CardDescription>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
@@ -245,43 +276,61 @@ export default function BanListPage() {
               <div className="text-sm text-muted-foreground">Tidak ada data ban</div>
             ) : (
               <div className="w-full overflow-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>EmployeeID</TableHead>
-                      <TableHead>Nama</TableHead>
-                      <TableHead>Department</TableHead>
-                      <TableHead>Banned Until</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Reason</TableHead>
-                      <TableHead>Unban Remark</TableHead>
-                      {!isCommittee && <TableHead>Action By</TableHead>}
-                      <TableHead>Consecutive No-Show</TableHead>
-                      <TableHead>Updated At</TableHead>
-                      <TableHead>Countdown</TableHead>
-                      <TableHead>Aksi</TableHead>
+                <Table className="text-xs md:text-sm">
+                  <TableHeader className="sticky top-0 z-10 bg-card">
+                    <TableRow className="border-b bg-muted/30">
+                      <TableHead className="whitespace-nowrap">EmployeeID</TableHead>
+                      <TableHead className="whitespace-nowrap">Nama</TableHead>
+                      <TableHead className="whitespace-nowrap">Department</TableHead>
+                      <TableHead className="whitespace-nowrap">Banned Until</TableHead>
+                      <TableHead className="whitespace-nowrap">Status</TableHead>
+                      <TableHead className="whitespace-nowrap">Reason</TableHead>
+                      <TableHead className="whitespace-nowrap">Unban Remark</TableHead>
+                      {!isCommittee && <TableHead className="whitespace-nowrap">Action By</TableHead>}
+                      <TableHead className="whitespace-nowrap">Consecutive No-Show</TableHead>
+                      <TableHead className="whitespace-nowrap">Updated At</TableHead>
+                      <TableHead className="whitespace-nowrap">Countdown</TableHead>
+                      <TableHead className="whitespace-nowrap">Aksi</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {bans.map((row) => {
                       const status = String(row.status || '').toUpperCase();
                       const canUnban = status === 'ACTIVE' && canUnbanByRole;
+                      const rowClass =
+                        status === 'ACTIVE'
+                          ? 'hover:bg-amber-50/60'
+                          : 'hover:bg-slate-50';
                       return (
-                        <TableRow key={`${row.employee_id}-${row.banned_until}`}>
-                          <TableCell className="font-mono text-sm">{row.employee_id || '-'}</TableCell>
-                          <TableCell className="text-sm">{row.name || '-'}</TableCell>
-                          <TableCell className="text-sm">{row.department || '-'}</TableCell>
-                          <TableCell className="font-mono text-sm">{formatDateOnly(row.banned_until)}</TableCell>
-                          <TableCell>{statusBadge(row.status)}</TableCell>
-                          <TableCell className="text-sm">{row.reason || '-'}</TableCell>
-                          <TableCell className="text-sm">{row.unban_remark || '-'}</TableCell>
-                          {!isCommittee && <TableCell className="text-sm">{row.action_by || '-'}</TableCell>}
-                          <TableCell className="font-mono text-sm">{Number(row.consecutive_no_show || 0)}</TableCell>
-                          <TableCell className="font-mono text-sm">
+                        <TableRow key={`${row.employee_id}-${row.banned_until}`} className={rowClass}>
+                          <TableCell className="whitespace-nowrap font-mono py-2">{row.employee_id || '-'}</TableCell>
+                          <TableCell className="whitespace-nowrap py-2">{row.name || '-'}</TableCell>
+                          <TableCell className="whitespace-nowrap py-2">{row.department || '-'}</TableCell>
+                          <TableCell className="whitespace-nowrap font-mono py-2">{formatDateOnly(row.banned_until)}</TableCell>
+                          <TableCell className="whitespace-nowrap py-2">{statusBadge(row.status)}</TableCell>
+                          <TableCell className="max-w-[280px] truncate py-2">{row.reason || '-'}</TableCell>
+                          <TableCell className="max-w-[280px] truncate py-2">{row.unban_remark || '-'}</TableCell>
+                          {!isCommittee && <TableCell className="max-w-[160px] truncate py-2">{row.action_by || '-'}</TableCell>}
+                          <TableCell className="whitespace-nowrap font-mono py-2">
+                            <span
+                              className={
+                                Number(row.consecutive_no_show || 0) >= 2
+                                  ? 'inline-flex rounded-full bg-rose-100 px-2 py-0.5 text-rose-700'
+                                  : 'inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-slate-700'
+                              }
+                            >
+                              {Number(row.consecutive_no_show || 0)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap font-mono py-2">
                             {row.updated_at ? format(new Date(row.updated_at), 'yyyy-MM-dd HH:mm') : row.created_at ? format(new Date(row.created_at), 'yyyy-MM-dd HH:mm') : '-'}
                           </TableCell>
-                          <TableCell className="font-mono text-sm">{countdownFor(row.banned_until)}</TableCell>
-                          <TableCell>
+                          <TableCell className="whitespace-nowrap py-2">
+                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs">
+                              {countdownFor(row.banned_until)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap py-2">
                             {canUnban ? (
                               <Button
                                 variant="outline"
@@ -292,6 +341,7 @@ export default function BanListPage() {
                                   setUnbanOpen(true);
                                 }}
                                 disabled={unbanMutation.isPending}
+                                className="border-amber-300 text-amber-700 hover:bg-amber-50"
                               >
                                 Unban
                               </Button>
