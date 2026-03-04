@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -94,8 +94,11 @@ export function AppSidebar() {
   })();
 
   return (
-    <Sidebar className="border-r border-sidebar-border bg-card shadow-sm">
-      <SidebarHeader className="h-14 flex-row items-center justify-between gap-3 border-b border-sidebar-border bg-muted/30 px-6 py-0">
+    <Sidebar
+      className="border-r border-sidebar-border shadow-sm"
+      style={{ '--sidebar-bg-image': "url('/sidebar-background.png')" } as CSSProperties}
+    >
+      <SidebarHeader className="h-14 flex-row items-center justify-between gap-3 border-b border-sidebar-border bg-transparent px-6 py-0">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <Dumbbell className="h-4 w-4 text-primary" />
@@ -110,7 +113,7 @@ export function AppSidebar() {
         </Button>
       </SidebarHeader>
 
-      <SidebarContent className="p-3">
+      <SidebarContent className="bg-transparent p-3">
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -139,7 +142,7 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="border-t border-sidebar-border bg-muted/30 p-4">
+      <SidebarFooter className="border-t border-sidebar-border bg-transparent p-4">
         <Separator className="mb-4" />
         <div className="flex items-center gap-3 mb-4">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
