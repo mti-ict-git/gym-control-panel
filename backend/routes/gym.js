@@ -5298,19 +5298,14 @@ router.get('/gym-booking-ban-list', async (req, res) => {
     const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
     const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
 
-    const masterDbRaw = envTrim(process.env.MASTER_DB_DATABASE);
-    const masterDbSafe = masterDbRaw && /^[A-Za-z0-9_]+$/.test(masterDbRaw) ? masterDbRaw : '';
-    const selectName = masterDbSafe ? 'ec.name AS name,' : 'CAST(NULL AS varchar(255)) AS name,';
-    const selectDept = masterDbSafe ? 'eem.department AS department,' : 'CAST(NULL AS varchar(255)) AS department,';
-    const joinMaster = masterDbSafe
-      ? `LEFT JOIN [${masterDbSafe}].dbo.employee_core ec ON b.EmployeeID = ec.employee_id
-         OUTER APPLY (
-           SELECT TOP 1 ee.department AS department
-           FROM [${masterDbSafe}].dbo.employee_employment ee
-           WHERE ee.employee_id = b.EmployeeID
-           ORDER BY CASE WHEN UPPER(CAST(ee.status AS varchar(50))) IN ('ACTIVE','AKTIF','A','1','TRUE') THEN 0 ELSE 1 END
-         ) eem`
-      : '';
+  const selectName = "NULLIF(LTRIM(RTRIM(gbinfo.employee_name)), '') AS name,";
+  const selectDept = "NULLIF(LTRIM(RTRIM(gbinfo.department)), '') AS department,";
+  const joinBookingInfo = `OUTER APPLY (
+      SELECT TOP 1 gb.EmployeeName AS employee_name, gb.Department AS department
+      FROM dbo.gym_booking gb
+      WHERE gb.EmployeeID = b.EmployeeID
+      ORDER BY gb.BookingDate DESC, gb.CreatedAt DESC
+    ) gbinfo`;
 
     const reqCount = pool.request();
     const reqData = pool.request();
@@ -5321,22 +5316,20 @@ router.get('/gym-booking-ban-list', async (req, res) => {
 
     const whereParts = [];
     if (!includeExpired) whereParts.push('b.BannedUntil >= @today');
-    if (q) {
-      reqCount.input('q', sql.VarChar(100), `%${q}%`);
-      reqData.input('q', sql.VarChar(100), `%${q}%`);
-      if (masterDbSafe) {
-        whereParts.push('(b.EmployeeID LIKE @q OR COALESCE(ec.name, \'\') LIKE @q)');
-      } else {
-        whereParts.push('b.EmployeeID LIKE @q');
-      }
-    }
+  if (q) {
+    reqCount.input('q', sql.VarChar(100), `%${q}%`);
+    reqData.input('q', sql.VarChar(100), `%${q}%`);
+    whereParts.push(
+      "(b.EmployeeID LIKE @q OR COALESCE(NULLIF(LTRIM(RTRIM(gbinfo.employee_name)), ''), '') LIKE @q)"
+    );
+  }
     const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
 
     const countRes = await reqCount.query(
       `SELECT COUNT(1) AS total,
         SUM(CASE WHEN b.BannedUntil >= @today THEN 1 ELSE 0 END) AS active_total
-       FROM dbo.gym_booking_ban b
-       ${joinMaster}
+     FROM dbo.gym_booking_ban b
+     ${joinBookingInfo}
        ${whereSql}`
     );
 
@@ -5352,8 +5345,8 @@ router.get('/gym-booking-ban-list', async (req, res) => {
         b.ConsecutiveNoShow AS consecutive_no_show,
         b.UpdatedAt AS updated_at,
         b.CreatedAt AS created_at
-       FROM dbo.gym_booking_ban b
-       ${joinMaster}
+     FROM dbo.gym_booking_ban b
+     ${joinBookingInfo}
        ${whereSql}
        ORDER BY b.BannedUntil DESC, b.EmployeeID ASC
        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`

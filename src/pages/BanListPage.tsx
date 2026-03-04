@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import {
   Pagination,
   PaginationContent,
+  PaginationEllipsis,
   PaginationItem,
   PaginationLink,
   PaginationNext,
@@ -104,6 +105,7 @@ export default function BanListPage() {
         return await tryFetch('');
       }
     },
+    placeholderData: (prev) => prev,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     retry: 1,
@@ -148,13 +150,32 @@ export default function BanListPage() {
   const total = Number(data?.total || 0);
   const activeTotal = Number(data?.active_total || 0);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const safePage = Math.min(page, totalPages);
-  const startIndex = total === 0 ? 0 : (safePage - 1) * pageSize + 1;
-  const endIndex = total === 0 ? 0 : Math.min(safePage * pageSize, total);
+  const currentPage = Math.min(page, totalPages);
+  const startIndex = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const endIndex = total === 0 ? 0 : Math.min(currentPage * pageSize, total);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+
+  const pageItems = (() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages = new Set<number>();
+    pages.add(1);
+    pages.add(totalPages);
+    for (let p = currentPage - 1; p <= currentPage + 1; p += 1) {
+      if (p > 1 && p < totalPages) pages.add(p);
+    }
+    const sorted = Array.from(pages).sort((a, b) => a - b);
+    const items: Array<number | 'ellipsis'> = [];
+    let prev = 0;
+    for (const p of sorted) {
+      if (p - prev > 1) items.push('ellipsis');
+      items.push(p);
+      prev = p;
+    }
+    return items;
+  })();
 
   const countdownFor = (value: string | null | undefined) => {
     const s = parseDateOnly(value);
@@ -179,9 +200,17 @@ export default function BanListPage() {
     return <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">Expired</Badge>;
   };
 
+  const reasonLabel = (value: string | null | undefined) => {
+    const s = String(value || '').trim();
+    if (!s) return '-';
+    if (s.toUpperCase() === 'NO_SHOW_2X') return 'Absen';
+    return s;
+  };
+
   return (
     <AppLayout>
-      <div className="space-y-6">
+      <div className="min-h-[calc(100vh-56px)] bg-white -m-4 md:-m-6 p-4 md:p-6">
+        <div className="space-y-6">
         <Card className="border bg-gradient-to-b from-white to-slate-50/50 shadow-sm">
           <CardHeader className="pb-3">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -308,7 +337,7 @@ export default function BanListPage() {
                           <TableCell className="whitespace-nowrap py-2">{row.department || '-'}</TableCell>
                           <TableCell className="whitespace-nowrap font-mono py-2">{formatDateOnly(row.banned_until)}</TableCell>
                           <TableCell className="whitespace-nowrap py-2">{statusBadge(row.status)}</TableCell>
-                          <TableCell className="max-w-[280px] truncate py-2">{row.reason || '-'}</TableCell>
+                          <TableCell className="max-w-[280px] truncate py-2">{reasonLabel(row.reason)}</TableCell>
                           <TableCell className="max-w-[280px] truncate py-2">{row.unban_remark || '-'}</TableCell>
                           {!isCommittee && <TableCell className="max-w-[160px] truncate py-2">{row.action_by || '-'}</TableCell>}
                           <TableCell className="whitespace-nowrap font-mono py-2">
@@ -366,25 +395,38 @@ export default function BanListPage() {
                     <PaginationItem>
                       <PaginationPrevious
                         href="#"
-                        className={safePage <= 1 ? 'pointer-events-none opacity-50' : undefined}
+                        className={currentPage <= 1 ? 'pointer-events-none opacity-50' : undefined}
                         onClick={(e) => {
                           e.preventDefault();
-                          if (safePage > 1) setPage(safePage - 1);
+                          if (currentPage > 1) setPage(currentPage - 1);
                         }}
                       />
                     </PaginationItem>
-                    <PaginationItem>
-                      <PaginationLink href="#" isActive onClick={(e) => e.preventDefault()}>
-                        {safePage}
-                      </PaginationLink>
-                    </PaginationItem>
+                    {pageItems.map((item, idx) => (
+                      <PaginationItem key={`${item}-${idx}`}>
+                        {item === 'ellipsis' ? (
+                          <PaginationEllipsis />
+                        ) : (
+                          <PaginationLink
+                            href="#"
+                            isActive={item === currentPage}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              if (item !== currentPage) setPage(item);
+                            }}
+                          >
+                            {item}
+                          </PaginationLink>
+                        )}
+                      </PaginationItem>
+                    ))}
                     <PaginationItem>
                       <PaginationNext
                         href="#"
-                        className={safePage >= totalPages ? 'pointer-events-none opacity-50' : undefined}
+                        className={currentPage >= totalPages ? 'pointer-events-none opacity-50' : undefined}
                         onClick={(e) => {
                           e.preventDefault();
-                          if (safePage < totalPages) setPage(safePage + 1);
+                          if (currentPage < totalPages) setPage(currentPage + 1);
                         }}
                       />
                     </PaginationItem>
@@ -394,6 +436,7 @@ export default function BanListPage() {
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
       <Dialog
         open={unbanOpen}
