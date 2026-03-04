@@ -244,77 +244,80 @@ export default function ReportsPage() {
 
   const isLoading = false;
 
+  const fetchReportsPage = async (base: string, pageParam: number, limitParam: number) => {
+    const fromStr = format(start, 'yyyy-MM-dd');
+    const toStr = format(end, 'yyyy-MM-dd');
+    const empQ = String(filterEmpId || '').trim();
+    const deptQ = filterDept !== 'all' ? filterDept : '';
+    const genderQ = filterGender === 'Male' ? 'M' : (filterGender === 'Female' ? 'F' : '');
+    const sessionQ = filterSession !== 'all' ? filterSession : '';
+    const resp = await fetch(`${base}/gym-reports?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&page=${encodeURIComponent(String(pageParam))}&limit=${encodeURIComponent(String(limitParam))}&sort_by=${encodeURIComponent(String(sortBy || ''))}&sort_dir=${encodeURIComponent(String(sortDir))}&employee_id=${encodeURIComponent(empQ)}&department=${encodeURIComponent(deptQ)}&gender=${encodeURIComponent(genderQ)}&session=${encodeURIComponent(sessionQ)}`);
+    const json = await resp.json();
+    if (!json || !json.ok) return { rows: [], total: 0 } as ReportQueryResult;
+    const rows = Array.isArray(json.reports) ? json.reports : [];
+    const mapped = rows.map((r: unknown) => {
+      const obj = r as {
+        BookingID?: number;
+        booking_id?: number;
+        EmployeeID?: string;
+        employee_id?: string;
+        CardNo?: string | null;
+        Name?: string | null;
+        Department?: string | null;
+        Gender?: string | null;
+        SessionName?: string | null;
+        BookingDate?: string | Date | null;
+        ReportDate?: string | Date | null;
+        TimeStart?: string | null;
+        TimeEnd?: string | null;
+        TimeIn?: string | Date | null;
+        TimeOut?: string | Date | null;
+      };
+      return {
+        booking_id: Number(obj.BookingID ?? obj.booking_id ?? 0),
+        employee_id: String(obj.EmployeeID ?? obj.employee_id ?? ''),
+        card_no: obj.CardNo != null ? String(obj.CardNo) : null,
+        employee_name: obj.Name != null ? String(obj.Name) : null,
+        name: obj.Name != null ? String(obj.Name) : null,
+        department: obj.Department != null ? String(obj.Department) : null,
+        gender: obj.Gender != null ? String(obj.Gender) : null,
+        session_name: obj.SessionName != null ? String(obj.SessionName) : '',
+        booking_date:
+          obj.BookingDate
+            ? String(obj.BookingDate).slice(0, 10)
+            : obj.ReportDate
+            ? String(obj.ReportDate).slice(0, 10)
+            : '',
+        time_start: obj.TimeStart != null ? String(obj.TimeStart) : null,
+        time_end: obj.TimeEnd != null ? String(obj.TimeEnd) : null,
+        time_in: obj.TimeIn != null ? String(obj.TimeIn) : null,
+        time_out: obj.TimeOut != null ? String(obj.TimeOut) : null,
+        status: null,
+      } as BookingRecord;
+    }) as BookingRecord[];
+    return {
+      rows: mapped,
+      total: Number(json.total || 0),
+      time_in_total: Number(json.time_in_total || 0),
+      time_out_total: Number(json.time_out_total || 0),
+      male_total: Number(json.male_total || 0),
+      female_total: Number(json.female_total || 0),
+    } as ReportQueryResult;
+  };
+
+  const loadReportsPage = async (pageParam: number, limitParam: number) => {
+    try {
+      const data = await fetchReportsPage('/api', pageParam, limitParam);
+      if (data && Array.isArray(data.rows)) return data;
+      return await fetchReportsPage('', pageParam, limitParam);
+    } catch (_) {
+      return await fetchReportsPage('', pageParam, limitParam);
+    }
+  };
+
   const { data: bookingDataRes = { rows: [], total: 0 } as ReportQueryResult, isLoading: bookingsLoading } = useQuery<ReportQueryResult>({
     queryKey: ['gym-reports', dateRange, customStartDate, customEndDate, page, pageSize, sortBy, sortDir, filterEmpId, filterDept, filterGender, filterSession],
-    queryFn: async () => {
-      const fromStr = format(start, 'yyyy-MM-dd');
-      const toStr = format(end, 'yyyy-MM-dd');
-      const empQ = String(filterEmpId || '').trim();
-      const deptQ = filterDept !== 'all' ? filterDept : '';
-      const genderQ = filterGender === 'Male' ? 'M' : (filterGender === 'Female' ? 'F' : '');
-      const sessionQ = filterSession !== 'all' ? filterSession : '';
-      const tryFetch = async (base: string) => {
-        const resp = await fetch(`${base}/gym-reports?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&page=${encodeURIComponent(String(page))}&limit=${encodeURIComponent(String(pageSize))}&sort_by=${encodeURIComponent(String(sortBy || ''))}&sort_dir=${encodeURIComponent(String(sortDir))}&employee_id=${encodeURIComponent(empQ)}&department=${encodeURIComponent(deptQ)}&gender=${encodeURIComponent(genderQ)}&session=${encodeURIComponent(sessionQ)}`);
-        const json = await resp.json();
-        if (!json || !json.ok) return { rows: [], total: 0 } as ReportQueryResult;
-        const rows = Array.isArray(json.reports) ? json.reports : [];
-        const mapped = rows.map((r: unknown) => {
-          const obj = r as {
-            BookingID?: number;
-            booking_id?: number;
-            EmployeeID?: string;
-            employee_id?: string;
-            CardNo?: string | null;
-            Name?: string | null;
-            Department?: string | null;
-            Gender?: string | null;
-            SessionName?: string | null;
-            BookingDate?: string | Date | null;
-            ReportDate?: string | Date | null;
-            TimeStart?: string | null;
-            TimeEnd?: string | null;
-            TimeIn?: string | Date | null;
-            TimeOut?: string | Date | null;
-          };
-          return {
-            booking_id: Number(obj.BookingID ?? obj.booking_id ?? 0),
-            employee_id: String(obj.EmployeeID ?? obj.employee_id ?? ''),
-            card_no: obj.CardNo != null ? String(obj.CardNo) : null,
-            employee_name: obj.Name != null ? String(obj.Name) : null,
-            name: obj.Name != null ? String(obj.Name) : null,
-            department: obj.Department != null ? String(obj.Department) : null,
-            gender: obj.Gender != null ? String(obj.Gender) : null,
-            session_name: obj.SessionName != null ? String(obj.SessionName) : '',
-            booking_date:
-              obj.BookingDate
-                ? String(obj.BookingDate).slice(0, 10)
-                : obj.ReportDate
-                ? String(obj.ReportDate).slice(0, 10)
-                : '',
-            time_start: obj.TimeStart != null ? String(obj.TimeStart) : null,
-            time_end: obj.TimeEnd != null ? String(obj.TimeEnd) : null,
-            time_in: obj.TimeIn != null ? String(obj.TimeIn) : null,
-            time_out: obj.TimeOut != null ? String(obj.TimeOut) : null,
-            status: null,
-          } as BookingRecord;
-        }) as BookingRecord[];
-        return {
-          rows: mapped,
-          total: Number(json.total || 0),
-          time_in_total: Number(json.time_in_total || 0),
-          time_out_total: Number(json.time_out_total || 0),
-          male_total: Number(json.male_total || 0),
-          female_total: Number(json.female_total || 0),
-        } as ReportQueryResult;
-      };
-      try {
-        const data = await tryFetch('/api');
-        if (data && Array.isArray(data.rows)) return data;
-        return await tryFetch('');
-      } catch (_) {
-        return await tryFetch('');
-      }
-    },
+    queryFn: async () => loadReportsPage(page, pageSize),
     staleTime: 60000,
     refetchOnWindowFocus: false,
     placeholderData: (prev) => prev,
@@ -456,9 +459,34 @@ export default function ReportsPage() {
     { key: 'female', label: 'Female', value: stats.female, icon: Users, iconClass: 'text-pink-500', bgClass: 'bg-pink-500/10' },
   ];
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
+    const exportLimit = 200;
+    const fetchAllRows = async () => {
+      let pageParam = 1;
+      let total = 0;
+      const all: BookingRecord[] = [];
+      while (true) {
+        const res = await loadReportsPage(pageParam, exportLimit);
+        total = Number(res.total || 0);
+        if (res.rows.length === 0) break;
+        all.push(...res.rows);
+        if (all.length >= total) break;
+        pageParam += 1;
+      }
+      return all;
+    };
+
+    let exportRows = bookingData;
+    try {
+      const allRows = await fetchAllRows();
+      if (allRows.length > 0) {
+        exportRows = allRows;
+      }
+    } catch (_) {
+      exportRows = bookingData;
+    }
     const headers = ['No', 'Booking ID', 'ID Card', 'Name', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
-      const rows = bookingData.map((record, idx) => [
+      const rows = exportRows.map((record, idx) => [
       String(idx + 1),
       formatBookingId(record.booking_id),
         String(record.card_no ?? ''),
