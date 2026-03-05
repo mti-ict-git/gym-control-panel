@@ -60,6 +60,14 @@ function formatBookingId(n: number | null | undefined): string {
   return `GYMBOOK${String(n)}`;
 }
 
+function formatDateOnly(value: string | null | undefined): string {
+  const s = String(value || '').slice(0, 10);
+  if (!s) return '-';
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return format(d, 'yyyy-MM-dd');
+}
+
 function getDateRange(range: DateRange, customStart?: Date, customEnd?: Date): { start: Date; end: Date } {
   const now = new Date();
   
@@ -485,10 +493,11 @@ export default function ReportsPage() {
     } catch (_) {
       exportRows = bookingData;
     }
-    const headers = ['No', 'Booking ID', 'ID Card', 'Name', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
+    const headers = ['No', 'Booking ID', 'Date', 'ID Card', 'Name', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
       const rows = exportRows.map((record, idx) => [
       String(idx + 1),
       formatBookingId(record.booking_id),
+      formatDateOnly(record.booking_date),
         String(record.card_no ?? ''),
         String((record.name ?? record.employee_name) ?? ''),
         String(record.employee_id ?? ''),
@@ -720,6 +729,7 @@ export default function ReportsPage() {
                           <SortIndicator active={sortBy === 'booking_id'} dir={sortDir} />
                         </button>
                       </TableHead>
+                      <TableHead>Date</TableHead>
                       <TableHead>ID Card</TableHead>
                       <TableHead>
                         <button className="inline-flex items-center gap-1 hover:underline" onClick={() => toggleSort('name')}>
@@ -761,6 +771,7 @@ export default function ReportsPage() {
                       <TableRow key={`${record.booking_id}-${idx}`}>
                         <TableCell className="font-mono text-sm">{idx + 1}</TableCell>
                         <TableCell className="font-mono text-sm">{formatBookingId(record.booking_id)}</TableCell>
+                        <TableCell className="font-mono text-sm">{formatDateOnly(record.booking_date)}</TableCell>
                         <TableCell className="font-mono text-sm">{record.card_no || '-'}</TableCell>
                         <TableCell className="text-sm">{(record.name ?? record.employee_name) || '-'}</TableCell>
                         <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
