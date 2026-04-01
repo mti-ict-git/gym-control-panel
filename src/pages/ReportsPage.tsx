@@ -22,6 +22,8 @@ import { useQuery } from '@tanstack/react-query';
 
 type DateRange = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'custom' | 'all';
 
+const API_BASES = ['/api', ''] as const;
+
 interface BookingRecord {
   booking_id: number;
   employee_id: string;
@@ -232,7 +234,7 @@ function getGenderChip(gender: string | null) {
 }
 
 export default function ReportsPage() {
-  const [dateRange, setDateRange] = useState<DateRange>('all');
+  const [dateRange, setDateRange] = useState<DateRange>('month');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [filterEmpId, setFilterEmpId] = useState('');
@@ -249,8 +251,6 @@ export default function ReportsPage() {
     customStartDate ? new Date(customStartDate) : undefined,
     customEndDate ? new Date(customEndDate) : undefined
   );
-
-  const isLoading = false;
 
   const fetchReportsPage = async (base: string, pageParam: number, limitParam: number) => {
     const fromStr = format(start, 'yyyy-MM-dd');
@@ -344,9 +344,15 @@ export default function ReportsPage() {
   }, [dateRange, customStartDate, customEndDate, sortBy, sortDir]);
 
   useEffect(() => {
+    if (dateRange === 'all') return;
+    const rangeDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    if (!Number.isFinite(rangeDays) || rangeDays > 45) return;
     const fromStr = format(start, 'yyyy-MM-dd');
     const toStr = format(end, 'yyyy-MM-dd');
-    fetch(`/api/gym-reports-backfill?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`, { method: 'POST' }).catch(() => {});
+    const path = `/gym-reports-backfill?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`;
+    fetch(`${API_BASES[0]}${path}`, { method: 'POST' })
+      .catch(() => fetch(`${API_BASES[1]}${path}`, { method: 'POST' }))
+      .catch(() => {});
   }, [dateRange, customStartDate, customEndDate, start, end]);
 
   const toggleSort = (key: 'department' | 'employee_id' | 'name' | 'gender' | 'session' | 'booking_id') => {
@@ -406,9 +412,15 @@ export default function ReportsPage() {
   })();
 
   useEffect(() => {
+    if (dateRange === 'all') return;
+    const rangeDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    if (!Number.isFinite(rangeDays) || rangeDays > 45) return;
     const fromStr = format(start, 'yyyy-MM-dd');
     const toStr = format(end, 'yyyy-MM-dd');
-    fetch(`/api/gym-live-sync?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`).catch(() => {});
+    const path = `/gym-live-sync?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`;
+    fetch(`${API_BASES[0]}${path}`)
+      .catch(() => fetch(`${API_BASES[1]}${path}`))
+      .catch(() => {});
   }, [dateRange, customStartDate, customEndDate, start, end]);
 
   const { data: liveTapMap = new Map<string, { time_in: string | null; time_out: string | null; session_name: string | null; time_start: string | null; time_end: string | null }>() } = useQuery({
@@ -497,7 +509,7 @@ export default function ReportsPage() {
       const rows = exportRows.map((record, idx) => [
       String(idx + 1),
       formatBookingId(record.booking_id),
-      formatDateOnly(record.booking_date),
+      formatDateOnly(record.booking_date || record.time_in || record.time_out),
         String(record.card_no ?? ''),
         String((record.name ?? record.employee_name) ?? ''),
         String(record.employee_id ?? ''),
@@ -771,7 +783,7 @@ export default function ReportsPage() {
                       <TableRow key={`${record.booking_id}-${idx}`}>
                         <TableCell className="font-mono text-sm">{idx + 1}</TableCell>
                         <TableCell className="font-mono text-sm">{formatBookingId(record.booking_id)}</TableCell>
-                        <TableCell className="font-mono text-sm">{formatDateOnly(record.booking_date)}</TableCell>
+                        <TableCell className="font-mono text-sm">{formatDateOnly(record.booking_date || record.time_in || record.time_out)}</TableCell>
                         <TableCell className="font-mono text-sm">{record.card_no || '-'}</TableCell>
                         <TableCell className="text-sm">{(record.name ?? record.employee_name) || '-'}</TableCell>
                         <TableCell className="font-mono text-sm">{record.employee_id || '-'}</TableCell>
