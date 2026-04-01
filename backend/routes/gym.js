@@ -55,6 +55,67 @@ async function ensureGymBookingBanTable(pool) {
   );
 }
 
+function classifyEmployeeIdKind(employeeId) {
+  const id = String(employeeId ?? '').trim();
+  if (!id) return 'UNKNOWN';
+  if (/^MTI/i.test(id)) return 'MTI';
+  if (/^5/.test(id)) return 'MMS';
+  return 'VENDOR';
+}
+
+async function ensureGymControllerSettingsTable(pool) {
+  await pool.request().query(`IF OBJECT_ID('dbo.gym_controller_settings','U') IS NULL BEGIN
+      CREATE TABLE dbo.gym_controller_settings (
+        Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
+        EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
+        EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0,
+        AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0,
+        GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
+        GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
+        WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
+        BookingMinDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMinDaysAhead DEFAULT 1,
+        BookingMaxDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMaxDaysAhead DEFAULT 2,
+        CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_settings_CreatedAt DEFAULT GETDATE(),
+        UpdatedAt DATETIME NULL
+      );
+    END`);
+  await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'EnableManagerAllSessionAccess') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0;
+    END`);
+  await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'AllowVendorUseGym') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0;
+    END`);
+  await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'GraceBeforeMin') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0;
+    END`);
+  await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'GraceAfterMin') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0;
+    END`);
+  await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'WorkerIntervalMs') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000;
+    END`);
+  await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'BookingMinDaysAhead') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD BookingMinDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMinDaysAhead DEFAULT 1;
+    END`);
+  await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'BookingMaxDaysAhead') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD BookingMaxDaysAhead INT NOT NULL CONSTRAINT DF_gym_controller_settings_BookingMaxDaysAhead DEFAULT 2;
+    END`);
+  await pool.request().query(`IF NOT EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
+      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, BookingMinDaysAhead, BookingMaxDaysAhead) VALUES (1, 0, 1, 2)`);
+}
+
+let allowVendorUseGymCache = { atMs: 0, value: false };
+async function getAllowVendorUseGym(pool) {
+  const now = Date.now();
+  if (now - allowVendorUseGymCache.atMs < 5000) return allowVendorUseGymCache.value;
+  await ensureGymControllerSettingsTable(pool);
+  const r = await pool.request().query(`SELECT TOP 1 AllowVendorUseGym FROM dbo.gym_controller_settings WHERE Id = 1`);
+  const row = r?.recordset?.[0] || null;
+  const value = row?.AllowVendorUseGym ? true : false;
+  allowVendorUseGymCache = { atMs: now, value };
+  return value;
+}
+
 function getJwtSecret() {
   const s = envTrim(process.env.JWT_SECRET);
   if (!s) throw new Error('Missing JWT_SECRET');
@@ -1087,17 +1148,19 @@ router.get('/carddb-staff', async (req, res) => {
 
   try {
     const pool = await sql.connect(config);
+    const allowVendorUseGym = await getAllowVendorUseGym(pool);
     const request = pool.request();
     request.input('q', sql.VarChar(100), likeParam);
     const likeClause = qRaw ? 'AND c.StaffNo LIKE @q' : '';
     const excludeMti = typeRaw && typeRaw !== 'MTI' ? "AND UPPER(LTRIM(RTRIM(c.StaffNo))) NOT LIKE 'MTI%'" : '';
+    const excludeVendor = allowVendorUseGym ? '' : "AND (UPPER(LTRIM(RTRIM(c.StaffNo))) LIKE 'MTI%' OR LTRIM(RTRIM(c.StaffNo)) LIKE '5%')";
     const result = await request.query(
       `SELECT TOP 20 c.StaffNo AS staff_no
        FROM DataDBEnt.dbo.CardDB c
        WHERE (c.Status = 1 OR UPPER(CAST(c.Status AS varchar(50))) IN ('ACTIVE','AKTIF','1','TRUE'))
          AND (c.Block IS NULL OR c.Block = 0 OR UPPER(CAST(c.Block AS varchar(50))) IN ('UNBLOCK','FALSE','0'))
          AND (c.del_state = 0 OR c.del_state IS NULL)
-         ${likeClause} ${excludeMti}
+         ${likeClause} ${excludeMti} ${excludeVendor}
        ORDER BY c.StaffNo`
     );
     await pool.close();
@@ -1214,15 +1277,6 @@ router.post('/gym-controller-access', async (req, res) => {
   const source = sourceRaw != null ? String(sourceRaw).trim() : 'MANUAL';
   log('start', { employee_id: employeeId, unit_no: unitNo, allow, tz: customAccessTz });
 
-  const baseUrl =
-    envTrim(process.env.VAULT_UPLOAD_ASMX_BASE_URL) ||
-    envTrim(process.env.VAULT_ASMX_BASE_URL) ||
-    envTrim(process.env.VAULT_API_BASE) ||
-    '';
-  if (!baseUrl) {
-    return res.status(500).json({ ok: false, error: 'Vault ASMX base URL is not configured' });
-  }
-
   const config = {
     server: DB_SERVER,
     port: Number(DB_PORT || 1433),
@@ -1235,6 +1289,28 @@ router.post('/gym-controller-access', async (req, res) => {
     },
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
+
+  if (allow && classifyEmployeeIdKind(employeeId) === 'VENDOR') {
+    try {
+      const pool = await new sql.ConnectionPool(config).connect();
+      const allowVendorUseGym = await getAllowVendorUseGym(pool);
+      await pool.close();
+      if (!allowVendorUseGym) {
+        return res.status(200).json({ ok: false, error: 'Vendor belum diizinkan menggunakan gym' });
+      }
+    } catch (_) {
+      return res.status(200).json({ ok: false, error: 'Vendor belum diizinkan menggunakan gym' });
+    }
+  }
+
+  const baseUrl =
+    envTrim(process.env.VAULT_UPLOAD_ASMX_BASE_URL) ||
+    envTrim(process.env.VAULT_ASMX_BASE_URL) ||
+    envTrim(process.env.VAULT_API_BASE) ||
+    '';
+  if (!baseUrl) {
+    return res.status(500).json({ ok: false, error: 'Vault ASMX base URL is not configured' });
+  }
 
   const extractTag = (xml, tag) => {
     const re = new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`, 'i');
@@ -1611,11 +1687,12 @@ router.post('/gym-booking-create', async (req, res) => {
   const employeeId = String(employee_id || employeeIdHeader || '').trim();
   const sessionId = String(session_id || '').trim();
   const bookingDateStr = String(booking_date || '').trim();
+  const employeeKind = classifyEmployeeIdKind(employeeId);
   const employeeTypeGuess = (() => {
     const v = String(employeeTypeRaw || '').trim().toUpperCase();
     if (v === 'MTI' || v === 'MMS' || v === 'VISITOR') return v;
-    if (/^MTI/i.test(employeeId)) return 'MTI';
-    if (/^MMS/i.test(employeeId)) return 'MMS';
+    if (employeeKind === 'MTI') return 'MTI';
+    if (employeeKind === 'MMS') return 'MMS';
     return 'VISITOR';
   })();
 
@@ -1645,6 +1722,19 @@ router.post('/gym-booking-create', async (req, res) => {
     },
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
+
+  if (employeeKind === 'VENDOR') {
+    try {
+      const pool = await new sql.ConnectionPool(gymConfig).connect();
+      const allowVendorUseGym = await getAllowVendorUseGym(pool);
+      await pool.close();
+      if (!allowVendorUseGym) {
+        return res.status(200).json({ ok: false, error: 'Vendor belum diizinkan menggunakan gym' });
+      }
+    } catch (_) {
+      return res.status(200).json({ ok: false, error: 'Vendor belum diizinkan menggunakan gym' });
+    }
+  }
 
   const masterConfig = {
     server: masterServer,
@@ -3333,6 +3423,7 @@ router.get('/gym-controller-settings', async (req, res) => {
         Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
         EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
         EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0,
+        AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0,
         GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
         GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
         WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
@@ -3344,6 +3435,9 @@ router.get('/gym-controller-settings', async (req, res) => {
     END`);
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'EnableManagerAllSessionAccess') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0;
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'AllowVendorUseGym') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0;
     END`);
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'GraceBeforeMin') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0;
@@ -3363,7 +3457,7 @@ router.get('/gym-controller-settings', async (req, res) => {
     await pool.request().query(`IF NOT EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
       INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, BookingMinDaysAhead, BookingMaxDaysAhead) VALUES (1, 0, 1, 2)`);
 
-    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
+    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
     await pool.close();
 
     const row = r?.recordset?.[0] || null;
@@ -3372,6 +3466,7 @@ router.get('/gym-controller-settings', async (req, res) => {
       ok: true,
       enable_auto_organize: row?.EnableAutoOrganize ? true : false,
       enable_manager_all_session_access: row?.EnableManagerAllSessionAccess ? true : false,
+      allow_vendor_use_gym: row?.AllowVendorUseGym ? true : false,
       grace_before_min: Number(row?.GraceBeforeMin ?? 0) || 0,
       grace_after_min: Number(row?.GraceAfterMin ?? 0) || 0,
       worker_interval_ms: Number(row?.WorkerIntervalMs ?? 60000) || 60000,
@@ -3406,6 +3501,12 @@ router.post('/gym-controller-settings', async (req, res) => {
     enableManagerRaw === undefined
       ? undefined
       : enableManagerRaw === true || enableManagerRaw === 1 || String(enableManagerRaw || '').trim().toLowerCase() === 'true';
+
+  const allowVendorRaw = req?.body?.allow_vendor_use_gym;
+  const allowVendorParsed =
+    allowVendorRaw === undefined
+      ? undefined
+      : allowVendorRaw === true || allowVendorRaw === 1 || String(allowVendorRaw || '').trim().toLowerCase() === 'true';
 
   const graceBeforeRaw = req?.body?.grace_before_min;
   const graceAfterRaw = req?.body?.grace_after_min;
@@ -3452,6 +3553,7 @@ router.post('/gym-controller-settings', async (req, res) => {
         Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
         EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
         EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0,
+        AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0,
         GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
         GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
         WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
@@ -3463,6 +3565,9 @@ router.post('/gym-controller-settings', async (req, res) => {
     END`);
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'EnableManagerAllSessionAccess') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0;
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'AllowVendorUseGym') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0;
     END`);
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'GraceBeforeMin') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0;
@@ -3483,6 +3588,7 @@ router.post('/gym-controller-settings', async (req, res) => {
     const req1 = pool.request();
     req1.input('EnableAutoOrganize', sql.Bit, enableParsed == null ? null : enableParsed ? 1 : 0);
     req1.input('EnableManagerAllSessionAccess', sql.Bit, enableManagerParsed == null ? null : enableManagerParsed ? 1 : 0);
+    req1.input('AllowVendorUseGym', sql.Bit, allowVendorParsed == null ? null : allowVendorParsed ? 1 : 0);
     req1.input('GraceBeforeMin', sql.Int, graceBeforeClamped);
     req1.input('GraceAfterMin', sql.Int, graceAfterClamped);
     req1.input('WorkerIntervalMs', sql.Int, workerIntervalClamped);
@@ -3492,6 +3598,7 @@ router.post('/gym-controller-settings', async (req, res) => {
       UPDATE dbo.gym_controller_settings SET
         EnableAutoOrganize = COALESCE(@EnableAutoOrganize, EnableAutoOrganize),
         EnableManagerAllSessionAccess = COALESCE(@EnableManagerAllSessionAccess, EnableManagerAllSessionAccess),
+        AllowVendorUseGym = COALESCE(@AllowVendorUseGym, AllowVendorUseGym),
         GraceBeforeMin = COALESCE(@GraceBeforeMin, GraceBeforeMin),
         GraceAfterMin = COALESCE(@GraceAfterMin, GraceAfterMin),
         WorkerIntervalMs = COALESCE(@WorkerIntervalMs, WorkerIntervalMs),
@@ -3500,18 +3607,22 @@ router.post('/gym-controller-settings', async (req, res) => {
         UpdatedAt = SYSDATETIME()
       WHERE Id = 1
     ELSE
-      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt)
-      VALUES (1, COALESCE(@EnableAutoOrganize, 0), COALESCE(@EnableManagerAllSessionAccess, 0), COALESCE(@GraceBeforeMin, 0), COALESCE(@GraceAfterMin, 0), COALESCE(@WorkerIntervalMs, 60000), COALESCE(@BookingMinDaysAhead, 1), COALESCE(@BookingMaxDaysAhead, 2), SYSDATETIME())`);
+      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt)
+      VALUES (1, COALESCE(@EnableAutoOrganize, 0), COALESCE(@EnableManagerAllSessionAccess, 0), COALESCE(@AllowVendorUseGym, 0), COALESCE(@GraceBeforeMin, 0), COALESCE(@GraceAfterMin, 0), COALESCE(@WorkerIntervalMs, 60000), COALESCE(@BookingMinDaysAhead, 1), COALESCE(@BookingMaxDaysAhead, 2), SYSDATETIME())`);
 
-    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
+    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
     await pool.close();
 
     const row = r?.recordset?.[0] || null;
     const updatedAt = row?.UpdatedAt ? new Date(row.UpdatedAt).toISOString() : row?.CreatedAt ? new Date(row.CreatedAt).toISOString() : null;
+    if (allowVendorParsed !== undefined) {
+      allowVendorUseGymCache = { atMs: Date.now(), value: allowVendorParsed };
+    }
     return res.json({
       ok: true,
       enable_auto_organize: row?.EnableAutoOrganize ? true : false,
       enable_manager_all_session_access: row?.EnableManagerAllSessionAccess ? true : false,
+      allow_vendor_use_gym: row?.AllowVendorUseGym ? true : false,
       grace_before_min: Number(row?.GraceBeforeMin ?? 0) || 0,
       grace_after_min: Number(row?.GraceAfterMin ?? 0) || 0,
       worker_interval_ms: Number(row?.WorkerIntervalMs ?? 60000) || 60000,

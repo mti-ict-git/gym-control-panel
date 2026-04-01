@@ -165,6 +165,7 @@ async function ensureGymControllerSettings(pool) {
          Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
          EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
          EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0,
+         AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0,
          GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
          GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
          WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
@@ -174,6 +175,9 @@ async function ensureGymControllerSettings(pool) {
      END;
      IF COL_LENGTH('dbo.gym_controller_settings','EnableManagerAllSessionAccess') IS NULL BEGIN
        ALTER TABLE dbo.gym_controller_settings ADD EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0;
+     END;
+     IF COL_LENGTH('dbo.gym_controller_settings','AllowVendorUseGym') IS NULL BEGIN
+       ALTER TABLE dbo.gym_controller_settings ADD AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0;
      END;
      IF COL_LENGTH('dbo.gym_controller_settings','GraceBeforeMin') IS NULL BEGIN
        ALTER TABLE dbo.gym_controller_settings ADD GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0;
@@ -194,6 +198,7 @@ const resolveControllerSettings = (row) =>
     ? {
         enable_auto_organize: row.EnableAutoOrganize ? true : false,
         enable_manager_all_session_access: row.EnableManagerAllSessionAccess ? true : false,
+        allow_vendor_use_gym: row.AllowVendorUseGym ? true : false,
         grace_before_min: Number(row.GraceBeforeMin ?? 0) || 0,
         grace_after_min: Number(row.GraceAfterMin ?? 0) || 0,
         worker_interval_ms: Number(row.WorkerIntervalMs ?? 60000) || 60000,
@@ -201,6 +206,7 @@ const resolveControllerSettings = (row) =>
     : {
         enable_auto_organize: false,
         enable_manager_all_session_access: false,
+        allow_vendor_use_gym: false,
         grace_before_min: 0,
         grace_after_min: 0,
         worker_interval_ms: 60000,
@@ -215,7 +221,7 @@ const handleGetControllerSettings = async (_req, res) => {
     const pool = await new sql.ConnectionPool(config).connect();
     await ensureGymControllerSettings(pool);
     const r = await pool.request().query(
-      `SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs FROM dbo.gym_controller_settings WHERE Id = 1`
+      `SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs FROM dbo.gym_controller_settings WHERE Id = 1`
     );
     await pool.close();
     const row = Array.isArray(r?.recordset) && r.recordset.length > 0 ? r.recordset[0] : null;
@@ -249,6 +255,12 @@ const handlePostControllerSettings = async (req, res) => {
       : b.enable_manager_all_session_access != null
       ? toBool(b.enable_manager_all_session_access)
       : undefined;
+  const allowVendorUseGym =
+    b.AllowVendorUseGym != null
+      ? toBool(b.AllowVendorUseGym)
+      : b.allow_vendor_use_gym != null
+      ? toBool(b.allow_vendor_use_gym)
+      : undefined;
   const graceBeforeMin =
     b.GraceBeforeMin != null
       ? clamp(Number(b.GraceBeforeMin) || 0, 0, 24 * 60)
@@ -275,6 +287,7 @@ const handlePostControllerSettings = async (req, res) => {
     req1.input('Id', sql.Int, 1);
     if (enableAutoOrganize !== undefined) req1.input('EnableAutoOrganize', sql.Bit, enableAutoOrganize ? 1 : 0);
     if (enableManagerAllSessionAccess !== undefined) req1.input('EnableManagerAllSessionAccess', sql.Bit, enableManagerAllSessionAccess ? 1 : 0);
+    if (allowVendorUseGym !== undefined) req1.input('AllowVendorUseGym', sql.Bit, allowVendorUseGym ? 1 : 0);
     if (graceBeforeMin !== undefined) req1.input('GraceBeforeMin', sql.Int, graceBeforeMin);
     if (graceAfterMin !== undefined) req1.input('GraceAfterMin', sql.Int, graceAfterMin);
     if (workerIntervalMs !== undefined) req1.input('WorkerIntervalMs', sql.Int, workerIntervalMs);
@@ -282,6 +295,7 @@ const handlePostControllerSettings = async (req, res) => {
     const sets = [];
     if (enableAutoOrganize !== undefined) sets.push('EnableAutoOrganize = @EnableAutoOrganize');
     if (enableManagerAllSessionAccess !== undefined) sets.push('EnableManagerAllSessionAccess = @EnableManagerAllSessionAccess');
+    if (allowVendorUseGym !== undefined) sets.push('AllowVendorUseGym = @AllowVendorUseGym');
     if (graceBeforeMin !== undefined) sets.push('GraceBeforeMin = @GraceBeforeMin');
     if (graceAfterMin !== undefined) sets.push('GraceAfterMin = @GraceAfterMin');
     if (workerIntervalMs !== undefined) sets.push('WorkerIntervalMs = @WorkerIntervalMs');
@@ -292,8 +306,8 @@ const handlePostControllerSettings = async (req, res) => {
       `IF EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = @Id)
        UPDATE dbo.gym_controller_settings SET ${setSql} WHERE Id = @Id
        ELSE
-       INSERT INTO dbo.gym_controller_settings (Id${enableAutoOrganize !== undefined ? ', EnableAutoOrganize' : ''}${enableManagerAllSessionAccess !== undefined ? ', EnableManagerAllSessionAccess' : ''}${graceBeforeMin !== undefined ? ', GraceBeforeMin' : ''}${graceAfterMin !== undefined ? ', GraceAfterMin' : ''}${workerIntervalMs !== undefined ? ', WorkerIntervalMs' : ''})
-       VALUES (@Id${enableAutoOrganize !== undefined ? ', @EnableAutoOrganize' : ''}${enableManagerAllSessionAccess !== undefined ? ', @EnableManagerAllSessionAccess' : ''}${graceBeforeMin !== undefined ? ', @GraceBeforeMin' : ''}${graceAfterMin !== undefined ? ', @GraceAfterMin' : ''}${workerIntervalMs !== undefined ? ', @WorkerIntervalMs' : ''})`;
+       INSERT INTO dbo.gym_controller_settings (Id${enableAutoOrganize !== undefined ? ', EnableAutoOrganize' : ''}${enableManagerAllSessionAccess !== undefined ? ', EnableManagerAllSessionAccess' : ''}${allowVendorUseGym !== undefined ? ', AllowVendorUseGym' : ''}${graceBeforeMin !== undefined ? ', GraceBeforeMin' : ''}${graceAfterMin !== undefined ? ', GraceAfterMin' : ''}${workerIntervalMs !== undefined ? ', WorkerIntervalMs' : ''})
+       VALUES (@Id${enableAutoOrganize !== undefined ? ', @EnableAutoOrganize' : ''}${enableManagerAllSessionAccess !== undefined ? ', @EnableManagerAllSessionAccess' : ''}${allowVendorUseGym !== undefined ? ', @AllowVendorUseGym' : ''}${graceBeforeMin !== undefined ? ', @GraceBeforeMin' : ''}${graceAfterMin !== undefined ? ', @GraceAfterMin' : ''}${workerIntervalMs !== undefined ? ', @WorkerIntervalMs' : ''})`;
 
     await req1.query(sqlText);
     await pool.close();

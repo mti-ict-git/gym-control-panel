@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "dbtester": "node backend/app.js",
+    "db:migrate": "node backend/scripts/db-migrate.js",
     "controller:upload-card": "node backend/scripts/upload-card-to-controller.js"
   },
   "dependencies": {

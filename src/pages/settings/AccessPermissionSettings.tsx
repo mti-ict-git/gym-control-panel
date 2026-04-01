@@ -13,6 +13,7 @@ export default function AccessPermissionSettings() {
   const { toast } = useToast();
 
   const [managerAllSessionAccess, setManagerAllSessionAccess] = useState(false);
+  const [allowVendorUseGym, setAllowVendorUseGym] = useState(false);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
@@ -30,6 +31,7 @@ export default function AccessPermissionSettings() {
         return (await resp.json()) as {
           ok: boolean;
           enable_manager_all_session_access?: boolean;
+          allow_vendor_use_gym?: boolean;
           error?: string;
         };
       };
@@ -37,11 +39,17 @@ export default function AccessPermissionSettings() {
       try {
         const json = await tryFetch('/api/gym-controller-settings');
         if (!json.ok) throw new Error(json.error || 'Failed to fetch controller settings');
-        return { enable_manager_all_session_access: Boolean(json.enable_manager_all_session_access) };
+        return {
+          enable_manager_all_session_access: Boolean(json.enable_manager_all_session_access),
+          allow_vendor_use_gym: Boolean(json.allow_vendor_use_gym),
+        };
       } catch (_) {
         const json = await tryFetch('/gym-controller-settings');
         if (!json.ok) throw new Error(json.error || 'Failed to fetch controller settings');
-        return { enable_manager_all_session_access: Boolean(json.enable_manager_all_session_access) };
+        return {
+          enable_manager_all_session_access: Boolean(json.enable_manager_all_session_access),
+          allow_vendor_use_gym: Boolean(json.allow_vendor_use_gym),
+        };
       }
     },
   });
@@ -49,15 +57,16 @@ export default function AccessPermissionSettings() {
   useEffect(() => {
     if (!settingsQuery.data) return;
     setManagerAllSessionAccess(Boolean(settingsQuery.data.enable_manager_all_session_access));
+    setAllowVendorUseGym(Boolean(settingsQuery.data.allow_vendor_use_gym));
   }, [settingsQuery.data]);
 
-  const updateManagerMutation = useMutation({
-    mutationFn: async (enabled: boolean) => {
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (payload: { enable_manager_all_session_access?: boolean; allow_vendor_use_gym?: boolean }) => {
       const post = async (url: string) => {
         const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ enable_manager_all_session_access: enabled }),
+          body: JSON.stringify(payload),
         });
         if (!resp.ok) throw new Error('Failed to update access permission settings');
         return (await resp.json()) as { ok: boolean; error?: string };
@@ -292,7 +301,7 @@ export default function AccessPermissionSettings() {
 
   const isBusy =
     settingsQuery.isLoading ||
-    updateManagerMutation.isPending ||
+    updateSettingsMutation.isPending ||
     committeeQuery.isLoading ||
     addCommitteeMutation.isPending ||
     removeCommitteeMutation.isPending ||
@@ -324,7 +333,22 @@ export default function AccessPermissionSettings() {
               disabled={isBusy}
               onCheckedChange={(next) => {
                 setManagerAllSessionAccess(next);
-                updateManagerMutation.mutate(next);
+                updateSettingsMutation.mutate({ enable_manager_all_session_access: next });
+              }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+            <div className="space-y-1">
+              <div className="text-sm font-medium">Allow Vendor to use Gym</div>
+              <div className="text-sm text-muted-foreground">Enable gym booking/access for Vendor IDs.</div>
+            </div>
+            <Switch
+              checked={allowVendorUseGym}
+              disabled={isBusy}
+              onCheckedChange={(next) => {
+                setAllowVendorUseGym(next);
+                updateSettingsMutation.mutate({ allow_vendor_use_gym: next });
               }}
             />
           </div>
