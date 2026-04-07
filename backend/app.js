@@ -642,6 +642,123 @@ if (['1', 'true', 'yes', 'y'].includes(enableReportsAutoSync)) {
 const enableProactiveScan = String(process.env.GYM_AUTO_BAN_SCANNER_ENABLE || '1').trim().toLowerCase();
 if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
   let runningScan = false;
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const isTransientDbError = (error) => {
+    const code = String(error?.code || '').toUpperCase();
+    if (['ETIMEOUT', 'ESOCKET', 'ECONNRESET', 'EPIPE', 'ECONNCLOSED', 'EABORT'].includes(code)) return true;
+    const msg = String(error?.message || '').toLowerCase();
+    return (
+      msg.includes('deadlock') ||
+      msg.includes('timeout') ||
+      msg.includes('temporar') ||
+      msg.includes('could not open a connection') ||
+      msg.includes('connection is closed') ||
+      msg.includes('transport-level error')
+    );
+  };
+  const runProactiveScanQuery = async (pool, entryPattern) => {
+    const scanReq = pool.request();
+    scanReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
+    await scanReq.query(`
+      BEGIN TRY
+        DECLARE @today DATE = CONVERT(date, DATEADD(hour, 8, GETUTCDATE()));
+        DECLARE @windowStart DATE = DATEADD(day, -7, @today);
+        ;WITH Candidate AS (
+          SELECT DISTINCT gb.EmployeeID
+          FROM dbo.gym_booking gb
+          WHERE gb.BookingDate < @today
+            AND gb.BookingDate >= @windowStart
+            AND gb.Status IN ('BOOKED','CHECKIN')
+            AND gb.EmployeeID IS NOT NULL
+            AND LTRIM(RTRIM(gb.EmployeeID)) <> ''
+            AND NOT EXISTS (
+              SELECT 1
+              FROM dbo.gym_booking_ban b
+              WHERE b.EmployeeID = gb.EmployeeID
+                AND b.BannedUntil >= @today
+            )
+        ),
+        BookingRows AS (
+          SELECT
+            gb.EmployeeID,
+            gb.BookingDate,
+            ROW_NUMBER() OVER (
+              PARTITION BY gb.EmployeeID
+              ORDER BY gb.BookingDate DESC, gb.CreatedAt DESC, gb.BookingID DESC
+            ) AS rn
+          FROM dbo.gym_booking gb
+          INNER JOIN Candidate c ON c.EmployeeID = gb.EmployeeID
+          WHERE gb.BookingDate < @today
+            AND gb.BookingDate >= @windowStart
+            AND gb.Status IN ('BOOKED','CHECKIN')
+        ),
+        DayEntry AS (
+          SELECT
+            t.EmployeeID,
+            CONVERT(date, t.TxnTime) AS TapDate,
+            MAX(CASE WHEN UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @entryPat THEN 1 ELSE 0 END) AS HasEntry
+          FROM dbo.gym_live_taps t
+          INNER JOIN Candidate c ON c.EmployeeID = t.EmployeeID
+          WHERE CONVERT(date, t.TxnTime) < @today
+            AND CONVERT(date, t.TxnTime) >= @windowStart
+          GROUP BY t.EmployeeID, CONVERT(date, t.TxnTime)
+        ),
+        Annotated AS (
+          SELECT
+            br.EmployeeID,
+            br.rn,
+            CASE WHEN ISNULL(de.HasEntry, 0) = 1 THEN 1 ELSE 0 END AS HasEntry,
+            MIN(CASE WHEN ISNULL(de.HasEntry, 0) = 1 THEN br.rn END) OVER (PARTITION BY br.EmployeeID) AS firstEntryRn
+          FROM BookingRows br
+          LEFT JOIN DayEntry de
+            ON de.EmployeeID = br.EmployeeID
+           AND de.TapDate = br.BookingDate
+        ),
+        NoShowCount AS (
+          SELECT
+            a.EmployeeID,
+            SUM(CASE WHEN a.HasEntry = 0 AND (a.firstEntryRn IS NULL OR a.rn < a.firstEntryRn) THEN 1 ELSE 0 END) AS ConsecutiveNoShow
+          FROM Annotated a
+          GROUP BY a.EmployeeID
+        ),
+        ToBan AS (
+          SELECT n.EmployeeID, n.ConsecutiveNoShow
+          FROM NoShowCount n
+          WHERE n.ConsecutiveNoShow >= 3
+        )
+        MERGE dbo.gym_booking_ban AS tgt
+        USING ToBan AS src
+        ON tgt.EmployeeID = src.EmployeeID
+        WHEN MATCHED THEN
+          UPDATE SET
+            BannedUntil = DATEADD(day, 7, @today),
+            Reason = 'NO_SHOW_3X',
+            ConsecutiveNoShow = src.ConsecutiveNoShow,
+            UnbanRemark = NULL,
+            UnbanAt = NULL,
+            ActionBy = NULL,
+            UpdatedAt = GETDATE()
+        WHEN NOT MATCHED THEN
+          INSERT (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow)
+          VALUES (src.EmployeeID, DATEADD(day, 7, @today), 'NO_SHOW_3X', src.ConsecutiveNoShow);
+
+        UPDATE gb
+        SET
+          gb.Status = 'CANCELLED',
+          gb.RejectedReason = 'Auto-cancelled by System due to 3x No-Show Ban'
+        FROM dbo.gym_booking gb
+        INNER JOIN ToBan b ON b.EmployeeID = gb.EmployeeID
+        WHERE gb.BookingDate >= @today
+          AND gb.Status IN ('BOOKED','CHECKIN');
+      END TRY
+      BEGIN CATCH
+        DECLARE @msg NVARCHAR(4000) = ERROR_MESSAGE();
+        DECLARE @sev INT = ERROR_SEVERITY();
+        DECLARE @st INT = ERROR_STATE();
+        RAISERROR(@msg, @sev, @st);
+      END CATCH
+    `);
+  };
   const scanTick = async () => {
     if (runningScan) return;
     runningScan = true;
@@ -655,59 +772,30 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
         options: { encrypt: envBool(process.env.DB_ENCRYPT, false), trustServerCertificate: envBool(process.env.DB_TRUST_SERVER_CERTIFICATE, true) },
       };
       if (cfg.server && cfg.database) {
-        const pool = await new sql.ConnectionPool(cfg).connect();
-        
         const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
-        const scanReq = pool.request();
-        scanReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
-        
-        await scanReq.query(`
-          DECLARE @today DATE = CONVERT(date, DATEADD(hour, 8, GETUTCDATE()));
-          DECLARE @EmpsToScan TABLE (EmployeeID VARCHAR(20));
-          INSERT INTO @EmpsToScan SELECT DISTINCT EmployeeID FROM dbo.gym_booking WHERE BookingDate < @today AND BookingDate >= DATEADD(day, -7, @today) AND Status IN ('BOOKED','CHECKIN');
-          
-          DECLARE @curEmp VARCHAR(20);
-          DECLARE empCursor CURSOR LOCAL FOR SELECT EmployeeID FROM @EmpsToScan;
-          OPEN empCursor;
-          FETCH NEXT FROM empCursor INTO @curEmp;
-          
-          WHILE @@FETCH_STATUS = 0
-          BEGIN
-            IF NOT EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @curEmp AND BannedUntil >= @today)
-            BEGIN
-                DECLARE @noShowCount INT = 0; DECLARE @done BIT = 0; DECLARE @bDate DATE;
-                DECLARE bCursor CURSOR LOCAL FOR SELECT BookingDate FROM dbo.gym_booking WHERE EmployeeID = @curEmp AND BookingDate < @today AND BookingDate >= DATEADD(day, -7, @today) AND Status IN ('BOOKED','CHECKIN') ORDER BY BookingDate DESC;
-                OPEN bCursor; FETCH NEXT FROM bCursor INTO @bDate;
-                WHILE @@FETCH_STATUS = 0 AND @done = 0
-                BEGIN
-                  DECLARE @hasEntry BIT = 0;
-                  IF EXISTS (SELECT 1 FROM dbo.gym_live_taps t WHERE t.EmployeeID = @curEmp AND CONVERT(date, t.TxnTime) = @bDate AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @entryPat)
-                     SET @hasEntry = 1;
-                  IF @hasEntry = 1 SET @done = 1;
-                  ELSE BEGIN
-                     SET @noShowCount = @noShowCount + 1;
-                     IF @noShowCount >= 3 SET @done = 1;
-                  END
-                  FETCH NEXT FROM bCursor INTO @bDate;
-                END
-                CLOSE bCursor; DEALLOCATE bCursor;
-                IF @noShowCount >= 3
-                BEGIN
-                    IF EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @curEmp)
-                       UPDATE dbo.gym_booking_ban SET BannedUntil = DATEADD(day, 7, @today), Reason = 'NO_SHOW_3X', ConsecutiveNoShow = 3, UnbanRemark = NULL, UnbanAt = NULL, ActionBy = NULL, UpdatedAt = GETDATE() WHERE EmployeeID = @curEmp;
-                    ELSE
-                       INSERT INTO dbo.gym_booking_ban (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow) VALUES (@curEmp, DATEADD(day, 7, @today), 'NO_SHOW_3X', 3);
-                    
-                    UPDATE dbo.gym_booking SET Status = 'CANCELLED', RejectedReason = 'Auto-cancelled by System due to 3x No-Show Ban'
-                    WHERE EmployeeID = @curEmp AND BookingDate >= @today AND Status IN ('BOOKED','CHECKIN');
-                END
-            END
-            FETCH NEXT FROM empCursor INTO @curEmp;
-          END
-          CLOSE empCursor; DEALLOCATE empCursor;
-        `);
-        console.log('[gym-worker] Proactive Daily Ban Scanner cycle completed.');
-        await pool.close();
+        const maxAttempts = 3;
+        let attempt = 0;
+        let done = false;
+        while (!done && attempt < maxAttempts) {
+          attempt += 1;
+          let pool = null;
+          try {
+            pool = await new sql.ConnectionPool(cfg).connect();
+            await runProactiveScanQuery(pool, entryPattern);
+            console.log(`[gym-worker] Proactive Daily Ban Scanner cycle completed (attempt ${attempt}).`);
+            done = true;
+          } catch (e) {
+            const transient = isTransientDbError(e);
+            const canRetry = transient && attempt < maxAttempts;
+            console.log(`[gym-worker] Proactive Daily Ban Scanner attempt ${attempt} failed: ${e?.message || String(e)}`);
+            if (!canRetry) throw e;
+            await sleep(attempt * 1500);
+          } finally {
+            try {
+              if (pool) await pool.close();
+            } catch (_) {}
+          }
+        }
       }
     } catch (e) {
       console.log('[gym-worker] Proactive Daily Ban Scanner error:', e.message);
