@@ -14,6 +14,7 @@ export default function AccessPermissionSettings() {
 
   const [managerAllSessionAccess, setManagerAllSessionAccess] = useState(false);
   const [allowVendorUseGym, setAllowVendorUseGym] = useState(false);
+  const [allowDuplicateCardPerEmployee, setAllowDuplicateCardPerEmployee] = useState(false);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
@@ -32,6 +33,7 @@ export default function AccessPermissionSettings() {
           ok: boolean;
           enable_manager_all_session_access?: boolean;
           allow_vendor_use_gym?: boolean;
+          allow_duplicate_card_per_employee?: boolean;
           error?: string;
         };
       };
@@ -42,6 +44,7 @@ export default function AccessPermissionSettings() {
         return {
           enable_manager_all_session_access: Boolean(json.enable_manager_all_session_access),
           allow_vendor_use_gym: Boolean(json.allow_vendor_use_gym),
+          allow_duplicate_card_per_employee: Boolean(json.allow_duplicate_card_per_employee),
         };
       } catch (_) {
         const json = await tryFetch('/gym-controller-settings');
@@ -49,6 +52,7 @@ export default function AccessPermissionSettings() {
         return {
           enable_manager_all_session_access: Boolean(json.enable_manager_all_session_access),
           allow_vendor_use_gym: Boolean(json.allow_vendor_use_gym),
+          allow_duplicate_card_per_employee: Boolean(json.allow_duplicate_card_per_employee),
         };
       }
     },
@@ -58,10 +62,11 @@ export default function AccessPermissionSettings() {
     if (!settingsQuery.data) return;
     setManagerAllSessionAccess(Boolean(settingsQuery.data.enable_manager_all_session_access));
     setAllowVendorUseGym(Boolean(settingsQuery.data.allow_vendor_use_gym));
+    setAllowDuplicateCardPerEmployee(Boolean(settingsQuery.data.allow_duplicate_card_per_employee));
   }, [settingsQuery.data]);
 
   const updateSettingsMutation = useMutation({
-    mutationFn: async (payload: { enable_manager_all_session_access?: boolean; allow_vendor_use_gym?: boolean }) => {
+    mutationFn: async (payload: { enable_manager_all_session_access?: boolean; allow_vendor_use_gym?: boolean; allow_duplicate_card_per_employee?: boolean }) => {
       const post = async (url: string) => {
         const resp = await fetch(url, {
           method: 'POST',
@@ -349,6 +354,21 @@ export default function AccessPermissionSettings() {
               onCheckedChange={(next) => {
                 setAllowVendorUseGym(next);
                 updateSettingsMutation.mutate({ allow_vendor_use_gym: next });
+              }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+            <div className="space-y-1">
+              <div className="text-sm font-medium">Allow Duplicate Card Per Employee</div>
+              <div className="text-sm text-muted-foreground">Upload all active cards for the same employee ID to controller access.</div>
+            </div>
+            <Switch
+              checked={allowDuplicateCardPerEmployee}
+              disabled={isBusy}
+              onCheckedChange={(next) => {
+                setAllowDuplicateCardPerEmployee(next);
+                updateSettingsMutation.mutate({ allow_duplicate_card_per_employee: next });
               }}
             />
           </div>

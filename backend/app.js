@@ -637,3 +637,84 @@ if (['1', 'true', 'yes', 'y'].includes(enableReportsAutoSync)) {
   };
   setTimeout(tick, 10000);
 }
+
+/* Proactive Daily Ban Scanner */
+const enableProactiveScan = String(process.env.GYM_AUTO_BAN_SCANNER_ENABLE || '1').trim().toLowerCase();
+if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
+  let runningScan = false;
+  const scanTick = async () => {
+    if (runningScan) return;
+    runningScan = true;
+    try {
+      const cfg = {
+        server: envTrim(process.env.DB_SERVER),
+        port: Number(process.env.DB_PORT || 1433),
+        database: envTrim(process.env.DB_DATABASE),
+        user: envTrim(process.env.DB_USER),
+        password: envTrim(process.env.DB_PASSWORD),
+        options: { encrypt: envBool(process.env.DB_ENCRYPT, false), trustServerCertificate: envBool(process.env.DB_TRUST_SERVER_CERTIFICATE, true) },
+      };
+      if (cfg.server && cfg.database) {
+        const pool = await new sql.ConnectionPool(cfg).connect();
+        
+        const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
+        const scanReq = pool.request();
+        scanReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
+        
+        await scanReq.query(`
+          DECLARE @today DATE = CONVERT(date, DATEADD(hour, 8, GETUTCDATE()));
+          DECLARE @EmpsToScan TABLE (EmployeeID VARCHAR(20));
+          INSERT INTO @EmpsToScan SELECT DISTINCT EmployeeID FROM dbo.gym_booking WHERE BookingDate < @today AND BookingDate >= DATEADD(day, -7, @today) AND Status IN ('BOOKED','CHECKIN');
+          
+          DECLARE @curEmp VARCHAR(20);
+          DECLARE empCursor CURSOR LOCAL FOR SELECT EmployeeID FROM @EmpsToScan;
+          OPEN empCursor;
+          FETCH NEXT FROM empCursor INTO @curEmp;
+          
+          WHILE @@FETCH_STATUS = 0
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @curEmp AND BannedUntil >= @today)
+            BEGIN
+                DECLARE @noShowCount INT = 0; DECLARE @done BIT = 0; DECLARE @bDate DATE;
+                DECLARE bCursor CURSOR LOCAL FOR SELECT BookingDate FROM dbo.gym_booking WHERE EmployeeID = @curEmp AND BookingDate < @today AND BookingDate >= DATEADD(day, -7, @today) AND Status IN ('BOOKED','CHECKIN') ORDER BY BookingDate DESC;
+                OPEN bCursor; FETCH NEXT FROM bCursor INTO @bDate;
+                WHILE @@FETCH_STATUS = 0 AND @done = 0
+                BEGIN
+                  DECLARE @hasEntry BIT = 0;
+                  IF EXISTS (SELECT 1 FROM dbo.gym_live_taps t WHERE t.EmployeeID = @curEmp AND CONVERT(date, t.TxnTime) = @bDate AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @entryPat)
+                     SET @hasEntry = 1;
+                  IF @hasEntry = 1 SET @done = 1;
+                  ELSE BEGIN
+                     SET @noShowCount = @noShowCount + 1;
+                     IF @noShowCount >= 3 SET @done = 1;
+                  END
+                  FETCH NEXT FROM bCursor INTO @bDate;
+                END
+                CLOSE bCursor; DEALLOCATE bCursor;
+                IF @noShowCount >= 3
+                BEGIN
+                    IF EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @curEmp)
+                       UPDATE dbo.gym_booking_ban SET BannedUntil = DATEADD(day, 7, @today), Reason = 'NO_SHOW_3X', ConsecutiveNoShow = 3, UnbanRemark = NULL, UnbanAt = NULL, ActionBy = NULL, UpdatedAt = GETDATE() WHERE EmployeeID = @curEmp;
+                    ELSE
+                       INSERT INTO dbo.gym_booking_ban (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow) VALUES (@curEmp, DATEADD(day, 7, @today), 'NO_SHOW_3X', 3);
+                    
+                    UPDATE dbo.gym_booking SET Status = 'CANCELLED', RejectedReason = 'Auto-cancelled by System due to 3x No-Show Ban'
+                    WHERE EmployeeID = @curEmp AND BookingDate >= @today AND Status IN ('BOOKED','CHECKIN');
+                END
+            END
+            FETCH NEXT FROM empCursor INTO @curEmp;
+          END
+          CLOSE empCursor; DEALLOCATE empCursor;
+        `);
+        console.log('[gym-worker] Proactive Daily Ban Scanner cycle completed.');
+        await pool.close();
+      }
+    } catch (e) {
+      console.log('[gym-worker] Proactive Daily Ban Scanner error:', e.message);
+    } finally {
+      runningScan = false;
+      setTimeout(scanTick, 6 * 60 * 60 * 1000); // 6 hours
+    }
+  };
+  setTimeout(scanTick, 60000); // start 1 minute after boot
+}

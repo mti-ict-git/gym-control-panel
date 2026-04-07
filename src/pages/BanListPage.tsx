@@ -203,7 +203,7 @@ export default function BanListPage() {
   const reasonLabel = (value: string | null | undefined) => {
     const s = String(value || '').trim();
     if (!s) return '-';
-    if (s.toUpperCase() === 'NO_SHOW_2X') return 'Absen';
+    if (s.toUpperCase() === 'NO_SHOW_2X' || s.toUpperCase() === 'NO_SHOW_3X') return 'Absen';
     return s;
   };
 

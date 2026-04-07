@@ -70,6 +70,7 @@ async function ensureGymControllerSettingsTable(pool) {
         EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
         EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0,
         AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0,
+        AllowDuplicateCardPerEmployee BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowDuplicateCardPerEmployee DEFAULT 0,
         GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
         GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
         WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
@@ -84,6 +85,9 @@ async function ensureGymControllerSettingsTable(pool) {
     END`);
   await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'AllowVendorUseGym') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0;
+    END`);
+  await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'AllowDuplicateCardPerEmployee') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD AllowDuplicateCardPerEmployee BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowDuplicateCardPerEmployee DEFAULT 0;
     END`);
   await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'GraceBeforeMin') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0;
@@ -1322,30 +1326,60 @@ router.post('/gym-controller-access', async (req, res) => {
   try {
     let cardNo = card_no != null ? String(card_no).trim() : '';
     let cardNoSource = cardNo ? 'request' : null;
+    const cardSet = new Set();
+    const pushCard = (value, sourceName) => {
+      const c = value != null ? String(value).trim() : '';
+      if (!c) return;
+      if (!cardNo) {
+        cardNo = c;
+        cardNoSource = sourceName;
+      }
+      cardSet.add(c);
+    };
+    if (cardNo) pushCard(cardNo, 'request');
 
-    if (!cardNo) {
+    let allowDuplicateCardPerEmployee = false;
+    try {
+      const poolSettings = await new sql.ConnectionPool(config).connect();
+      try {
+        await ensureGymControllerSettingsTable(poolSettings);
+        const settingsResult = await poolSettings
+          .request()
+          .query(`SELECT TOP 1 AllowDuplicateCardPerEmployee FROM dbo.gym_controller_settings WHERE Id = 1`);
+        const settingsRow = settingsResult?.recordset?.[0] || null;
+        allowDuplicateCardPerEmployee = settingsRow?.AllowDuplicateCardPerEmployee ? true : false;
+      } finally {
+        await poolSettings.close();
+      }
+    } catch (_) {}
+
+    if (!cardNo || allowDuplicateCardPerEmployee) {
       const pool = await new sql.ConnectionPool(config).connect();
       const req1 = pool.request();
       req1.input('emp', sql.VarChar(50), employeeId);
       const r1 = await req1.query(
-        "SELECT TOP 1 CardNo FROM dbo.gym_booking WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY BookingDate DESC, CreatedAt DESC"
+        `SELECT TOP ${allowDuplicateCardPerEmployee ? 20 : 1} CardNo FROM dbo.gym_booking WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY BookingDate DESC, CreatedAt DESC`
       );
-      cardNo = r1?.recordset?.[0]?.CardNo != null ? String(r1.recordset[0].CardNo).trim() : '';
-      if (cardNo) cardNoSource = 'gym_booking';
-      if (!cardNo) {
+      const bookingRows = Array.isArray(r1?.recordset) ? r1.recordset : [];
+      for (const row of bookingRows) {
+        pushCard(row?.CardNo, 'gym_booking');
+      }
+      if (!cardNo || allowDuplicateCardPerEmployee) {
         const req2 = pool.request();
         req2.input('emp', sql.NVarChar(50), employeeId);
         const r2 = await req2.query(
-          "SELECT TOP 1 CardNo FROM dbo.gym_live_taps WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY TxnTime DESC"
+          `SELECT TOP ${allowDuplicateCardPerEmployee ? 20 : 1} CardNo FROM dbo.gym_live_taps WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY TxnTime DESC`
         );
-        cardNo = r2?.recordset?.[0]?.CardNo != null ? String(r2.recordset[0].CardNo).trim() : '';
-        if (cardNo) cardNoSource = 'gym_live_taps';
+        const liveRows = Array.isArray(r2?.recordset) ? r2.recordset : [];
+        for (const row of liveRows) {
+          pushCard(row?.CardNo, 'gym_live_taps');
+        }
       }
 
       await pool.close();
     }
 
-    if (!cardNo) {
+    if (!cardNo || allowDuplicateCardPerEmployee) {
       const pickColumn = (columns, candidates) => {
         const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
         for (const cand of candidates) {
@@ -1410,12 +1444,11 @@ router.post('/gym-controller-access', async (req, res) => {
                 ? `ORDER BY CASE WHEN ([${activeCol}] = 1 OR UPPER(CAST([${activeCol}] AS varchar(50))) IN ('ACTIVE','AKTIF','1','TRUE')) THEN 0 ELSE 1 END`
                 : '';
               const r = await req.query(
-                `SELECT TOP 1 [${cardCol}] AS card_no FROM [${schema}].[${table}] WHERE [${empCol}] = @id ${delStateWhere} ${blockWhere} ${orderBy}`
+                `SELECT TOP ${allowDuplicateCardPerEmployee ? 20 : 1} [${cardCol}] AS card_no FROM [${schema}].[${table}] WHERE [${empCol}] = @id ${delStateWhere} ${blockWhere} ${orderBy}`
               );
-              const c = r?.recordset?.[0]?.card_no != null ? String(r.recordset[0].card_no).trim() : '';
-              if (c) {
-                cardNo = c;
-                cardNoSource = 'carddb';
+              const cardDbRows = Array.isArray(r?.recordset) ? r.recordset : [];
+              for (const row of cardDbRows) {
+                pushCard(row?.card_no, 'carddb');
               }
             }
           }
@@ -1428,25 +1461,24 @@ router.post('/gym-controller-access', async (req, res) => {
       }
     }
 
-    if (!cardNo) {
+    if (!cardNo || allowDuplicateCardPerEmployee) {
       const pool3 = await new sql.ConnectionPool(config).connect();
       try {
         const req = pool3.request();
         req.input('emp', sql.VarChar(50), employeeId);
         const r3 = await req.query(
-          `SELECT TOP 1 CardNo FROM DataDBEnt.dbo.CardDB WHERE StaffNo = @emp AND Status = 1 AND (Block IS NULL OR Block = 0) AND (del_state = 0 OR del_state IS NULL)`
+          `SELECT TOP ${allowDuplicateCardPerEmployee ? 20 : 1} CardNo FROM DataDBEnt.dbo.CardDB WHERE StaffNo = @emp AND Status = 1 AND (Block IS NULL OR Block = 0) AND (del_state = 0 OR del_state IS NULL)`
         );
-        const c3 = r3?.recordset?.[0]?.CardNo != null ? String(r3.recordset[0].CardNo).trim() : '';
-        if (c3) {
-          cardNo = c3;
-          cardNoSource = 'carddb_cross';
+        const cardDbCrossRows = Array.isArray(r3?.recordset) ? r3.recordset : [];
+        for (const row of cardDbCrossRows) {
+          pushCard(row?.CardNo, 'carddb_cross');
         }
       } finally {
         await pool3.close();
       }
     }
 
-    if (!cardNo) {
+    if (!cardNo || allowDuplicateCardPerEmployee) {
       const cardTxServer = envTrim(process.env.CARD_DB_SERVER) || envTrim(process.env.CARDDB_SERVER);
       const cardTxDatabase = envTrim(process.env.CARD_DB_DATABASE) || envTrim(process.env.CARDDB_NAME);
       const cardTxUser = envTrim(process.env.CARD_DB_USER) || envTrim(process.env.CARDDB_USER);
@@ -1486,12 +1518,11 @@ router.post('/gym-controller-access', async (req, res) => {
           const cardCol = pickColumn(cols, ['CardNo', 'card_no', 'Card', 'CardNumber', 'CardID', 'CardId', 'IDCard']);
           if (staffCol && cardCol) {
             const order = timeCol ? `ORDER BY [${timeCol}] DESC` : '';
-            const q = `SELECT TOP 1 [${cardCol}] AS CardNo FROM [${cardTxSchema}].[${cardTxTable}] WHERE [${staffCol}] = @emp AND [${cardCol}] IS NOT NULL ${order}`;
+            const q = `SELECT TOP ${allowDuplicateCardPerEmployee ? 20 : 1} [${cardCol}] AS CardNo FROM [${cardTxSchema}].[${cardTxTable}] WHERE [${staffCol}] = @emp AND [${cardCol}] IS NOT NULL ${order}`;
             const r = await txPool.request().input('emp', sql.NVarChar(50), employeeId).query(q);
-            const c = r?.recordset?.[0]?.CardNo != null ? String(r.recordset[0].CardNo).trim() : '';
-            if (c) {
-              cardNo = c;
-              cardNoSource = 'cardtx';
+            const cardTxRows = Array.isArray(r?.recordset) ? r.recordset : [];
+            for (const row of cardTxRows) {
+              pushCard(row?.CardNo, 'cardtx');
             }
           }
           await txPool.close();
@@ -1503,32 +1534,44 @@ router.post('/gym-controller-access', async (req, res) => {
       }
     }
 
-    if (!cardNo) {
+    const cardNos = allowDuplicateCardPerEmployee ? Array.from(cardSet).slice(0, 20) : cardNo ? [cardNo] : [];
+    if (cardNos.length === 0) {
       log('cardNo_not_found');
       return res
         .status(200)
         .json({ ok: false, error: 'CardNo not found for employee_id', debug: debug ? { reqId, events: debugEvents } : undefined });
     }
-    log('cardNo_resolved', { source: cardNoSource });
+    log('cardNo_resolved', { source: cardNoSource, count: cardNos.length, duplicate_enabled: allowDuplicateCardPerEmployee });
 
-    const url = new URL(`${baseUrl.replace(/\/+$/, '')}/UploadCardByDoorUnitNo`);
-    url.searchParams.set('CardNo', cardNo);
-    url.searchParams.set('UnitNo', unitNo);
-    url.searchParams.set('CustomAccessTZ', customAccessTz);
-    const r = await fetch(url.toString(), { method: 'GET' });
-    const body = await r.text();
-
-    const parsed = {
-      unitNo: extractTag(body, 'UnitNo'),
-      doorName: extractTag(body, 'DoorName'),
-      ipAddress: extractTag(body, 'IPAddress'),
-      doorId: extractTag(body, 'DoorID'),
-      uploadStatus: extractTag(body, 'UploadStatus'),
-      log: extractTag(body, 'Log'),
-    };
-    log('vault_response', { http_ok: Boolean(r.ok), http_status: r.status, upload_status: parsed.uploadStatus });
-
-    const uploadOk = String(parsed.uploadStatus || '').trim() === '1';
+    const uploadResults = [];
+    for (const currentCardNo of cardNos) {
+      const url = new URL(`${baseUrl.replace(/\/+$/, '')}/UploadCardByDoorUnitNo`);
+      url.searchParams.set('CardNo', currentCardNo);
+      url.searchParams.set('UnitNo', unitNo);
+      url.searchParams.set('CustomAccessTZ', customAccessTz);
+      const r = await fetch(url.toString(), { method: 'GET' });
+      const body = await r.text();
+      const parsed = {
+        unitNo: extractTag(body, 'UnitNo'),
+        doorName: extractTag(body, 'DoorName'),
+        ipAddress: extractTag(body, 'IPAddress'),
+        doorId: extractTag(body, 'DoorID'),
+        uploadStatus: extractTag(body, 'UploadStatus'),
+        log: extractTag(body, 'Log'),
+      };
+      const itemOk = String(parsed.uploadStatus || '').trim() === '1' && r.ok;
+      log('vault_response', { card_no: currentCardNo, http_ok: Boolean(r.ok), http_status: r.status, upload_status: parsed.uploadStatus, ok: itemOk });
+      uploadResults.push({
+        card_no: currentCardNo,
+        ok: itemOk,
+        http_ok: Boolean(r.ok),
+        http_status: r.status,
+        parsed,
+        body,
+      });
+    }
+    const uploadOk = uploadResults.length > 0 && uploadResults.every((x) => x.ok);
+    const primaryUpload = uploadResults[0] || null;
 
     let dbOk = false;
     const pool2 = await new sql.ConnectionPool(config).connect();
@@ -1560,17 +1603,21 @@ router.post('/gym-controller-access', async (req, res) => {
       await pool2.close();
     }
 
-    const finalOk = uploadOk && r.ok;
+    const finalOk = uploadOk;
     log('done', { ok: finalOk, db_ok: dbOk });
     return res.json({
       ok: finalOk,
       employee_id: employeeId,
+      card_no: cardNos[0] || null,
+      card_nos: cardNos,
+      allow_duplicate_card_per_employee: allowDuplicateCardPerEmployee,
       unit_no: unitNo,
       tz: customAccessTz,
       db_ok: dbOk,
       upload_ok: finalOk,
-      parsed,
-      body,
+      upload_results: uploadResults,
+      parsed: primaryUpload?.parsed ?? null,
+      body: primaryUpload?.body ?? null,
       debug: debug ? { reqId, events: debugEvents } : undefined,
     });
   } catch (error) {
@@ -2103,45 +2150,35 @@ router.post('/gym-booking-create', async (req, res) => {
       const tapsTableExists = Boolean(tapsExistsRes?.recordset?.[0]?.id);
       if (tapsTableExists) {
         const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
-        const exitPattern = (envTrim(process.env.GYM_EXIT_EVENT) || 'VALID EXIT ACCESS').toUpperCase();
         const noShowReq = gymPool.request();
         noShowReq.input('employee_id', sql.VarChar(20), employeeId);
         noShowReq.input('today', sql.Date, todayDate);
         noShowReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
-        noShowReq.input('exitPat', sql.VarChar(120), `%${exitPattern}%`);
         const sinceWhere = noShowSinceDate ? 'AND gb.BookingDate >= @since' : '';
         if (noShowSinceDate) {
           noShowReq.input('since', sql.Date, noShowSinceDate);
         }
         const noShowRes = await noShowReq.query(
-          `SELECT TOP 2 gb.BookingDate AS booking_date,
+          `SELECT TOP 3 gb.BookingDate AS booking_date,
              CASE WHEN EXISTS (
                SELECT 1 FROM dbo.gym_live_taps t
                WHERE t.EmployeeID = @employee_id
                  AND CONVERT(date, t.TxnTime) = gb.BookingDate
                  AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @entryPat
-             ) THEN 1 ELSE 0 END AS has_entry_tap,
-             CASE WHEN EXISTS (
-               SELECT 1 FROM dbo.gym_live_taps t
-               WHERE t.EmployeeID = @employee_id
-                 AND CONVERT(date, t.TxnTime) = gb.BookingDate
-                 AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @exitPat
-             ) THEN 1 ELSE 0 END AS has_exit_tap
+             ) THEN 1 ELSE 0 END AS has_entry_tap
            FROM dbo.gym_booking gb
            WHERE gb.EmployeeID = @employee_id
              AND gb.BookingDate < @today
              AND gb.BookingDate >= DATEADD(day, -7, @today)
              ${sinceWhere}
-             AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+             AND gb.Status IN ('BOOKED','CHECKIN')
            ORDER BY gb.BookingDate DESC`
         );
         const noShowRows = Array.isArray(noShowRes?.recordset) ? noShowRes.recordset : [];
         let consecutiveNoShow = 0;
         for (const row of noShowRows) {
           const hasEntry = Number(row?.has_entry_tap || 0) === 1;
-          const hasExit = Number(row?.has_exit_tap || 0) === 1;
-          const isNoShow = !(hasEntry && hasExit);
-          if (!isNoShow) break;
+          if (hasEntry) break;
           consecutiveNoShow += 1;
         }
         const updateCountReq = gymPool.request();
@@ -2155,19 +2192,19 @@ router.post('/gym-booking-create', async (req, res) => {
              WHERE EmployeeID = @employee_id;
            END`
         );
-        const shouldBan = consecutiveNoShow >= 2;
+        const shouldBan = consecutiveNoShow >= 3;
         if (shouldBan) {
           const banReq = gymPool.request();
           banReq.input('employee_id', sql.VarChar(20), employeeId);
           banReq.input('today', sql.Date, todayDate);
-          banReq.input('reason', sql.VarChar(255), 'NO_SHOW_2X');
+          banReq.input('reason', sql.VarChar(255), 'NO_SHOW_3X');
           await banReq.query(
             `IF EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id)
              BEGIN
                UPDATE dbo.gym_booking_ban
                SET BannedUntil = DATEADD(day, 7, @today),
                    Reason = @reason,
-                   ConsecutiveNoShow = 2,
+                   ConsecutiveNoShow = 3,
                   UnbanRemark = NULL,
                   UnbanAt = NULL,
                   ActionBy = NULL,
@@ -2177,8 +2214,15 @@ router.post('/gym-booking-create', async (req, res) => {
              ELSE
              BEGIN
                INSERT INTO dbo.gym_booking_ban (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow)
-               VALUES (@employee_id, DATEADD(day, 7, @today), @reason, 2);
-             END`
+               VALUES (@employee_id, DATEADD(day, 7, @today), @reason, 3);
+             END;
+             
+             UPDATE dbo.gym_booking
+             SET Status = 'CANCELLED',
+                 RejectedReason = 'Auto-cancelled by System due to 3x No-Show Ban'
+             WHERE EmployeeID = @employee_id
+               AND BookingDate >= @today
+               AND Status IN ('BOOKED','CHECKIN');`
           );
           const bannedUntil = new Date(todayDate.getTime() + 7 * 24 * 60 * 60 * 1000);
           const bannedStr = isNaN(bannedUntil.getTime()) ? null : bannedUntil.toISOString().slice(0, 10);
@@ -3424,6 +3468,7 @@ router.get('/gym-controller-settings', async (req, res) => {
         EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
         EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0,
         AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0,
+        AllowDuplicateCardPerEmployee BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowDuplicateCardPerEmployee DEFAULT 0,
         GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
         GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
         WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
@@ -3438,6 +3483,9 @@ router.get('/gym-controller-settings', async (req, res) => {
     END`);
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'AllowVendorUseGym') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0;
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'AllowDuplicateCardPerEmployee') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD AllowDuplicateCardPerEmployee BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowDuplicateCardPerEmployee DEFAULT 0;
     END`);
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'GraceBeforeMin') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0;
@@ -3457,7 +3505,7 @@ router.get('/gym-controller-settings', async (req, res) => {
     await pool.request().query(`IF NOT EXISTS (SELECT 1 FROM dbo.gym_controller_settings WHERE Id = 1)
       INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, BookingMinDaysAhead, BookingMaxDaysAhead) VALUES (1, 0, 1, 2)`);
 
-    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
+    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, AllowDuplicateCardPerEmployee, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
     await pool.close();
 
     const row = r?.recordset?.[0] || null;
@@ -3467,6 +3515,7 @@ router.get('/gym-controller-settings', async (req, res) => {
       enable_auto_organize: row?.EnableAutoOrganize ? true : false,
       enable_manager_all_session_access: row?.EnableManagerAllSessionAccess ? true : false,
       allow_vendor_use_gym: row?.AllowVendorUseGym ? true : false,
+      allow_duplicate_card_per_employee: row?.AllowDuplicateCardPerEmployee ? true : false,
       grace_before_min: Number(row?.GraceBeforeMin ?? 0) || 0,
       grace_after_min: Number(row?.GraceAfterMin ?? 0) || 0,
       worker_interval_ms: Number(row?.WorkerIntervalMs ?? 60000) || 60000,
@@ -3507,6 +3556,11 @@ router.post('/gym-controller-settings', async (req, res) => {
     allowVendorRaw === undefined
       ? undefined
       : allowVendorRaw === true || allowVendorRaw === 1 || String(allowVendorRaw || '').trim().toLowerCase() === 'true';
+  const allowDuplicateCardRaw = req?.body?.allow_duplicate_card_per_employee;
+  const allowDuplicateCardParsed =
+    allowDuplicateCardRaw === undefined
+      ? undefined
+      : allowDuplicateCardRaw === true || allowDuplicateCardRaw === 1 || String(allowDuplicateCardRaw || '').trim().toLowerCase() === 'true';
 
   const graceBeforeRaw = req?.body?.grace_before_min;
   const graceAfterRaw = req?.body?.grace_after_min;
@@ -3554,6 +3608,7 @@ router.post('/gym-controller-settings', async (req, res) => {
         EnableAutoOrganize BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableAutoOrganize DEFAULT 0,
         EnableManagerAllSessionAccess BIT NOT NULL CONSTRAINT DF_gym_controller_settings_EnableManagerAllSessionAccess DEFAULT 0,
         AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0,
+        AllowDuplicateCardPerEmployee BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowDuplicateCardPerEmployee DEFAULT 0,
         GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0,
         GraceAfterMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceAfterMin DEFAULT 0,
         WorkerIntervalMs INT NOT NULL CONSTRAINT DF_gym_controller_settings_WorkerIntervalMs DEFAULT 60000,
@@ -3568,6 +3623,9 @@ router.post('/gym-controller-settings', async (req, res) => {
     END`);
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'AllowVendorUseGym') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD AllowVendorUseGym BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowVendorUseGym DEFAULT 0;
+    END`);
+    await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'AllowDuplicateCardPerEmployee') IS NULL BEGIN
+      ALTER TABLE dbo.gym_controller_settings ADD AllowDuplicateCardPerEmployee BIT NOT NULL CONSTRAINT DF_gym_controller_settings_AllowDuplicateCardPerEmployee DEFAULT 0;
     END`);
     await pool.request().query(`IF COL_LENGTH('dbo.gym_controller_settings', 'GraceBeforeMin') IS NULL BEGIN
       ALTER TABLE dbo.gym_controller_settings ADD GraceBeforeMin INT NOT NULL CONSTRAINT DF_gym_controller_settings_GraceBeforeMin DEFAULT 0;
@@ -3589,6 +3647,7 @@ router.post('/gym-controller-settings', async (req, res) => {
     req1.input('EnableAutoOrganize', sql.Bit, enableParsed == null ? null : enableParsed ? 1 : 0);
     req1.input('EnableManagerAllSessionAccess', sql.Bit, enableManagerParsed == null ? null : enableManagerParsed ? 1 : 0);
     req1.input('AllowVendorUseGym', sql.Bit, allowVendorParsed == null ? null : allowVendorParsed ? 1 : 0);
+    req1.input('AllowDuplicateCardPerEmployee', sql.Bit, allowDuplicateCardParsed == null ? null : allowDuplicateCardParsed ? 1 : 0);
     req1.input('GraceBeforeMin', sql.Int, graceBeforeClamped);
     req1.input('GraceAfterMin', sql.Int, graceAfterClamped);
     req1.input('WorkerIntervalMs', sql.Int, workerIntervalClamped);
@@ -3599,6 +3658,7 @@ router.post('/gym-controller-settings', async (req, res) => {
         EnableAutoOrganize = COALESCE(@EnableAutoOrganize, EnableAutoOrganize),
         EnableManagerAllSessionAccess = COALESCE(@EnableManagerAllSessionAccess, EnableManagerAllSessionAccess),
         AllowVendorUseGym = COALESCE(@AllowVendorUseGym, AllowVendorUseGym),
+        AllowDuplicateCardPerEmployee = COALESCE(@AllowDuplicateCardPerEmployee, AllowDuplicateCardPerEmployee),
         GraceBeforeMin = COALESCE(@GraceBeforeMin, GraceBeforeMin),
         GraceAfterMin = COALESCE(@GraceAfterMin, GraceAfterMin),
         WorkerIntervalMs = COALESCE(@WorkerIntervalMs, WorkerIntervalMs),
@@ -3607,10 +3667,10 @@ router.post('/gym-controller-settings', async (req, res) => {
         UpdatedAt = SYSDATETIME()
       WHERE Id = 1
     ELSE
-      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt)
-      VALUES (1, COALESCE(@EnableAutoOrganize, 0), COALESCE(@EnableManagerAllSessionAccess, 0), COALESCE(@AllowVendorUseGym, 0), COALESCE(@GraceBeforeMin, 0), COALESCE(@GraceAfterMin, 0), COALESCE(@WorkerIntervalMs, 60000), COALESCE(@BookingMinDaysAhead, 1), COALESCE(@BookingMaxDaysAhead, 2), SYSDATETIME())`);
+      INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, AllowDuplicateCardPerEmployee, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt)
+      VALUES (1, COALESCE(@EnableAutoOrganize, 0), COALESCE(@EnableManagerAllSessionAccess, 0), COALESCE(@AllowVendorUseGym, 0), COALESCE(@AllowDuplicateCardPerEmployee, 0), COALESCE(@GraceBeforeMin, 0), COALESCE(@GraceAfterMin, 0), COALESCE(@WorkerIntervalMs, 60000), COALESCE(@BookingMinDaysAhead, 1), COALESCE(@BookingMaxDaysAhead, 2), SYSDATETIME())`);
 
-    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
+    const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, AllowDuplicateCardPerEmployee, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
     await pool.close();
 
     const row = r?.recordset?.[0] || null;
@@ -3623,6 +3683,7 @@ router.post('/gym-controller-settings', async (req, res) => {
       enable_auto_organize: row?.EnableAutoOrganize ? true : false,
       enable_manager_all_session_access: row?.EnableManagerAllSessionAccess ? true : false,
       allow_vendor_use_gym: row?.AllowVendorUseGym ? true : false,
+      allow_duplicate_card_per_employee: row?.AllowDuplicateCardPerEmployee ? true : false,
       grace_before_min: Number(row?.GraceBeforeMin ?? 0) || 0,
       grace_after_min: Number(row?.GraceAfterMin ?? 0) || 0,
       worker_interval_ms: Number(row?.WorkerIntervalMs ?? 60000) || 60000,

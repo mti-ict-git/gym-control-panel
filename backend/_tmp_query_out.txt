@@ -1,7 +1,0 @@
-BookingID EmployeeID BookingDate Status ApprovalStatus SessionName ScheduleID CardNo CreatedAt
---------- ---------- ----------- ------ -------------- ----------- ---------- ------ ---------
-4582 MTI230361 2026-03-02 BOOKED APPROVED Afternoon - Ramadhan 6 3925495309 2026-03-01 11:50:13.373
-4496 MTI230361 2026-02-28 BOOKED APPROVED Afternoon - Ramadhan 6 2344507295 2026-02-27 06:31:24.767
-1407 MTI230361 2026-02-08 BOOKED APPROVED Afternoon 4 2344507295 2026-02-07 06:03:41.583
-1084 MTI230361 2026-02-03 BOOKED APPROVED Night - 2 3 2344507295 2026-02-02 04:46:02.120
-
