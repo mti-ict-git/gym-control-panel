@@ -464,13 +464,20 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
       rows: typeof bookingsRes !== 'undefined' && Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset.length : 0,
     });
 
-    const updateEmployeeAccess = async (employeeId, allow, cardNo, source) => {
+    const grantRefreshMaxAgeMs = clamp(
+      envInt(process.env.GYM_GRANT_REFRESH_MAX_AGE_MS, 5 * 60 * 1000),
+      60 * 1000,
+      24 * 60 * 60 * 1000
+    );
+
+    const updateEmployeeAccess = async (employeeId, allow, cardNo, source, opts = {}) => {
       const desiredTz = allow ? tzAllow : tzDeny;
       const current = overrideMap.get(employeeId) || null;
       const currentTz = current && typeof current === 'object' ? current.tz : (current || null);
       const updatedAt = current && typeof current === 'object' ? current.updatedAt : null;
       if (currentTz === desiredTz) {
-        const maxAgeMs = Number(process.env.GYM_CONTROLLER_ACCESS_MAX_AGE_MS || 10 * 60 * 1000);
+        const envMaxAge = Number(process.env.GYM_CONTROLLER_ACCESS_MAX_AGE_MS || 10 * 60 * 1000);
+        const maxAgeMs = Number.isFinite(Number(opts?.maxAgeMs)) ? Number(opts.maxAgeMs) : envMaxAge;
         const recent = updatedAt ? (Date.now() - new Date(updatedAt).getTime()) < maxAgeMs : false;
         if (recent) return;
       }
@@ -573,7 +580,9 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
           });
           pushAccessEvent({ t: new Date().toISOString(), type: 'grant', employee_id: employeeId, unit_no: unitNo });
           await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER');
-      } else if (prevRequired && !nowRequired && current && isPrunableOverride) {
+        } else if (nowRequired) {
+          await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER', { maxAgeMs: grantRefreshMaxAgeMs });
+        } else if (prevRequired && !nowRequired && current && isPrunableOverride) {
           console.log('[gym-worker] prune', {
             employee_id: employeeId,
             unit_no: unitNo,

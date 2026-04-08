@@ -1,0 +1,45 @@
+
+=== DIAGNOSE BOOKING ID: 6049 (GYMBOOK6049) ===
+
+[1] BOOKING DATA
+  Employee ID  : 5211863
+  Employee Name: RIVAURI ARLAEN MENGKO
+  Card No      : 0731017519
+  Department   : PROJECT
+  Gender       : Male
+  Session      : Afternoon (Schedule: Afternoon )
+  Time         : 13:00 - 15:00
+  Booking Date : 2026-04-08
+  Status       : BOOKED
+  Approval     : APPROVED
+  Created At   : Wed Apr 08 2026 05:02:25 GMT+0800 (Central Indonesia Time)
+  Schedule Active: true
+  Schedule Quota : 15
+
+[2] ISSUE ANALYSIS
+  [OK] Status: BOOKED
+  [OK] Approval for MMS: APPROVED
+  [OK] Card No: 0731017519
+  [OK] Booking Date = today: 2026-04-08
+  [INFO] Controller Settings: AutoOrganize=true, GraceBefore=5min, GraceAfter=5min, Interval=60000ms
+  [OK] Waktu (13:24) dalam range 13:00-15:00 (effective: 12:55-15:05)
+
+[3] CONTROLLER ACCESS OVERRIDE
+  Override found:
+    AccessTZ : 01 (ALLOWED) [Allow=01, Deny=00]
+    Source   : WORKER
+    UpdatedAt: Wed Apr 08 2026 19:55:03 GMT+0800 (Central Indonesia Time)
+
+[4] COMMITTEE / ALWAYS-ALLOW
+  [INFO] Not a committee member
+
+[5] BAN STATUS
+  Ban record: Until 2026-03-27, Reason: NO_SHOW_2X, NoShow: 0 [EXPIRED]
+
+[6] CARD DATABASE (DataDBEnt)
+  Found 1 card(s):
+    CardNo: 0731017519, StaffNo: 5211863, Status: Inactive, Block: OK, DelState: del_state!=1, Dept: PROJECT
+
+=== SUMMARY: 2 issue(s) found ===
+  [WARN] Card 0731017519 Status INACTIVE in CardDB
+  [FAIL] CardNo in booking (0731017519) does NOT match any active card in CardDB
