@@ -98,6 +98,15 @@ function StatusBadge({ status }: { status: string | null }) {
   return <Clock className="h-5 w-5 text-yellow-500" />;
 }
 
+function MultiCardBadge({ active, count }: { active: boolean; count: number }) {
+  if (!active) return null;
+  return (
+    <span className="inline-flex items-center rounded-md border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900">
+      MULTI CARD {count > 0 ? `(${count})` : ''}
+    </span>
+  );
+}
+
 export default function VaultPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
@@ -573,6 +582,9 @@ export default function VaultPage() {
                                   <IdCard className="h-3.5 w-3.5" />
                                   <span className="font-mono">{user.card_no || '-'}</span>
                                 </div>
+                                <div className="mt-1">
+                                  <MultiCardBadge active={Boolean(user.multi_card)} count={Number(user.active_card_count || 0)} />
+                                </div>
                               </div>
                               <StatusBadge status={user.approval_status} />
                             </div>
@@ -754,7 +766,12 @@ export default function VaultPage() {
                               <TableCell className="hidden md:table-cell">
                                 <GenderBadge gender={user.gender} />
                               </TableCell>
-                              <TableCell>{user.employee_id}</TableCell>
+                              <TableCell>
+                                <div className="flex flex-col gap-1">
+                                  <span>{user.employee_id}</span>
+                                  <MultiCardBadge active={Boolean(user.multi_card)} count={Number(user.active_card_count || 0)} />
+                                </div>
+                              </TableCell>
                               <TableCell className="hidden md:table-cell">{user.department || '-'}</TableCell>
                               <TableCell className="hidden md:table-cell"><SessionBadge name={user.session_name || '-'} /></TableCell>
                               <TableCell className="hidden md:table-cell">

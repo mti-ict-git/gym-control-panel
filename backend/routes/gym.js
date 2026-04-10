@@ -881,7 +881,17 @@ router.get('/gym-bookings', async (req, res) => {
           AND c.Status = 1
           AND (c.Block IS NULL OR c.Block = 0)
           AND c.del_state = 0
-      ) cd`;
+      ) cd
+      OUTER APPLY (
+        SELECT COUNT(DISTINCT c2.CardNo) AS active_card_count
+        FROM DataDBEnt.dbo.CardDB c2
+        WHERE c2.StaffNo = gb.EmployeeID
+          AND c2.Status = 1
+          AND (c2.Block IS NULL OR c2.Block = 0)
+          AND c2.del_state = 0
+          AND c2.CardNo IS NOT NULL
+          AND LTRIM(RTRIM(c2.CardNo)) <> ''
+      ) mcc`;
 
     const whereParts = [
       'gb.BookingDate >= @fromDate',
@@ -1007,6 +1017,8 @@ router.get('/gym-bookings', async (req, res) => {
         COALESCE(ec.gender, gb.Gender) AS gender,
         COALESCE(s.Session, gb.SessionName) AS session_name,
         gb.ScheduleID AS schedule_id,
+        ISNULL(mcc.active_card_count, 0) AS active_card_count,
+        CASE WHEN ISNULL(mcc.active_card_count, 0) > 1 THEN 1 ELSE 0 END AS multi_card,
         CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date,
         gb.Status AS status,
         gb.ApprovalStatus AS approval_status,
@@ -1032,6 +1044,8 @@ router.get('/gym-bookings', async (req, res) => {
           gender: r.gender != null ? String(r.gender).trim() : null,
           session_name: String(r.session_name ?? '').trim(),
           schedule_id: Number(r.schedule_id),
+          active_card_count: Number(r.active_card_count ?? 0) || 0,
+          multi_card: Boolean(Number(r.multi_card ?? 0)),
           booking_date: String(r.booking_date ?? '').trim(),
           status: String(r.status ?? '').trim(),
           approval_status: r.approval_status != null ? String(r.approval_status).trim() : null,

@@ -13,6 +13,8 @@ export interface VaultUser {
   status: 'BOOKED' | 'IN_GYM' | 'OUT';
   approval_status: string | null;
   card_no: string | null;
+  active_card_count: number;
+  multi_card: boolean;
   booking_date: string;
 }
 
@@ -37,6 +39,8 @@ type GymDbBookingRow = {
   session_name: string | null;
   time_start: string | null;
   time_end: string | null;
+  active_card_count?: number | null;
+  multi_card?: boolean | number | null;
 };
 
 type GymDbBookingResponse = { ok: boolean; error?: string; bookings?: GymDbBookingRow[]; total?: number } | null;
@@ -117,6 +121,8 @@ export function useVaultUsers() {
             department: r.department != null ? String(r.department).trim() : null,
             gender: mappedGender,
             card_no: r.card_no != null ? String(r.card_no).trim() : null,
+            active_card_count: Number(r.active_card_count ?? 0) || 0,
+            multi_card: Boolean(typeof r.multi_card === 'boolean' ? r.multi_card : Number(r.multi_card ?? 0)),
             approval_status: r.approval_status != null ? String(r.approval_status).trim() : null,
             status: mappedStatus,
             booking_date: r.booking_date,
@@ -243,6 +249,8 @@ export function useVaultUsersPaged(params: {
             department: r.department != null ? String(r.department).trim() : null,
             gender: mappedGender,
             card_no: r.card_no != null ? String(r.card_no).trim() : null,
+            active_card_count: Number(r.active_card_count ?? 0) || 0,
+            multi_card: Boolean(typeof r.multi_card === 'boolean' ? r.multi_card : Number(r.multi_card ?? 0)),
             approval_status: r.approval_status != null ? String(r.approval_status).trim() : null,
             status: mappedStatus,
             booking_date: r.booking_date,
