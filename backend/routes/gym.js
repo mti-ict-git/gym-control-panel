@@ -1339,6 +1339,10 @@ router.post('/gym-controller-access', async (req, res) => {
 
   try {
     let cardNo = card_no != null ? String(card_no).trim() : '';
+    // Prevent stale gym_booking cards passed by the worker from blocking fresh CardDB lookups
+    if (source === 'WORKER') {
+      cardNo = '';
+    }
     let cardNoSource = cardNo ? 'request' : null;
     const cardSet = new Set();
     const pushCard = (value, sourceName) => {
@@ -1366,32 +1370,6 @@ router.post('/gym-controller-access', async (req, res) => {
         await poolSettings.close();
       }
     } catch (_) {}
-
-    if (!cardNo || allowDuplicateCardPerEmployee) {
-      const pool = await new sql.ConnectionPool(config).connect();
-      const req1 = pool.request();
-      req1.input('emp', sql.VarChar(50), employeeId);
-      const r1 = await req1.query(
-        `SELECT TOP ${allowDuplicateCardPerEmployee ? 20 : 1} CardNo FROM dbo.gym_booking WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY BookingDate DESC, CreatedAt DESC`
-      );
-      const bookingRows = Array.isArray(r1?.recordset) ? r1.recordset : [];
-      for (const row of bookingRows) {
-        pushCard(row?.CardNo, 'gym_booking');
-      }
-      if (!cardNo || allowDuplicateCardPerEmployee) {
-        const req2 = pool.request();
-        req2.input('emp', sql.NVarChar(50), employeeId);
-        const r2 = await req2.query(
-          `SELECT TOP ${allowDuplicateCardPerEmployee ? 20 : 1} CardNo FROM dbo.gym_live_taps WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY TxnTime DESC`
-        );
-        const liveRows = Array.isArray(r2?.recordset) ? r2.recordset : [];
-        for (const row of liveRows) {
-          pushCard(row?.CardNo, 'gym_live_taps');
-        }
-      }
-
-      await pool.close();
-    }
 
     if (!cardNo || allowDuplicateCardPerEmployee) {
       const pickColumn = (columns, candidates) => {
@@ -1546,6 +1524,33 @@ router.post('/gym-controller-access', async (req, res) => {
           } catch (_) {}
         }
       }
+    }
+
+    // Lowest priority fallback: cached records from scheduled bookings or live tap logs
+    if (!cardNo || allowDuplicateCardPerEmployee) {
+      const pool = await new sql.ConnectionPool(config).connect();
+      const req1 = pool.request();
+      req1.input('emp', sql.VarChar(50), employeeId);
+      const r1 = await req1.query(
+        `SELECT TOP ${allowDuplicateCardPerEmployee ? 20 : 1} CardNo FROM dbo.gym_booking WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY BookingDate DESC, CreatedAt DESC`
+      );
+      const bookingRows = Array.isArray(r1?.recordset) ? r1.recordset : [];
+      for (const row of bookingRows) {
+        pushCard(row?.CardNo, 'gym_booking');
+      }
+      if (!cardNo || allowDuplicateCardPerEmployee) {
+        const req2 = pool.request();
+        req2.input('emp', sql.NVarChar(50), employeeId);
+        const r2 = await req2.query(
+          `SELECT TOP ${allowDuplicateCardPerEmployee ? 20 : 1} CardNo FROM dbo.gym_live_taps WHERE EmployeeID = @emp AND CardNo IS NOT NULL AND LTRIM(RTRIM(CardNo)) <> '' ORDER BY TxnTime DESC`
+        );
+        const liveRows = Array.isArray(r2?.recordset) ? r2.recordset : [];
+        for (const row of liveRows) {
+          pushCard(row?.CardNo, 'gym_live_taps');
+        }
+      }
+
+      await pool.close();
     }
 
     const cardNos = allowDuplicateCardPerEmployee ? Array.from(cardSet).slice(0, 20) : cardNo ? [cardNo] : [];
