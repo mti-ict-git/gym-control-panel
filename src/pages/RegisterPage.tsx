@@ -418,6 +418,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     const q = (employeeIdInput || '').trim();
+    const qSearch = employeeType === 'MTI' ? q.toUpperCase() : q;
     if (q.length === 0) {
       setEmpSuggestions([]);
       return;
@@ -427,22 +428,41 @@ export default function RegisterPage() {
     const t = setTimeout(async () => {
       try {
         const base = '/api';
-        const path = employeeType === 'MTI' ? '/employees' : '/carddb-staff';
-        const build = (b: string) => `${b}${path}?q=${encodeURIComponent(q)}${employeeType !== 'MTI' ? `&type=${encodeURIComponent(employeeType)}` : ''}`;
         const tryFetch = async (u: string) => {
           const resp = await fetch(u, { signal: ctrl.signal });
           if (!resp.ok) return null;
           return await resp.json();
         };
-        const json = (await tryFetch(build(base))) || (await tryFetch(build('')));
-        const success = json && (json.success === true || json.ok === true);
-        let list = Array.isArray(json?.employees)
-          ? json.employees
-          : Array.isArray(json?.rows)
-          ? json.rows
-          : [];
-        if (employeeType !== 'MTI') {
-          list = list.filter((v: unknown) => typeof v === 'string' ? !/^\s*MTI/i.test(v) : true);
+
+        let list: string[] = [];
+        let success = false;
+
+        if (employeeType === 'MTI') {
+          // Prefer /employee-core for MTI because it returns canonical IDs + works across varied schemas.
+          const buildCore = (b: string) => `${b}/employee-core?q=${encodeURIComponent(qSearch)}&limit=20`;
+          const coreJson = (await tryFetch(buildCore(base))) || (await tryFetch(buildCore('')));
+          success = coreJson?.ok === true;
+          if (success && Array.isArray(coreJson?.employees)) {
+            list = coreJson.employees
+              .map((e: unknown) => (e && typeof e === 'object' ? String((e as { employee_id?: unknown }).employee_id ?? '').trim() : ''))
+              .filter(Boolean);
+          }
+          // Secondary fallback for older backend setup.
+          if (list.length === 0) {
+            const buildLegacy = (b: string) => `${b}/employees?q=${encodeURIComponent(qSearch)}`;
+            const legacyJson = (await tryFetch(buildLegacy(base))) || (await tryFetch(buildLegacy('')));
+            const legacyOk = legacyJson?.success === true || legacyJson?.ok === true;
+            if (legacyOk) {
+              list = Array.isArray(legacyJson?.employees) ? legacyJson.employees.map((v: unknown) => String(v || '').trim()).filter(Boolean) : [];
+              success = true;
+            }
+          }
+        } else {
+          const buildCardDb = (b: string) => `${b}/carddb-staff?q=${encodeURIComponent(qSearch)}&type=${encodeURIComponent(employeeType)}`;
+          const json = (await tryFetch(buildCardDb(base))) || (await tryFetch(buildCardDb('')));
+          success = Boolean(json && (json.success === true || json.ok === true));
+          list = Array.isArray(json?.employees) ? json.employees.map((v: unknown) => String(v || '').trim()).filter(Boolean) : [];
+          list = list.filter((v) => !/^\s*MTI/i.test(v));
         }
         setEmpSuggestions(success ? list : []);
         setShowEmpDropdown(success && list.length > 0);
@@ -538,11 +558,12 @@ export default function RegisterPage() {
     setIsSubmitting(true);
     try {
       const tryPost = async (url: string) => {
+        const normalizedEmployeeId = String(data.employeeId || '').trim().toUpperCase();
         const resp = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            employee_id: data.employeeId,
+            employee_id: normalizedEmployeeId,
             employee_type: data.employeeType,
             session_id: data.sessionId,
             booking_date: format(data.date, 'yyyy-MM-dd'),
@@ -570,7 +591,8 @@ export default function RegisterPage() {
       }
 
       const selectedSession = selectedGymDbSession;
-      const employeeProfile = await fetchEmployeeProfile(data.employeeId);
+      const normalizedEmployeeId = String(data.employeeId || '').trim().toUpperCase();
+      const employeeProfile = await fetchEmployeeProfile(normalizedEmployeeId);
 
       const bId = payload && typeof payload.booking_id === 'number' ? payload.booking_id : null;
       const dateStr = format(data.date, 'yyyy-MM-dd');
@@ -582,7 +604,7 @@ export default function RegisterPage() {
           sessionName: displaySessionName(selectedSession.session_name),
           timeStart: selectedSession.time_start,
           timeEnd: timeEndForSession(selectedSession),
-          employeeId: data.employeeId,
+          employeeId: normalizedEmployeeId,
           employeeName: bookingDetails?.name ?? employeeProfile?.name ?? null,
           department: bookingDetails?.department ?? employeeProfile?.department ?? null,
         });

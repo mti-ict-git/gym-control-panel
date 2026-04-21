@@ -1750,7 +1750,13 @@ router.post('/gym-booking-create', async (req, res) => {
 
   const { employee_id, session_id, booking_date, employee_type: employeeTypeRaw } = req.body || {};
   const employeeIdHeader = envTrim(req.headers['x-employee-id'] || req.headers['x-employee_id']);
-  const employeeId = String(employee_id || employeeIdHeader || '').trim();
+  const employeeIdRaw = String(employee_id || employeeIdHeader || '');
+  const employeeId = employeeIdRaw
+    .replace(/\uFEFF/g, '')
+    .replace(/[^\x20-\x7E]/g, '')
+    .trim()
+    .replace(/\s+/g, '')
+    .toUpperCase();
   const sessionId = String(session_id || '').trim();
   const bookingDateStr = String(booking_date || '').trim();
   const employeeKind = classifyEmployeeIdKind(employeeId);
@@ -1930,7 +1936,7 @@ router.post('/gym-booking-create', async (req, res) => {
 
     let pool;
     try {
-      pool = await sql.connect(cardConfig);
+      pool = await new sql.ConnectionPool(cardConfig).connect();
       const tableResult = await pool.request().query(
         `SELECT TOP 1 TABLE_SCHEMA AS schema_name, TABLE_NAME AS table_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME IN (${tableCandidates.map((t) => `'${t}'`).join(', ')}) ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA`
       );
@@ -2004,7 +2010,7 @@ router.post('/gym-booking-create', async (req, res) => {
 
     let pool;
     try {
-      pool = await sql.connect(cardConfig);
+      pool = await new sql.ConnectionPool(cardConfig).connect();
       const tableRowRes = await pool.request().query(
         `SELECT TOP 1 TABLE_SCHEMA AS schema_name, TABLE_NAME AS table_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' AND TABLE_NAME IN ('CardDB') ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA`
       );
@@ -2083,7 +2089,7 @@ router.post('/gym-booking-create', async (req, res) => {
     };
     let pool;
     try {
-      pool = await sql.connect(config);
+      pool = await new sql.ConnectionPool(config).connect();
       const req = pool.request();
       req.input('id', sql.VarChar(100), String(staffNo));
       const r = await req.query(
@@ -2295,6 +2301,10 @@ router.post('/gym-booking-create', async (req, res) => {
       const base = String(raw || '').trim();
       if (!base) return [];
       const set = new Set([base]);
+      const compact = base.replace(/\s+/g, '');
+      if (compact && compact !== base) set.add(compact);
+      const alnum = compact.replace(/[^A-Z0-9]/gi, '');
+      if (alnum && alnum !== compact) set.add(alnum);
       const digits = base.replace(/[^0-9]/g, '');
       if (digits && digits !== base) set.add(digits);
       return Array.from(set);
@@ -2302,7 +2312,7 @@ router.post('/gym-booking-create', async (req, res) => {
     let empRow = null;
     let department = '';
     if (employeeTypeGuess === 'MTI') {
-      const masterPool = await sql.connect(masterConfig);
+      const masterPool = await new sql.ConnectionPool(masterConfig).connect();
       const coreSchema = await pickSchemaForTable(masterPool, 'employee_core');
       if (coreSchema) {
         const columnsResult = await masterPool.request().query(
@@ -2329,11 +2339,20 @@ router.post('/gym-booking-create', async (req, res) => {
           const empReq = masterPool.request();
           const ids = buildIdCandidates(employeeId);
           const params = ids.map((_, idx) => `@id${idx}`);
+          const normalizedIds = ids.map((id) => String(id || '').trim().toUpperCase()).filter(Boolean);
+          const normalizedParams = normalizedIds.map((_, idx) => `@nid${idx}`);
           ids.forEach((id, idx) => {
             empReq.input(`id${idx}`, sql.VarChar(100), id);
           });
-          const byId = params.length > 0 ? `[${employeeIdCol}] IN (${params.join(', ')})` : `[${employeeIdCol}] = @id0`;
-          const byStaff = staffNoCol ? ` OR [${staffNoCol}] IN (${params.join(', ')})` : '';
+          normalizedIds.forEach((id, idx) => {
+            empReq.input(`nid${idx}`, sql.VarChar(100), id);
+          });
+          const byId = normalizedParams.length > 0
+            ? `UPPER(LTRIM(RTRIM(CAST([${employeeIdCol}] AS varchar(100))))) IN (${normalizedParams.join(', ')})`
+            : `UPPER(LTRIM(RTRIM(CAST([${employeeIdCol}] AS varchar(100))))) = @nid0`;
+          const byStaff = staffNoCol && normalizedParams.length > 0
+            ? ` OR UPPER(LTRIM(RTRIM(CAST([${staffNoCol}] AS varchar(100))))) IN (${normalizedParams.join(', ')})`
+            : '';
           const empResult = await empReq.query(
             `SELECT TOP 1 ${selectCols} FROM [${coreSchema}].[employee_core] WHERE ${byId}${byStaff}`
           );
@@ -2344,12 +2363,43 @@ router.post('/gym-booking-create', async (req, res) => {
       }
       if (!empRow) {
         await masterPool.close();
-        return res.status(200).json({ ok: false, error: 'Employee not found' });
+        // Fallback for MTI when employee_core misses/mismatches but CardDB has valid staff data.
+        const staffFallback = (await tryLoadCardDbStaff(employeeId)) || (await tryLoadCardDbStaffFromGym(employeeId));
+        if (staffFallback) {
+          empRow = {
+            employee_id: employeeId,
+            name: staffFallback.name || employeeId,
+            department: staffFallback.department || 'MTI',
+            card_no: staffFallback.card_no || null,
+            staff_no: staffFallback.staff_no || employeeId,
+            gender: staffFallback.gender || null,
+          };
+          department = empRow.department != null ? String(empRow.department).trim() : '';
+        } else {
+          // Last fallback for MTI registration when master/card sources are temporarily unavailable.
+          if (/^MTI[0-9]+$/i.test(employeeId)) {
+            empRow = {
+              employee_id: employeeId,
+              name: employeeId,
+              department: 'MTI',
+              card_no: null,
+              staff_no: employeeId,
+              gender: null,
+            };
+            department = 'MTI';
+          } else {
+            return res.status(200).json({ ok: false, error: 'Employee not found' });
+          }
+        }
       }
       department = empRow.department != null ? String(empRow.department).trim() : '';
-      const employmentSchema = await pickSchemaForTable(masterPool, 'employee_employment');
+      try {
+        if (masterPool?.connected) await masterPool.close();
+      } catch (_) {}
+      const masterPool2 = await new sql.ConnectionPool(masterConfig).connect();
+      const employmentSchema = await pickSchemaForTable(masterPool2, 'employee_employment');
       if (employmentSchema) {
-        const empColsResult = await masterPool.request().query(
+        const empColsResult = await masterPool2.request().query(
           `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'employee_employment' AND TABLE_SCHEMA = '${employmentSchema.replace(/'/g, "''")}'`
         );
         const empCols = (empColsResult?.recordset || []).map((r) => String(r.COLUMN_NAME));
@@ -2358,7 +2408,7 @@ router.post('/gym-booking-create', async (req, res) => {
         const endDateCol = pickColumn(empCols, ['end_date', 'EndDate', 'enddate', 'termination_date', 'TerminationDate']);
         const startDateCol = pickColumn(empCols, ['start_date', 'StartDate', 'startdate', 'effective_date', 'EffectiveDate']);
         if (empIdCol2 && deptCol2) {
-          const empReq2 = masterPool.request();
+          const empReq2 = masterPool2.request();
           empReq2.input('id', sql.VarChar(100), employeeId);
           const orderParts = [];
           if (endDateCol) orderParts.push(`CASE WHEN [${endDateCol}] IS NULL THEN 0 ELSE 1 END`);
@@ -2373,7 +2423,7 @@ router.post('/gym-booking-create', async (req, res) => {
           }
         }
       }
-      await masterPool.close();
+      await masterPool2.close();
     } else {
       const staff = (await tryLoadCardDbStaff(employeeId)) || (await tryLoadCardDbStaffFromGym(employeeId));
       if (staff) {
@@ -2401,7 +2451,7 @@ router.post('/gym-booking-create', async (req, res) => {
     const cardNo = (cardNoCardDbPrimary || cardNoCardDbFallback) ?? cardNoMaster;
     const gender = empRow.gender != null && String(empRow.gender).trim() ? String(empRow.gender).trim() : 'UNKNOWN';
 
-    const gymPool2 = await sql.connect(gymConfig);
+    const gymPool2 = await new sql.ConnectionPool(gymConfig).connect();
     // Ensure local employee directory and upsert minimal info
     await gymPool2.request().query(
       `IF OBJECT_ID('dbo.gym_employee','U') IS NULL BEGIN

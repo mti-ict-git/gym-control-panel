@@ -1204,7 +1204,12 @@ app.post('/gym-booking-create', async (req, res) => {
 
   const { employee_id, session_id, booking_date } = req.body || {};
   const employeeIdHeader = envTrim(req.headers['x-employee-id'] || req.headers['x-employee_id']);
-  const employeeId = String(employee_id || employeeIdHeader || '').trim();
+  const employeeId = String(employee_id || employeeIdHeader || '')
+    .replace(/\uFEFF/g, '')
+    .replace(/[^\x20-\x7E]/g, '')
+    .trim()
+    .replace(/\s+/g, '')
+    .toUpperCase();
   const sessionId = String(session_id || '').trim();
   const bookingDateStr = String(booking_date || '').trim();
 
@@ -1463,19 +1468,24 @@ app.post('/gym-booking-create', async (req, res) => {
       const base = String(raw || '').trim();
       if (!base) return [];
       const set = new Set([base]);
+      const compact = base.replace(/\s+/g, '');
+      if (compact && compact !== base) set.add(compact);
+      const alnum = compact.replace(/[^A-Z0-9]/gi, '');
+      if (alnum && alnum !== compact) set.add(alnum);
       const digits = base.replace(/[^0-9]/g, '');
       if (digits && digits !== base) set.add(digits);
       return Array.from(set);
     };
     const ids = buildIdCandidates(employeeId);
     const empReq = masterPool.request();
-    const params = ids.map((_, idx) => `@id${idx}`);
-    ids.forEach((id, idx) => {
+    const normalizedIds = ids.map((id) => String(id || '').trim().toUpperCase()).filter(Boolean);
+    const params = normalizedIds.map((_, idx) => `@id${idx}`);
+    normalizedIds.forEach((id, idx) => {
       empReq.input(`id${idx}`, sql.VarChar(100), id);
     });
     const whereById = params.length > 0
-      ? `[${employeeIdCol}] IN (${params.join(', ')})`
-      : `[${employeeIdCol}] = @id0`;
+      ? `UPPER(LTRIM(RTRIM(CAST([${employeeIdCol}] AS varchar(100))))) IN (${params.join(', ')})`
+      : `UPPER(LTRIM(RTRIM(CAST([${employeeIdCol}] AS varchar(100))))) = @id0`;
     const empResult = await empReq.query(`
       SELECT TOP 1
         ${selectCols}
