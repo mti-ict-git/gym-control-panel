@@ -420,14 +420,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         FROM dbo.gym_booking gb
         LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
         WHERE CONVERT(varchar(10), gb.BookingDate, 23) IN (@todayStr, @yesterdayStr)
-          AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
-          AND (
-            (
-              UPPER(LTRIM(RTRIM(gb.Department))) IN ('MMS','VISITOR')
-              AND UPPER(LTRIM(RTRIM(gb.ApprovalStatus))) = 'APPROVED'
-            )
-            OR UPPER(LTRIM(RTRIM(gb.Department))) NOT IN ('MMS','VISITOR')
-          )`
+          AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')`
       );
 
       const rows = Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset : [];
