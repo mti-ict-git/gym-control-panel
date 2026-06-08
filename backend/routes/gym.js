@@ -1592,34 +1592,43 @@ router.post('/gym-controller-access', async (req, res) => {
     const uploadOk = uploadResults.length > 0 && uploadResults.every((x) => x.ok);
     const primaryUpload = uploadResults[0] || null;
 
+    // Only persist the override row when the controller upload ACTUALLY succeeded.
+    // Previously this write ran regardless of uploadOk, so the DB claimed "allow"
+    // even when the Vault upload failed — masking broken grants and making the
+    // worker/UI think access was set when the controller never received it.
+    // See memory: gym-tap-wrong-timezone.
     let dbOk = false;
-    const pool2 = await new sql.ConnectionPool(config).connect();
-    try {
-      await pool2.request().query(`IF OBJECT_ID('dbo.gym_controller_access_override','U') IS NULL BEGIN
-        CREATE TABLE dbo.gym_controller_access_override (
-          EmployeeID VARCHAR(20) NOT NULL,
-          UnitNo VARCHAR(20) NOT NULL,
-          CustomAccessTZ VARCHAR(2) NOT NULL,
-          Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL',
-          UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
-          CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
-        );
-      END`);
-      await pool2.request().query(`IF COL_LENGTH('dbo.gym_controller_access_override','Source') IS NULL BEGIN
-        ALTER TABLE dbo.gym_controller_access_override ADD Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL';
-      END`);
-      const req3 = pool2.request();
-      req3.input('emp', sql.VarChar(20), employeeId);
-      req3.input('unit', sql.VarChar(20), unitNo);
-      req3.input('tz', sql.VarChar(2), customAccessTz);
-      req3.input('source', sql.VarChar(20), source);
-      await req3.query(`IF EXISTS (SELECT 1 FROM dbo.gym_controller_access_override WHERE EmployeeID=@emp AND UnitNo=@unit)
-        UPDATE dbo.gym_controller_access_override SET CustomAccessTZ=@tz, UpdatedAt=GETDATE(), Source=@source WHERE EmployeeID=@emp AND UnitNo=@unit
-      ELSE
-        INSERT INTO dbo.gym_controller_access_override (EmployeeID, UnitNo, CustomAccessTZ, Source) VALUES (@emp, @unit, @tz, @source)`);
-      dbOk = true;
-    } finally {
-      await pool2.close();
+    if (uploadOk) {
+      const pool2 = await new sql.ConnectionPool(config).connect();
+      try {
+        await pool2.request().query(`IF OBJECT_ID('dbo.gym_controller_access_override','U') IS NULL BEGIN
+          CREATE TABLE dbo.gym_controller_access_override (
+            EmployeeID VARCHAR(20) NOT NULL,
+            UnitNo VARCHAR(20) NOT NULL,
+            CustomAccessTZ VARCHAR(2) NOT NULL,
+            Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL',
+            UpdatedAt DATETIME NOT NULL CONSTRAINT DF_gym_controller_access_override_UpdatedAt DEFAULT GETDATE(),
+            CONSTRAINT PK_gym_controller_access_override PRIMARY KEY (EmployeeID, UnitNo)
+          );
+        END`);
+        await pool2.request().query(`IF COL_LENGTH('dbo.gym_controller_access_override','Source') IS NULL BEGIN
+          ALTER TABLE dbo.gym_controller_access_override ADD Source VARCHAR(20) NOT NULL CONSTRAINT DF_gym_controller_access_override_Source DEFAULT 'MANUAL';
+        END`);
+        const req3 = pool2.request();
+        req3.input('emp', sql.VarChar(20), employeeId);
+        req3.input('unit', sql.VarChar(20), unitNo);
+        req3.input('tz', sql.VarChar(2), customAccessTz);
+        req3.input('source', sql.VarChar(20), source);
+        await req3.query(`IF EXISTS (SELECT 1 FROM dbo.gym_controller_access_override WHERE EmployeeID=@emp AND UnitNo=@unit)
+          UPDATE dbo.gym_controller_access_override SET CustomAccessTZ=@tz, UpdatedAt=GETDATE(), Source=@source WHERE EmployeeID=@emp AND UnitNo=@unit
+        ELSE
+          INSERT INTO dbo.gym_controller_access_override (EmployeeID, UnitNo, CustomAccessTZ, Source) VALUES (@emp, @unit, @tz, @source)`);
+        dbOk = true;
+      } finally {
+        await pool2.close();
+      }
+    } else {
+      log('override_write_skipped_upload_failed', { unit_no: unitNo, tz: customAccessTz });
     }
 
     const finalOk = uploadOk;

@@ -658,9 +658,10 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
       msg.includes('transport-level error')
     );
   };
-  const runProactiveScanQuery = async (pool, entryPattern) => {
+  const runProactiveScanQuery = async (pool, entryPattern, gymUnit) => {
     const scanReq = pool.request();
     scanReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
+    scanReq.input('gymUnit', sql.VarChar(20), String(gymUnit || '0031'));
     await scanReq.query(`
       BEGIN TRY
         DECLARE @today DATE = CONVERT(date, DATEADD(hour, 8, GETUTCDATE()));
@@ -705,16 +706,38 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
             AND CONVERT(date, t.TxnTime) >= @windowStart
           GROUP BY t.EmployeeID, CONVERT(date, t.TxnTime)
         ),
+        -- "Showed up" detection: ANY tap at the gym door that day (including a
+        -- rejected one such as "Wrong Time Zone") proves the person physically
+        -- attended. Without this, users whose access grant never landed on the
+        -- controller are wrongly counted as no-shows and auto-banned. Rejected
+        -- taps are NOT synced into gym_live_taps (GYM_SYNC_ONLY_VALID=1), so we
+        -- read the raw controller log and map CardNo -> StaffNo via CardDB.
+        -- (DataDBEnt is on the same SQL instance as the gym DB.)
+        DayAttempt AS (
+          SELECT
+            cd.StaffNo AS EmployeeID,
+            CONVERT(date, tx.TrDateTime) AS TapDate
+          FROM DataDBEnt.dbo.tblTransaction tx
+          INNER JOIN DataDBEnt.dbo.CardDB cd ON cd.CardNo = tx.CardNo
+          INNER JOIN Candidate c ON c.EmployeeID = cd.StaffNo
+          WHERE tx.UnitNo = @gymUnit
+            AND CONVERT(date, tx.TrDateTime) < @today
+            AND CONVERT(date, tx.TrDateTime) >= @windowStart
+          GROUP BY cd.StaffNo, CONVERT(date, tx.TrDateTime)
+        ),
         Annotated AS (
           SELECT
             br.EmployeeID,
             br.rn,
-            CASE WHEN ISNULL(de.HasEntry, 0) = 1 THEN 1 ELSE 0 END AS HasEntry,
-            MIN(CASE WHEN ISNULL(de.HasEntry, 0) = 1 THEN br.rn END) OVER (PARTITION BY br.EmployeeID) AS firstEntryRn
+            CASE WHEN ISNULL(de.HasEntry, 0) = 1 OR da.TapDate IS NOT NULL THEN 1 ELSE 0 END AS HasEntry,
+            MIN(CASE WHEN ISNULL(de.HasEntry, 0) = 1 OR da.TapDate IS NOT NULL THEN br.rn END) OVER (PARTITION BY br.EmployeeID) AS firstEntryRn
           FROM BookingRows br
           LEFT JOIN DayEntry de
             ON de.EmployeeID = br.EmployeeID
            AND de.TapDate = br.BookingDate
+          LEFT JOIN DayAttempt da
+            ON da.EmployeeID = br.EmployeeID
+           AND da.TapDate = br.BookingDate
         ),
         NoShowCount AS (
           SELECT
@@ -775,6 +798,9 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
       };
       if (cfg.server && cfg.database) {
         const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
+        const gymUnit = envTrim(process.env.GYM_CONTROLLER_UNIT_NO)
+          || (envTrim(process.env.GYM_UNIT_FILTER) || '').split(',')[0]?.trim()
+          || '0031';
         const maxAttempts = 3;
         let attempt = 0;
         let done = false;
@@ -783,7 +809,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
           let pool = null;
           try {
             pool = await new sql.ConnectionPool(cfg).connect();
-            await runProactiveScanQuery(pool, entryPattern);
+            await runProactiveScanQuery(pool, entryPattern, gymUnit);
             console.log(`[gym-worker] Proactive Daily Ban Scanner cycle completed (attempt ${attempt}).`);
             done = true;
           } catch (e) {
