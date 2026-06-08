@@ -15,6 +15,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 const days = Number(process.argv.find(a => /^\d+$/.test(a)) || 30);
 const apply = process.argv.includes('--apply');
+const allCards = process.argv.includes('--all-cards'); // blank ALL invalid-length PINs, not just gym bookers
 const gymUnit = process.env.GYM_CONTROLLER_UNIT_NO || '0031';
 const gym = { server: process.env.DB_SERVER, port: Number(process.env.DB_PORT||1433), database: process.env.DB_DATABASE, user: process.env.DB_USER, password: process.env.DB_PASSWORD, options:{encrypt:process.env.DB_ENCRYPT==='true',trustServerCertificate:true} };
 const T = `CONVERT(date, DATEADD(hour,8,GETUTCDATE()))`;
@@ -24,6 +25,22 @@ const VICTIMS = `b.Reason='NO_SHOW_3X' AND b.BannedUntil >= ${T} AND EXISTS (
   WHERE c.StaffNo=b.EmployeeID AND tx.UnitNo='${gymUnit}' AND tx.TrCode='CJ' AND tx.TrDateTime >= DATEADD(day,-30,${T}))`;
 const run = async () => {
   const p = await new sql.ConnectionPool(gym).connect();
+
+  if (allCards) {
+    // Full data cleanup: blank EVERY invalid-length PIN (len % 4 != 0). Safe because
+    // valid Base-64 length is required by Vault and all such PINs are junk defaults.
+    console.log(`MODE: ${apply ? 'APPLY (writing)' : 'DRY-RUN (read-only)'} | scope: ALL cards with invalid-length PIN\n`);
+    const before = await p.request().query(`SELECT COUNT(*) AS n FROM DataDBEnt.dbo.CardDB WHERE (del_state=0 OR del_state IS NULL) AND (LEN(PinCardNo)%4)<>0`);
+    console.log(`Kartu PIN invalid: ${before.recordset[0].n}`);
+    if (apply) {
+      const f = await p.request().query(`UPDATE c SET c.PinCardNo='' FROM DataDBEnt.dbo.CardDB c WHERE (del_state=0 OR del_state IS NULL) AND (LEN(c.PinCardNo)%4)<>0`);
+      const after = await p.request().query(`SELECT COUNT(*) AS n FROM DataDBEnt.dbo.CardDB WHERE (del_state=0 OR del_state IS NULL) AND (LEN(PinCardNo)%4)<>0`);
+      console.log(`[FIX] PIN dikosongkan: ${f.rowsAffected[0]} kartu. Sisa invalid sekarang: ${after.recordset[0].n}`);
+    } else console.log('(DRY-RUN — tambah --apply untuk eksekusi.)');
+    await p.close();
+    return;
+  }
+
   console.log(`MODE: ${apply ? 'APPLY (writing)' : 'DRY-RUN (read-only)'} | scope: gym bookers last ${days} days | gym unit ${gymUnit}\n`);
 
   const aff = await p.request().input('d', sql.Int, days).query(`
