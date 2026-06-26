@@ -703,8 +703,8 @@ export default function VaultPage() {
                   </div>
 
                   <div className="hidden md:block">
-                      <div className="-mx-6 overflow-hidden rounded-xl border bg-card shadow-sm">
-                      <Table>
+                      <div className="overflow-x-auto rounded-xl border bg-card shadow-sm">
+                      <Table className="[&_tbody_td]:py-5">
                         <TableHeader>
                           <TableRow className="bg-muted/40">
                             <TableHead className="w-12 text-right text-xs uppercase text-muted-foreground">No</TableHead>
