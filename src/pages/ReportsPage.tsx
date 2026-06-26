@@ -55,11 +55,31 @@ interface ReportQueryResult {
   time_out_total?: number;
   male_total?: number;
   female_total?: number;
+  departments?: string[];
+  sessions?: string[];
 }
 
 function formatBookingId(n: number | null | undefined): string {
   if (typeof n !== 'number' || !Number.isFinite(n)) return '-';
   return `GYMBOOK${String(n)}`;
+}
+
+// Parse a 'yyyy-MM-dd' string as a LOCAL calendar date. `new Date('2026-06-26')`
+// parses as UTC midnight, which shifts the day in non-UTC timezones; this keeps
+// the date the user picked intact for startOfDay/endOfDay.
+function parseLocalDate(value: string): Date | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim());
+  if (!m) return undefined;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+// Escape a value for CSV: quote when it contains a comma/quote/newline (doubling
+// internal quotes) and neutralise spreadsheet formula injection (=, +, -, @).
+function csvEscape(value: unknown): string {
+  let s = value == null ? '' : String(value);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  if (/[",\n\r]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
+  return s;
 }
 
 function formatDateOnly(value: string | null | undefined): string {
@@ -248,9 +268,13 @@ export default function ReportsPage() {
 
   const { start, end } = getDateRange(
     dateRange,
-    customStartDate ? new Date(customStartDate) : undefined,
-    customEndDate ? new Date(customEndDate) : undefined
+    parseLocalDate(customStartDate),
+    parseLocalDate(customEndDate)
   );
+  // Stable string keys for effect deps — `start`/`end` are fresh Date objects on
+  // every render, so depending on them directly re-fires effects each render.
+  const fromKey = format(start, 'yyyy-MM-dd');
+  const toKey = format(end, 'yyyy-MM-dd');
 
   const fetchReportsPage = async (base: string, pageParam: number, limitParam: number) => {
     const fromStr = format(start, 'yyyy-MM-dd');
@@ -260,8 +284,11 @@ export default function ReportsPage() {
     const genderQ = filterGender === 'Male' ? 'M' : (filterGender === 'Female' ? 'F' : '');
     const sessionQ = filterSession !== 'all' ? filterSession : '';
     const resp = await fetch(`${base}/gym-reports?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}&page=${encodeURIComponent(String(pageParam))}&limit=${encodeURIComponent(String(limitParam))}&sort_by=${encodeURIComponent(String(sortBy || ''))}&sort_dir=${encodeURIComponent(String(sortDir))}&employee_id=${encodeURIComponent(empQ)}&department=${encodeURIComponent(deptQ)}&gender=${encodeURIComponent(genderQ)}&session=${encodeURIComponent(sessionQ)}`);
+    // Throw (don't return empty) on failure so an actual error is distinguishable
+    // from a genuinely empty result and the base fallback / error UI can kick in.
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const json = await resp.json();
-    if (!json || !json.ok) return { rows: [], total: 0 } as ReportQueryResult;
+    if (!json || !json.ok) throw new Error(String(json?.error || 'Request failed'));
     const rows = Array.isArray(json.reports) ? json.reports : [];
     const mapped = rows.map((r: unknown) => {
       const obj = r as {
@@ -310,20 +337,22 @@ export default function ReportsPage() {
       time_out_total: Number(json.time_out_total || 0),
       male_total: Number(json.male_total || 0),
       female_total: Number(json.female_total || 0),
+      departments: Array.isArray(json.departments) ? json.departments.map((d: unknown) => String(d)) : [],
+      sessions: Array.isArray(json.sessions) ? json.sessions.map((s: unknown) => String(s)) : [],
     } as ReportQueryResult;
   };
 
   const loadReportsPage = async (pageParam: number, limitParam: number) => {
+    // Prefer the '/api' base; on failure fall back to the bare path. If BOTH
+    // throw, let it propagate so react-query surfaces the error (vs. silent empty).
     try {
-      const data = await fetchReportsPage('/api', pageParam, limitParam);
-      if (data && Array.isArray(data.rows)) return data;
-      return await fetchReportsPage('', pageParam, limitParam);
+      return await fetchReportsPage('/api', pageParam, limitParam);
     } catch (_) {
       return await fetchReportsPage('', pageParam, limitParam);
     }
   };
 
-  const { data: bookingDataRes = { rows: [], total: 0 } as ReportQueryResult, isLoading: bookingsLoading } = useQuery<ReportQueryResult>({
+  const { data: bookingDataRes = { rows: [], total: 0 } as ReportQueryResult, isLoading: bookingsLoading, isError: bookingsError, error: bookingsErrorObj } = useQuery<ReportQueryResult>({
     queryKey: ['gym-reports', dateRange, customStartDate, customEndDate, page, pageSize, sortBy, sortDir, filterEmpId, filterDept, filterGender, filterSession],
     queryFn: async () => loadReportsPage(page, pageSize),
     staleTime: 60000,
@@ -339,21 +368,25 @@ export default function ReportsPage() {
   const bookingData = bookingDataRes.rows;
   const totalCount = bookingDataRes.total;
 
+  // Reset to page 1 whenever anything that changes the result set changes —
+  // including the employee/department/gender/session filters, so a filter that
+  // shrinks the result set can't strand the user on a now-empty page.
   useEffect(() => {
     setPage(1);
-  }, [dateRange, customStartDate, customEndDate, sortBy, sortDir]);
+  }, [dateRange, customStartDate, customEndDate, sortBy, sortDir, filterEmpId, filterDept, filterGender, filterSession]);
 
   useEffect(() => {
     if (dateRange === 'all') return;
     const rangeDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
     if (!Number.isFinite(rangeDays) || rangeDays > 45) return;
-    const fromStr = format(start, 'yyyy-MM-dd');
-    const toStr = format(end, 'yyyy-MM-dd');
-    const path = `/gym-reports-backfill?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`;
+    const path = `/gym-reports-backfill?from=${encodeURIComponent(fromKey)}&to=${encodeURIComponent(toKey)}`;
     fetch(`${API_BASES[0]}${path}`, { method: 'POST' })
       .catch(() => fetch(`${API_BASES[1]}${path}`, { method: 'POST' }))
       .catch(() => {});
-  }, [dateRange, customStartDate, customEndDate, start, end]);
+    // Depend on the stable yyyy-MM-dd keys, not the Date objects (which are new
+    // each render and would otherwise re-fire this POST on every render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange, fromKey, toKey]);
 
   const toggleSort = (key: 'department' | 'employee_id' | 'name' | 'gender' | 'session' | 'booking_id') => {
     setPage(1);
@@ -379,23 +412,22 @@ export default function ReportsPage() {
     return format(d, 'HH:mm');
   };
 
-  const departments = Array.from(
-    new Set((bookingData || []).map((r) => r.department).filter((d): d is string => Boolean(d && d.trim())))
-  ).sort((a, b) => a.localeCompare(b));
+  // Filter options come from the backend (distinct over the whole date range, not
+  // just the current page). Fall back to page-derived values only if absent.
+  const departments = (bookingDataRes.departments && bookingDataRes.departments.length > 0)
+    ? [...bookingDataRes.departments].sort((a, b) => a.localeCompare(b))
+    : Array.from(
+        new Set((bookingData || []).map((r) => r.department).filter((d): d is string => Boolean(d && d.trim())))
+      ).sort((a, b) => a.localeCompare(b));
 
-  const normalizeSession = (s: string | null): string => {
-    const v = String(s || '').trim().toLowerCase();
-    if (!v) return '';
-    if (v === 'morning') return 'Morning';
-    if (v === 'afternoon') return 'Afternoon';
-    if (v === 'night - 1' || v === 'night-1' || v === 'night1') return 'Night - 1';
-    if (v === 'night - 2' || v === 'night-2' || v === 'night2') return 'Night - 2';
-    return s || '';
-  };
-
-  const sessions = Array.from(
-    new Set((bookingData || []).map((r) => normalizeSession(r.session_name)).filter((n): n is string => Boolean(n && n.trim())))
-  ).sort((a, b) => a.localeCompare(b));
+  // Sessions are the RAW SessionName values as stored, so the value sent back
+  // matches the backend's exact `SessionName = @session` filter (no normalised
+  // label vs. stored-value mismatch).
+  const sessions = (bookingDataRes.sessions && bookingDataRes.sessions.length > 0)
+    ? [...bookingDataRes.sessions].sort((a, b) => a.localeCompare(b))
+    : Array.from(
+        new Set((bookingData || []).map((r) => String(r.session_name || '').trim()).filter((n): n is string => Boolean(n)))
+      ).sort((a, b) => a.localeCompare(b));
 
   const filteredData = bookingData;
 
@@ -415,13 +447,13 @@ export default function ReportsPage() {
     if (dateRange === 'all') return;
     const rangeDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
     if (!Number.isFinite(rangeDays) || rangeDays > 45) return;
-    const fromStr = format(start, 'yyyy-MM-dd');
-    const toStr = format(end, 'yyyy-MM-dd');
-    const path = `/gym-live-sync?from=${encodeURIComponent(fromStr)}&to=${encodeURIComponent(toStr)}`;
+    const path = `/gym-live-sync?from=${encodeURIComponent(fromKey)}&to=${encodeURIComponent(toKey)}`;
     fetch(`${API_BASES[0]}${path}`)
       .catch(() => fetch(`${API_BASES[1]}${path}`))
       .catch(() => {});
-  }, [dateRange, customStartDate, customEndDate, start, end]);
+    // Stable yyyy-MM-dd keys (see backfill effect) — avoid re-firing every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateRange, fromKey, toKey]);
 
   const { data: liveTapMap = new Map<string, { time_in: string | null; time_out: string | null; session_name: string | null; time_start: string | null; time_end: string | null }>() } = useQuery({
     queryKey: ['gym-live-status-range', format(pageDateRange.from, 'yyyy-MM-dd'), format(pageDateRange.to, 'yyyy-MM-dd')],
@@ -481,16 +513,16 @@ export default function ReportsPage() {
 
   const handleExportCSV = async () => {
     const exportLimit = 200;
+    const maxPages = 1000; // hard safety cap (~200k rows) against a runaway loop
     const fetchAllRows = async () => {
       let pageParam = 1;
-      let total = 0;
       const all: BookingRecord[] = [];
-      while (true) {
+      while (pageParam <= maxPages) {
         const res = await loadReportsPage(pageParam, exportLimit);
-        total = Number(res.total || 0);
+        const total = Number(res.total || 0);
         if (res.rows.length === 0) break;
         all.push(...res.rows);
-        if (all.length >= total) break;
+        if (total > 0 && all.length >= total) break;
         pageParam += 1;
       }
       return all;
@@ -541,8 +573,10 @@ export default function ReportsPage() {
         })(),
     ]);
 
-    const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const csvContent = [headers, ...rows].map((row) => row.map(csvEscape).join(',')).join('\r\n');
+    // Prepend a UTF-8 BOM so Excel reads accented names / unicode correctly.
+    const BOM = String.fromCharCode(0xfeff);
+    const blob = new Blob([BOM, csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -722,6 +756,14 @@ export default function ReportsPage() {
                 {[1, 2, 3, 4, 5].map((i) => (
                   <Skeleton key={i} className="h-12 w-full" />
                 ))}
+              </div>
+            ) : bookingsError ? (
+              <div className="text-center py-12 text-red-600">
+                <FileText className="h-12 w-12 mx-auto mb-4 opacity-60" />
+                <p className="font-medium">Failed to load reports.</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {String((bookingsErrorObj as Error | undefined)?.message || 'Please try again or check the server.')}
+                </p>
               </div>
             ) : bookingData.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">

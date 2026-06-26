@@ -170,21 +170,21 @@ router.post('/gym-reports-add-name', async (req, res) => {
   };
 
   try {
+    // Shared cached pool from getGymDbPool() — do NOT close it here; closing
+    // would break every other request that reuses the same pool.
     const pool = await getGymDbPool(config);
     const existsRes = await pool.request().query("SELECT OBJECT_ID('dbo.gym_reports', 'U') AS id;");
     const exists = Boolean(existsRes?.recordset?.[0]?.id);
     if (!exists) {
-      await pool.close();
       return res.status(200).json({ ok: false, error: 'Missing table dbo.gym_reports' });
     }
     await pool.request().query(
       "IF COL_LENGTH('dbo.gym_reports', 'Name') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD Name VARCHAR(100) NULL END"
     );
-    await pool.close();
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);
-    return res.status(200).json({ ok: false, error: message });
+    return res.status(500).json({ ok: false, error: message });
   }
 });
 
@@ -217,14 +217,7 @@ router.post('/gym-reports-init', async (req, res) => {
   };
 
   try {
-    const keyParts = [from, to, qRaw, statusRaw, approvalRaw, sortKeyRaw, sortDirRaw, usePaging ? page : 'np', usePaging ? limit : 'nl'];
-    const cacheKey = keyParts.map((x) => String(x)).join('|');
-    const now = Date.now();
-    const cached = gymBookingsCache.get(cacheKey);
-    if (cached && now - cached.atMs < 3000) {
-      return res.json(cached.payload);
-    }
-    const pool = await sql.connect(config);
+    const pool = await new sql.ConnectionPool(config).connect();
     const existsRes = await pool.request().query("SELECT OBJECT_ID('dbo.gym_reports', 'U') AS id;");
     const exists = Boolean(existsRes?.recordset?.[0]?.id);
     if (!exists) {
@@ -241,6 +234,8 @@ router.post('/gym-reports-init', async (req, res) => {
           BookingDate DATE NULL,
           TimeStart VARCHAR(5) NULL,
           TimeEnd VARCHAR(5) NULL,
+          TimeIn DATETIME NULL,
+          TimeOut DATETIME NULL,
           CreatedAt DATETIME NOT NULL CONSTRAINT DF_gym_reports_CreatedAt DEFAULT GETDATE()
         );
         CREATE INDEX IX_gym_reports_BookingDate ON dbo.gym_reports(BookingDate);
@@ -264,6 +259,12 @@ router.post('/gym-reports-init', async (req, res) => {
       );
       await pool.request().query(
         "IF COL_LENGTH('dbo.gym_reports', 'TimeEnd') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD TimeEnd VARCHAR(5) NULL END"
+      );
+      await pool.request().query(
+        "IF COL_LENGTH('dbo.gym_reports', 'TimeIn') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD TimeIn DATETIME NULL END"
+      );
+      await pool.request().query(
+        "IF COL_LENGTH('dbo.gym_reports', 'TimeOut') IS NULL BEGIN ALTER TABLE dbo.gym_reports ADD TimeOut DATETIME NULL END"
       );
       await pool.request().query(
         "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_reports_Department' AND object_id = OBJECT_ID('dbo.gym_reports')) BEGIN CREATE INDEX IX_gym_reports_Department ON dbo.gym_reports(Department) END"
@@ -300,7 +301,7 @@ router.post('/gym-reports-init', async (req, res) => {
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);
-    return res.status(200).json({ ok: false, error: message });
+    return res.status(500).json({ ok: false, error: message });
   }
 });
 
@@ -5357,8 +5358,7 @@ router.post('/gym-reports-sync', async (req, res) => {
   const selectName = masterDbSafe ? 'COALESCE(ec.name, gb.EmployeeName) AS employee_name,' : 'gb.EmployeeName AS employee_name,';
   const selectDept = 'gb.Department AS department,';
   const joinMaster = masterDbSafe
-    ? `LEFT JOIN [${masterDbSafe}].dbo.employee_core ec ON gb.EmployeeID = ec.employee_id
-       LEFT JOIN [${masterDbSafe}].dbo.employee_employment ee ON gb.EmployeeID = ee.employee_id AND ee.status = 'ACTIVE'`
+    ? `LEFT JOIN [${masterDbSafe}].dbo.employee_core ec ON gb.EmployeeID = ec.employee_id`
     : '';
 
   const config = {
@@ -5440,11 +5440,15 @@ router.post('/gym-reports-sync', async (req, res) => {
       const bookingDateCol = colNames.has('BookingDate') ? 'BookingDate' : (colNames.has('ReportDate') ? 'ReportDate' : 'BookingDate');
       const hasTimeStart = colNames.has('TimeStart');
       const hasTimeEnd = colNames.has('TimeEnd');
+      const hasTimeIn = colNames.has('TimeIn');
+      const hasTimeOut = colNames.has('TimeOut');
 
       const rows = Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset : [];
       let inserted = 0;
       let updated = 0;
+      let failed = 0;
       for (const r of rows) {
+       try {
         const bookingId = Number(r?.booking_id || 0) || null;
         const employeeId = r?.employee_id != null ? String(r.employee_id).trim() : '';
         const bookingDate = r?.booking_date instanceof Date ? r.booking_date : (r?.booking_date ? new Date(String(r.booking_date)) : null);
@@ -5482,35 +5486,67 @@ router.post('/gym-reports-sync', async (req, res) => {
         }
         if (affected) {
           updated += 1;
-          const whereExtra2 = `AND ISNULL(SessionName,'') = ISNULL(@session_name,'')` + (hasTimeStart ? ` AND ISNULL(TimeStart,'') = ISNULL(@time_start,'')` : '');
-          const upTimes = await reqU.query(
-            `UPDATE dbo.gym_reports SET TimeIn = COALESCE(@time_in, TimeIn), TimeOut = COALESCE(@time_out, TimeOut) WHERE EmployeeID=@employee_id AND ${bookingDateCol}=@booking_date ${whereExtra2}`
-          );
-          void upTimes;
+          const timeSets = [];
+          if (hasTimeIn) timeSets.push('TimeIn = COALESCE(@time_in, TimeIn)');
+          if (hasTimeOut) timeSets.push('TimeOut = COALESCE(@time_out, TimeOut)');
+          if (timeSets.length > 0) {
+            const whereExtra2 = `AND ISNULL(SessionName,'') = ISNULL(@session_name,'')` + (hasTimeStart ? ` AND ISNULL(TimeStart,'') = ISNULL(@time_start,'')` : '');
+            const upTimes = await reqU.query(
+              `UPDATE dbo.gym_reports SET ${timeSets.join(', ')} WHERE EmployeeID=@employee_id AND ${bookingDateCol}=@booking_date ${whereExtra2}`
+            );
+            void upTimes;
+          }
           continue;
         }
 
         const insertCols = ['BookingID','EmployeeID','CardNo','Name','Department','Gender','SessionName', bookingDateCol];
         if (hasTimeStart) insertCols.push('TimeStart');
         if (hasTimeEnd) insertCols.push('TimeEnd');
-        insertCols.push('TimeIn','TimeOut');
+        if (hasTimeIn) insertCols.push('TimeIn');
+        if (hasTimeOut) insertCols.push('TimeOut');
         const insertVals = ['@booking_id','@employee_id','@card_no','@name','@department','@gender','@session_name','@booking_date'];
         if (hasTimeStart) insertVals.push('@time_start');
         if (hasTimeEnd) insertVals.push('@time_end');
-        insertVals.push('@time_in','@time_out');
-        const ins = await reqU.query(
-          `INSERT INTO dbo.gym_reports (${insertCols.join(', ')}) VALUES (${insertVals.join(', ')})`
-        );
-        inserted += Array.isArray(ins?.rowsAffected) ? Number(ins.rowsAffected[0] || 0) : 0;
+        if (hasTimeIn) insertVals.push('@time_in');
+        if (hasTimeOut) insertVals.push('@time_out');
+        try {
+          const ins = await reqU.query(
+            `INSERT INTO dbo.gym_reports (${insertCols.join(', ')}) VALUES (${insertVals.join(', ')})`
+          );
+          inserted += Array.isArray(ins?.rowsAffected) ? Number(ins.rowsAffected[0] || 0) : 0;
+        } catch (insErr) {
+          // Lost the INSERT race to a concurrent sync (unique index on BookingID or
+          // Emp+Date+Session+Start). Recover by updating the row that now exists.
+          const num = insErr?.number || insErr?.originalError?.info?.number;
+          if (num === 2601 || num === 2627) {
+            const recoverWhere = bookingId && Number.isFinite(bookingId)
+              ? 'BookingID=@booking_id'
+              : `EmployeeID=@employee_id AND ${bookingDateCol}=@booking_date AND ISNULL(SessionName,'') = ISNULL(@session_name,'')` + (hasTimeStart ? ` AND ISNULL(TimeStart,'') = ISNULL(@time_start,'')` : '');
+            const timeSets = [];
+            if (hasTimeIn) timeSets.push('TimeIn = COALESCE(@time_in, TimeIn)');
+            if (hasTimeOut) timeSets.push('TimeOut = COALESCE(@time_out, TimeOut)');
+            await reqU.query(
+              `UPDATE dbo.gym_reports SET CardNo=@card_no, Name=@name, Department=@department, Gender=@gender, SessionName=@session_name${hasTimeStart ? ', TimeStart=@time_start' : ''}${hasTimeEnd ? ', TimeEnd=@time_end' : ''}${timeSets.length ? ', ' + timeSets.join(', ') : ''} WHERE ${recoverWhere}`
+            );
+            updated += 1;
+          } else {
+            throw insErr;
+          }
+        }
+       } catch (rowErr) {
+        // One bad row must not abort the whole batch — count it and keep going.
+        failed += 1;
+        void rowErr;
+       }
       }
 
-      return res.json({ ok: true, inserted, updated });
+      return res.json({ ok: true, inserted, updated, failed });
     } finally {
       if (pool) await pool.close().catch(() => {});
     }
   } catch (error) {
     const message = error?.message || String(error);
-    return res.status(200).json({ ok: false, error: message });
+    return res.status(500).json({ ok: false, error: message });
   }
 });
 
@@ -5711,7 +5747,6 @@ router.post('/gym-booking-ban-reset', async (req, res) => {
   }
 });
 
-export default router;
 router.post('/gym-reports-backfill', async (req, res) => {
   try {
     const fromStr = String(req.query.from || req.body?.from || '').trim();
@@ -5735,7 +5770,7 @@ router.post('/gym-reports-backfill', async (req, res) => {
     return res.json({ ok: true, inserted: Number(json.inserted || 0), updated: Number(json.updated || 0) });
   } catch (error) {
     const message = error?.message || String(error);
-    return res.status(200).json({ ok: false, error: message });
+    return res.status(500).json({ ok: false, error: message });
   }
 });
 
@@ -5753,7 +5788,7 @@ router.get('/gym-reports-schema', async (req, res) => {
     return res.json({ ok: true, columns });
   } catch (error) {
     const message = error?.message || String(error);
-    return res.status(200).json({ ok: false, error: message, columns: [] });
+    return res.status(500).json({ ok: false, error: message, columns: [] });
   }
 });
 
@@ -5790,7 +5825,7 @@ router.get('/gym-reports', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
   try {
-    const cacheKey = [fromStr, toStr, page, limit, sortKeyRaw, sortDirRaw, empFilter, deptFilter, genderFilterRaw, sessionFilter].map((x) => String(x)).join('|');
+    const cacheKey = [fromStr, toStr, page, limit, sortKeyRaw, sortDirRaw, qRaw, empFilter, deptFilter, genderFilterRaw, sessionFilter].map((x) => String(x)).join('|');
     const cached = gymReportsCache.get(cacheKey);
     const nowMs = Date.now();
     if (cached && nowMs - cached.atMs < 2000) {
@@ -5803,6 +5838,8 @@ router.get('/gym-reports', async (req, res) => {
     const bookingDateCol = colNames.has('BookingDate') ? 'BookingDate' : (colNames.has('ReportDate') ? 'ReportDate' : 'ReportDate');
     const hasTimeStart = colNames.has('TimeStart');
     const hasTimeEnd = colNames.has('TimeEnd');
+    const hasTimeIn = colNames.has('TimeIn');
+    const hasTimeOut = colNames.has('TimeOut');
 
     const selectCols = [
       'ReportID',
@@ -5813,8 +5850,8 @@ router.get('/gym-reports', async (req, res) => {
       'Gender',
       'SessionName',
       bookingDateCol + ' AS BookingDate',
-      'TimeIn',
-      'TimeOut',
+      hasTimeIn ? 'TimeIn' : 'CAST(NULL AS DATETIME) AS TimeIn',
+      hasTimeOut ? 'TimeOut' : 'CAST(NULL AS DATETIME) AS TimeOut',
       'CreatedAt',
       'CardNo',
     ];
@@ -5866,8 +5903,8 @@ router.get('/gym-reports', async (req, res) => {
 
     const aggSql = `SELECT
         COUNT(1) AS total,
-        SUM(CASE WHEN [TimeIn] IS NOT NULL THEN 1 ELSE 0 END) AS time_in_total,
-        SUM(CASE WHEN [TimeOut] IS NOT NULL THEN 1 ELSE 0 END) AS time_out_total,
+        ${hasTimeIn ? 'SUM(CASE WHEN [TimeIn] IS NOT NULL THEN 1 ELSE 0 END)' : '0'} AS time_in_total,
+        ${hasTimeOut ? 'SUM(CASE WHEN [TimeOut] IS NOT NULL THEN 1 ELSE 0 END)' : '0'} AS time_out_total,
         SUM(CASE WHEN UPPER(CAST([Gender] AS varchar(50))) IN ('M','MALE') THEN 1 ELSE 0 END) AS male_total,
         SUM(CASE WHEN UPPER(CAST([Gender] AS varchar(50))) IN ('F','FEMALE') THEN 1 ELSE 0 END) AS female_total
       FROM dbo.gym_reports ${whereClause}`;
@@ -5888,6 +5925,19 @@ router.get('/gym-reports', async (req, res) => {
 
     const dataSql = `SELECT ${selectCols.join(', ')} FROM dbo.gym_reports ${whereClause} ORDER BY ${orderSql} OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
 
+    // Distinct filter options scoped to the date range ONLY (independent of the
+    // dept/session/gender/q/emp filters) so the dropdowns stay complete across pages.
+    const metaFrom = fromDate || new Date('1970-01-01');
+    const metaTo = toDate || new Date('2100-01-01');
+    const deptRes = await pool.request()
+      .input('mfrom', sql.Date, metaFrom)
+      .input('mto', sql.Date, metaTo)
+      .query(`SELECT DISTINCT Department FROM dbo.gym_reports WHERE [${bookingDateCol}] BETWEEN @mfrom AND @mto AND Department IS NOT NULL AND LTRIM(RTRIM(Department)) <> '' ORDER BY Department`);
+    const sessRes = await pool.request()
+      .input('mfrom', sql.Date, metaFrom)
+      .input('mto', sql.Date, metaTo)
+      .query(`SELECT DISTINCT SessionName FROM dbo.gym_reports WHERE [${bookingDateCol}] BETWEEN @mfrom AND @mto AND SessionName IS NOT NULL AND LTRIM(RTRIM(SessionName)) <> '' ORDER BY SessionName`);
+
     const aggRes = await reqCount.query(aggSql);
     const dataRes = await reqData.query(dataSql);
 
@@ -5899,11 +5949,17 @@ router.get('/gym-reports', async (req, res) => {
     const maleTotal = Number(aggRow?.male_total || 0);
     const femaleTotal = Number(aggRow?.female_total || 0);
     const reports = Array.isArray(dataRes?.recordset) ? dataRes.recordset : [];
-    const payload = { ok: true, total, time_in_total: timeInTotal, time_out_total: timeOutTotal, male_total: maleTotal, female_total: femaleTotal, reports };
+    const departments = (Array.isArray(deptRes?.recordset) ? deptRes.recordset : [])
+      .map((r) => String(r.Department || '').trim()).filter((v) => v.length > 0);
+    const sessions = (Array.isArray(sessRes?.recordset) ? sessRes.recordset : [])
+      .map((r) => String(r.SessionName || '').trim()).filter((v) => v.length > 0);
+    const payload = { ok: true, total, time_in_total: timeInTotal, time_out_total: timeOutTotal, male_total: maleTotal, female_total: femaleTotal, reports, departments, sessions };
     gymReportsCache.set(cacheKey, { atMs: nowMs, payload });
     return res.json(payload);
   } catch (error) {
     const message = error?.message || String(error);
-    return res.status(200).json({ ok: false, error: message, reports: [] });
+    return res.status(500).json({ ok: false, error: message, reports: [] });
   }
 });
+
+export default router;
