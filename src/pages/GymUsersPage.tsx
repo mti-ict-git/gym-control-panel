@@ -386,7 +386,7 @@ export default function GymUsersPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6">
               <div className="grid grid-cols-12 gap-4">
                 <div className="col-span-12 lg:col-span-4">
                   <div className="rounded-xl border bg-card shadow-sm p-4 space-y-4">

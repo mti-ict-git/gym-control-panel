@@ -625,7 +625,7 @@ export default function ReportsPage() {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="flex-1">
+        <CardContent className="flex-1 pt-6">
           <div className="space-y-6">
 
             <div className="rounded-xl border bg-card shadow-sm p-4 space-y-4">
@@ -750,7 +750,7 @@ export default function ReportsPage() {
               {filteredData.length} records on this page
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-6">
             {bookingsLoading ? (
               <div className="space-y-3">
                 {[1, 2, 3, 4, 5].map((i) => (

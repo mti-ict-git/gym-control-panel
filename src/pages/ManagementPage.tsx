@@ -366,7 +366,7 @@ export default function ManagementPage() {
                 </Dialog>
               </div>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-6 pt-6">
               <div className="grid gap-4 md:grid-cols-2">
                 <Card className="rounded-xl border bg-card shadow-sm">
                   <CardHeader className="flex flex-row items-center gap-3 pb-2">
@@ -404,7 +404,7 @@ export default function ManagementPage() {
                   <CardTitle>User Accounts</CardTitle>
                   <CardDescription>View and manage user roles</CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-6">
                   {isLoading ? (
                     <div className="flex items-center justify-center py-8">
                       <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />

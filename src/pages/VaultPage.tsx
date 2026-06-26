@@ -389,7 +389,7 @@ export default function VaultPage() {
               </div>
             </div>
           </CardHeader>
-          <CardContent className="flex-1 space-y-6">
+          <CardContent className="flex-1 space-y-6 pt-6">
             <div className="rounded-xl border bg-card p-4 shadow-sm">
               <div className="flex items-center gap-2">
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">

@@ -203,7 +203,7 @@ export default function DashboardPage() {
                     Analytics
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-6">
                   <Tabs defaultValue="heatmap" className="w-full">
                     <TabsList className="grid w-full grid-cols-4 rounded-lg bg-muted/40 p-1">
                       <TabsTrigger value="peak-hours">Peak Hours</TabsTrigger>

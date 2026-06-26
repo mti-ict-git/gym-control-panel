@@ -141,7 +141,7 @@ export default function ProfileSettings() {
             </CardTitle>
             <CardDescription>Manage your account information</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-6 pt-6">
             <Card className="rounded-xl border bg-card shadow-sm">
               <CardHeader className="border-b bg-muted/30">
                 <div className="flex items-center gap-2">
@@ -150,7 +150,7 @@ export default function ProfileSettings() {
                 </div>
                 <CardDescription>Your account information</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="space-y-6 pt-6">
                 <div className="flex items-center gap-4">
                   <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary text-primary-foreground text-2xl font-semibold">
                     {displayName.charAt(0).toUpperCase()}

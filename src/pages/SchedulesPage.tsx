@@ -318,7 +318,7 @@ export default function SchedulesPage() {
               </CardTitle>
               <CardDescription>Manage gym sessions and view calendar.</CardDescription>
             </CardHeader>
-            <CardContent className="flex-1">
+            <CardContent className="flex-1 pt-6">
               <Tabs defaultValue="sessions" className="w-full">
                 <TabsList className="bg-muted/40 p-1 rounded-lg">
                   <TabsTrigger value="sessions" className="flex items-center gap-2">
