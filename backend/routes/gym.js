@@ -5713,8 +5713,10 @@ router.get('/gym-booking-ban-list', async (req, res) => {
 
     const reqCount = pool.request();
     const reqData = pool.request();
+    const reqAgg = pool.request();
     reqCount.input('today', sql.Date, todayDate);
     reqData.input('today', sql.Date, todayDate);
+    reqAgg.input('today', sql.Date, todayDate);
     reqData.input('offset', sql.Int, offset);
     reqData.input('limit', sql.Int, limit);
 
@@ -5729,12 +5731,21 @@ router.get('/gym-booking-ban-list', async (req, res) => {
   }
     const whereSql = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
 
+    // Filtered count drives pagination ("Menampilkan X-Y dari N").
     const countRes = await reqCount.query(
-      `SELECT COUNT(1) AS total,
-        SUM(CASE WHEN b.BannedUntil >= @today THEN 1 ELSE 0 END) AS active_total
+      `SELECT COUNT(1) AS total
      FROM dbo.gym_booking_ban b
      ${joinBookingInfo}
        ${whereSql}`
+    );
+
+    // Summary cards are global (independent of search/scope) so "Ban Aktif"
+    // (currently banned) and "Total Riwayat" (all bans ever) never collapse to
+    // the same number the way a filter-scoped count did in the active view.
+    const aggRes = await reqAgg.query(
+      `SELECT COUNT(1) AS history_total,
+        SUM(CASE WHEN BannedUntil >= @today THEN 1 ELSE 0 END) AS active_total
+     FROM dbo.gym_booking_ban`
     );
 
     const dataRes = await reqData.query(
@@ -5771,8 +5782,9 @@ router.get('/gym-booking-ban-list', async (req, res) => {
       created_at: r.created_at ? new Date(r.created_at).toISOString() : null,
     })).filter((b) => b.employee_id);
     const total = Number(countRes?.recordset?.[0]?.total || 0);
-    const activeTotal = Number(countRes?.recordset?.[0]?.active_total || 0);
-    return res.json({ ok: true, total, active_total: activeTotal, page, limit, bans });
+    const activeTotal = Number(aggRes?.recordset?.[0]?.active_total || 0);
+    const historyTotal = Number(aggRes?.recordset?.[0]?.history_total || 0);
+    return res.json({ ok: true, total, active_total: activeTotal, history_total: historyTotal, page, limit, bans });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, bans: [] });

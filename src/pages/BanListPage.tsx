@@ -44,6 +44,7 @@ interface BanListResponse {
   bans?: BanRecord[];
   total?: number;
   active_total?: number;
+  history_total?: number;
   error?: string;
 }
 
@@ -149,6 +150,7 @@ export default function BanListPage() {
   const bans = Array.isArray(data?.bans) ? data?.bans : [];
   const total = Number(data?.total || 0);
   const activeTotal = Number(data?.active_total || 0);
+  const historyTotal = Number(data?.history_total || 0);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(page, totalPages);
   const startIndex = total === 0 ? 0 : (currentPage - 1) * pageSize + 1;
@@ -203,7 +205,7 @@ export default function BanListPage() {
   const reasonLabel = (value: string | null | undefined) => {
     const s = String(value || '').trim();
     if (!s) return '-';
-    if (s.toUpperCase() === 'NO_SHOW_2X' || s.toUpperCase() === 'NO_SHOW_3X') return 'Absen';
+    if (s.toUpperCase().startsWith('NO_SHOW')) return 'Absen';
     return s;
   };
 
@@ -248,30 +250,30 @@ export default function BanListPage() {
         </Card>
 
         <div className="grid gap-4 md:grid-cols-2">
-          <Card className="border-rose-200/60 bg-gradient-to-br from-rose-50 to-rose-100/40">
+          <Card className="border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100/40">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Total Ban</CardTitle>
-                  <CardDescription>Jumlah data ban sesuai filter</CardDescription>
+                  <CardTitle>Total Riwayat Ban</CardTitle>
+                  <CardDescription>Jumlah user yang pernah diban (semua user, abaikan pencarian)</CardDescription>
                 </div>
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/70 text-rose-600 ring-1 ring-rose-200">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/70 text-slate-600 ring-1 ring-slate-200">
                   <ShieldX className="h-5 w-5" />
                 </span>
               </div>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-semibold">{total}</div>
+              <div className="text-3xl font-semibold">{historyTotal}</div>
             </CardContent>
           </Card>
-          <Card className="border-amber-200/60 bg-gradient-to-br from-amber-50 to-amber-100/40">
+          <Card className="border-rose-200/60 bg-gradient-to-br from-rose-50 to-rose-100/40">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle>Ban Aktif</CardTitle>
-                  <CardDescription>Jumlah user yang masih diban</CardDescription>
+                  <CardDescription>User yang masih diban saat ini (semua user, abaikan pencarian)</CardDescription>
                 </div>
-                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/70 text-amber-600 ring-1 ring-amber-200">
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-white/70 text-rose-600 ring-1 ring-rose-200">
                   <Clock className="h-5 w-5" />
                 </span>
               </div>
@@ -330,6 +332,15 @@ export default function BanListPage() {
                         status === 'ACTIVE'
                           ? 'hover:bg-amber-50/60'
                           : 'hover:bg-slate-50';
+                      // Ban fires at 3 consecutive no-shows: 0 = neutral,
+                      // 1-2 = warning (heading toward ban), 3+ = banned (red).
+                      const noShowCount = Number(row.consecutive_no_show || 0);
+                      const noShowClass =
+                        noShowCount >= 3
+                          ? 'bg-rose-100 text-rose-700'
+                          : noShowCount >= 1
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-slate-100 text-slate-700';
                       return (
                         <TableRow key={`${row.employee_id}-${row.banned_until}`} className={rowClass}>
                           <TableCell className="whitespace-nowrap font-mono py-2">{row.employee_id || '-'}</TableCell>
@@ -341,14 +352,8 @@ export default function BanListPage() {
                           <TableCell className="max-w-[280px] truncate py-2">{row.unban_remark || '-'}</TableCell>
                           {!isCommittee && <TableCell className="max-w-[160px] truncate py-2">{row.action_by || '-'}</TableCell>}
                           <TableCell className="whitespace-nowrap font-mono py-2">
-                            <span
-                              className={
-                                Number(row.consecutive_no_show || 0) >= 2
-                                  ? 'inline-flex rounded-full bg-rose-100 px-2 py-0.5 text-rose-700'
-                                  : 'inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-slate-700'
-                              }
-                            >
-                              {Number(row.consecutive_no_show || 0)}
+                            <span className={`inline-flex rounded-full px-2 py-0.5 ${noShowClass}`}>
+                              {noShowCount}
                             </span>
                           </TableCell>
                           <TableCell className="whitespace-nowrap font-mono py-2">
