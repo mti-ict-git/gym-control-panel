@@ -23,3 +23,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Vercel CLI local project link (contains project/org IDs; should not be committed)
+.vercel
