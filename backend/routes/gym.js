@@ -369,7 +369,7 @@ router.get('/gym-availability', async (req, res) => {
     const request = pool.request();
     request.input('dateParam', sql.Date, new Date(dateStr));
     const result = await request.query(
-      "SELECT CONVERT(varchar(5), gs.StartTime, 108) AS hhmm, ISNULL(gs.Quota, 15) AS quota, COUNT(gb.BookingID) AS booked_count FROM dbo.gym_schedule gs LEFT JOIN dbo.gym_booking gb ON gb.ScheduleID = gs.ScheduleID AND gb.BookingDate = @dateParam AND gb.Status IN ('BOOKED','CHECKIN') WHERE (gs.IsActive = 1 OR gs.IsActive IS NULL) GROUP BY CONVERT(varchar(5), gs.StartTime, 108), ISNULL(gs.Quota, 15) ORDER BY hhmm"
+      "SELECT gs.ScheduleID AS schedule_id, gs.Session AS session_name, CONVERT(varchar(5), gs.StartTime, 108) AS hhmm, CONVERT(varchar(5), gs.EndTime, 108) AS hhmm_end, ISNULL(gs.Quota, 15) AS quota, COUNT(gb.BookingID) AS booked_count FROM dbo.gym_schedule gs LEFT JOIN dbo.gym_booking gb ON gb.ScheduleID = gs.ScheduleID AND gb.BookingDate = @dateParam AND gb.Status IN ('BOOKED','CHECKIN') WHERE (gs.IsActive = 1 OR gs.IsActive IS NULL) GROUP BY gs.ScheduleID, gs.Session, CONVERT(varchar(5), gs.StartTime, 108), CONVERT(varchar(5), gs.EndTime, 108), ISNULL(gs.Quota, 15) ORDER BY hhmm"
     );
 
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
@@ -382,14 +382,18 @@ router.get('/gym-availability', async (req, res) => {
       return 'Night 2';
     }
 
+    // Per-schedule (not merged by start time): two active sessions can share a
+    // start time, so each row is keyed by its own ScheduleID.
     const sessions = rows.map((r) => {
       const hhmm = String(r.hhmm);
       const booked = Number(r.booked_count) || 0;
       const quota = r.quota != null ? Number(r.quota) : DEFAULT_QUOTA;
       return {
+        schedule_id: Number(r.schedule_id) || 0,
+        session_name: r.session_name != null ? String(r.session_name) : labelFor(hhmm),
         session_label: labelFor(hhmm),
         time_start: hhmm,
-        time_end: null,
+        time_end: r.hhmm_end != null ? String(r.hhmm_end) : null,
         quota,
         booked_count: booked,
         available: Math.max(quota - booked, 0),
@@ -3549,7 +3553,14 @@ router.post('/gym-booking-cancel', async (req, res) => {
   }
   const { booking_id, employee_id } = req.body || {};
   const id = Number(booking_id);
-  const employeeId = String(employee_id || '').trim();
+  // Canonicalize identically to gym-booking-create (strip BOM/non-ASCII, remove
+  // whitespace, uppercase) so cancel matches the stored EmployeeID on any DB
+  // collation — not only the case-insensitive default.
+  const employeeId = String(employee_id || '')
+    .replace(/[^\x20-\x7E]/g, '')
+    .trim()
+    .replace(/\s+/g, '')
+    .toUpperCase();
   if (!Number.isFinite(id) || id <= 0 || !employeeId) {
     return res.status(400).json({ ok: false, error: 'booking_id and employee_id are required' });
   }

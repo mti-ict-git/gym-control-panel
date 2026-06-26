@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Badge, Loader2, Moon, Sun, Ticket, XCircle } from 'lucide-react';
+import { ArrowLeft, Info, Loader2, Moon, Sun, Ticket, User, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import cancelHero from '@/assets/unnamed.png';
@@ -26,6 +26,14 @@ export default function CancelBookingPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // Persist + restore theme like the rest of the app (AppLayout) so the public
+  // pages don't always load light and lose the choice on reload.
+  useEffect(() => {
+    const stored = localStorage.getItem('theme');
+    const preferDark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', preferDark);
+  }, []);
+
   const normalizeBookingId = (raw: string): number | null => {
     const digits = String(raw || '').replace(/[^0-9]/g, '');
     const num = Number(digits);
@@ -33,18 +41,24 @@ export default function CancelBookingPage() {
   };
 
   const submitCancelBooking = useCallback(async (bookingId: number, empId: string) => {
-    const emp = String(empId || '').trim();
+    const emp = String(empId || '').trim().toUpperCase();
     if (!emp || !bookingId) return;
     setLoading(true);
     try {
       const safeJson = async (resp: Response) => {
         const contentType = resp.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
-          const text = await resp.text();
+          const text = await resp.text().catch(() => '');
           return { json: null, text };
         }
-        const json = (await resp.json()) as { ok: boolean; error?: string } | null;
-        return { json, text: '' };
+        try {
+          const json = (await resp.json()) as { ok: boolean; error?: string } | null;
+          return { json, text: '' };
+        } catch (_) {
+          // JSON content-type but an unparseable body: fall back so the
+          // status-based message still shows instead of a generic JS error.
+          return { json: null, text: '' };
+        }
       };
 
       const post = async (url: string) => {
@@ -57,13 +71,19 @@ export default function CancelBookingPage() {
         return { resp, json, text };
       };
 
-      const first = await post('/api/gym-booking-cancel');
-      let final = first;
-      if (!first.resp.ok || !first.json) {
-        const second = await post('/gym-booking-cancel');
-        if (second.resp.ok || second.json) {
-          final = second;
+      // Only fall back to the bare backend path on a genuine transport failure
+      // or a 404 (the /api prefix not being wired). Do NOT re-POST this mutation
+      // just because the first response wasn't JSON/ok: if the first call reached
+      // the server it may have already cancelled the booking, and a blind retry
+      // would report the (now idempotent) "not found" as a failure.
+      let final;
+      try {
+        final = await post('/api/gym-booking-cancel');
+        if (final.resp.status === 404) {
+          final = await post('/gym-booking-cancel');
         }
+      } catch (_) {
+        final = await post('/gym-booking-cancel');
       }
 
       if (!final.resp.ok || !final.json || !final.json.ok) {
@@ -148,7 +168,11 @@ export default function CancelBookingPage() {
             variant="ghost"
             size="icon"
             className="absolute top-6 right-6 rounded-full bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700"
-            onClick={() => document.documentElement.classList.toggle('dark')}
+            onClick={() => {
+              const next = !document.documentElement.classList.contains('dark');
+              document.documentElement.classList.toggle('dark', next);
+              localStorage.setItem('theme', next ? 'dark' : 'light');
+            }}
           >
             <Sun className="h-4 w-4 dark:hidden" />
             <Moon className="h-4 w-4 hidden dark:block" />
@@ -188,7 +212,7 @@ export default function CancelBookingPage() {
                 <div className="space-y-2">
                   <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 ml-1">Employee ID</label>
                   <div className="relative">
-                    <Badge className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 h-5 w-5" />
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 h-5 w-5" />
                     <Input
                       placeholder="Enter your Employee ID"
                       value={employeeId}
@@ -203,7 +227,7 @@ export default function CancelBookingPage() {
                   disabled={loading}
                   onClick={() => {
                     const bookingId = normalizeBookingId(bookingIdRaw);
-                    const emp = employeeId.trim();
+                    const emp = employeeId.trim().toUpperCase();
                     if (!bookingId || !emp) {
                       toast({
                         title: 'Missing details',
@@ -223,7 +247,7 @@ export default function CancelBookingPage() {
               </form>
               <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 flex gap-3">
                 <div className="text-amber-500">
-                  <Badge className="h-5 w-5" />
+                  <Info className="h-5 w-5" />
                 </div>
                 <p className="text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
                   Only bookings with status <span className="font-semibold text-slate-700 dark:text-slate-200">BOOKED</span> for today or later can be cancelled. Please contact support if you need assistance with past sessions.
@@ -244,7 +268,7 @@ export default function CancelBookingPage() {
             <AlertDialogTitle>Cancel booking?</AlertDialogTitle>
             <AlertDialogDescription>
               {pending
-                ? `Booking ${pending.bookingId} for Employee ID ${pending.employeeId} will be cancelled and the slot will be released.`
+                ? `Booking GYMBOOK${String(pending.bookingId).padStart(2, '0')} for Employee ID ${pending.employeeId} will be cancelled and the slot will be released.`
                 : 'This action cannot be undone.'}
             </AlertDialogDescription>
           </AlertDialogHeader>

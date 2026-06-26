@@ -64,7 +64,7 @@ export default function RegisterPage() {
     date: Date | null;
     sessionName: string;
     timeStart: string;
-    timeEnd: string;
+    timeEnd: string | null;
     employeeId: string;
     employeeName: string | null;
     department: string | null;
@@ -74,8 +74,6 @@ export default function RegisterPage() {
   const defaultContactPhone = '+6281275000560';
   const [contactName, setContactName] = useState<string>(defaultContactName);
   const [contactPhone, setContactPhone] = useState<string>(defaultContactPhone);
-  const bookingToastClassName = 'rounded-2xl border border-blue-200/80 border-l-4 border-l-blue-400 bg-white text-slate-900 shadow-[0_10px_24px_-12px_rgba(59,130,246,0.6)] ring-1 ring-blue-100/70 dark:border-slate-800 dark:border-l-blue-500 dark:bg-slate-950 dark:text-slate-100 dark:ring-slate-800';
-
   useEffect(() => {
     const lsName = typeof window !== 'undefined' ? localStorage.getItem('gym_support_contact_name') : null;
     const lsPhone = typeof window !== 'undefined' ? localStorage.getItem('gym_support_contact_phone') : null;
@@ -113,6 +111,14 @@ export default function RegisterPage() {
       }
     })();
   }, []);
+
+  // Restore the saved/OS theme on mount so the public pages match the rest of the app.
+  useEffect(() => {
+    const stored = localStorage.getItem('theme');
+    const preferDark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', preferDark);
+  }, []);
+
   const [errorOpen, setErrorOpen] = useState(false);
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
   const [eulaOpen, setEulaOpen] = useState(false);
@@ -249,6 +255,9 @@ export default function RegisterPage() {
   });
 
   const sessionKey = (s: GymDbSession): string => `${s.session_name}__${s.time_start}`;
+  // Availability is per-schedule: two sessions can share a start time, so key the
+  // availability map by schedule_id rather than the start-time string.
+  const availKey = (s: GymDbSession): string => String(s.schedule_id ?? s.time_start);
   const selectedGymDbSession = (gymDbSessions || []).find((s) => sessionKey(s) === selectedSessionId) ?? null;
 
   const displaySessionName = (raw: string): string => {
@@ -263,21 +272,12 @@ export default function RegisterPage() {
       .join(' ');
   };
 
-  const endFor = (label: string): string | null => {
-    switch (label) {
-      case 'Morning':
-        return '06:30';
-      case 'Night 1':
-        return '20:00';
-      case 'Night 2':
-        return '22:00';
-      default:
-        return null;
-    }
-  };
-
-  const timeEndForSession = (session: GymDbSession): string =>
-    session.time_end ?? endFor(session.session_name) ?? session.time_start;
+  // Show "start - end" only when a real, distinct end time exists; otherwise just
+  // the start time, to avoid a misleading zero-length window like "20:00 - 20:00".
+  const sessionTimeLabel = (session: GymDbSession): string =>
+    session.time_end && session.time_end !== session.time_start
+      ? `${session.time_start} - ${session.time_end}`
+      : session.time_start;
 
   const sessionColorClass = (name: string): string => {
     const key = String(name || '').toLowerCase();
@@ -486,13 +486,14 @@ export default function RegisterPage() {
     setAvailabilityLoading(true);
     try {
       const params = `date=${encodeURIComponent(dateStr)}`;
+      type AvailSession = { schedule_id?: number; time_start: string; available: number; booked_count: number; quota: number };
       const tryFetch = async (url: string) => {
         const resp = await fetch(`${url}?${params}`);
-        const json = (await resp.json()) as { success: boolean; error?: string; sessions?: { time_start: string; available: number; booked_count: number; quota: number }[] } | null;
+        const json = (await resp.json()) as { success: boolean; error?: string; sessions?: AvailSession[] } | null;
         if (resp.status >= 500) throw new Error(json?.error || 'Server error');
         return json;
       };
-      let json: { success: boolean; error?: string; sessions?: { time_start: string; available: number; booked_count: number; quota: number }[] } | null = null;
+      let json: { success: boolean; error?: string; sessions?: AvailSession[] } | null = null;
       try {
         json = await tryFetch(`/api/gym-availability`);
       } catch (_) {
@@ -504,7 +505,7 @@ export default function RegisterPage() {
       }
       const map: Record<string, { available: number; booked: number; quota: number }> = {};
       (json.sessions || []).forEach((s) => {
-        map[String(s.time_start)] = {
+        map[String(s.schedule_id ?? s.time_start)] = {
           available: Number(s.available),
           booked: Number(s.booked_count || 0),
           quota: Number(s.quota || 0),
@@ -532,20 +533,21 @@ export default function RegisterPage() {
     const endpoint = import.meta.env.VITE_DB_TEST_ENDPOINT as string | undefined;
     const base = endpoint && endpoint.trim().length > 0 ? endpoint : '/api';
     const dateStr = selectedDate ? format(selectedDate, 'yyyy-MM-dd') : '';
-    const timeStart = selectedGymDbSession?.time_start || '';
-    if (!dateStr || !timeStart) return;
-    if (availability[timeStart]) return;
+    const scheduleId = selectedGymDbSession?.schedule_id;
+    if (!dateStr || !selectedGymDbSession || scheduleId == null) return;
+    const key = availKey(selectedGymDbSession);
+    if (availability[key]) return;
     const ctrl = new AbortController();
     const t = setTimeout(async () => {
       try {
         const resp = await fetch(`${base}/gym-bookings?from=${encodeURIComponent(dateStr)}&to=${encodeURIComponent(dateStr)}`, { signal: ctrl.signal });
-        const json = (await resp.json()) as { ok: boolean; bookings?: Array<{ time_start?: string | null; status?: string | null }> } | null;
+        const json = (await resp.json()) as { ok: boolean; bookings?: Array<{ schedule_id?: number | null; status?: string | null }> } | null;
         if (!json || !json.ok) return;
         const rows = Array.isArray(json.bookings) ? json.bookings : [];
-        const booked = rows.filter((r) => String(r.time_start || '') === timeStart && ['BOOKED','CHECKIN'].includes(String(r.status || '').toUpperCase())).length;
+        const booked = rows.filter((r) => Number(r.schedule_id) === scheduleId && ['BOOKED','CHECKIN'].includes(String(r.status || '').toUpperCase())).length;
         setAvailability((prev) => {
           const quota = selectedGymDbSession?.quota ?? 15;
-          return { ...prev, [timeStart]: { booked, quota, available: Math.max(0, quota - booked) } };
+          return { ...prev, [key]: { booked, quota, available: Math.max(0, quota - booked) } };
         });
       } catch (_) {
         setAvailability((prev) => ({ ...prev }));
@@ -557,7 +559,8 @@ export default function RegisterPage() {
   const submitRegistration = async (data: FormData) => {
     setIsSubmitting(true);
     try {
-      const tryPost = async (url: string) => {
+      type CreateResult = { ok: boolean; error?: string; booking_id?: number; schedule_id?: number } | null;
+      const tryPost = async (url: string): Promise<{ resp: Response; json: CreateResult }> => {
         const normalizedEmployeeId = String(data.employeeId || '').trim().toUpperCase();
         const resp = await fetch(url, {
           method: 'POST',
@@ -569,22 +572,25 @@ export default function RegisterPage() {
             booking_date: format(data.date, 'yyyy-MM-dd'),
           }),
         });
-        const payload = (await resp.json()) as { ok: boolean; error?: string; booking_id?: number; schedule_id?: number } | null;
-        if (resp.status >= 500) throw new Error(payload?.error || 'Server error');
-        return payload;
+        let json: CreateResult = null;
+        try { json = (await resp.json()) as CreateResult; } catch (_) { json = null; }
+        return { resp, json };
       };
-      let payload: { ok: boolean; error?: string; booking_id?: number; schedule_id?: number } | null = null;
+      // Only retry the bare path on a true transport failure or a 404 (the /api
+      // prefix not wired). Never re-POST after a response that could have already
+      // inserted the booking, or a committed booking gets reported as a failure
+      // ("already registered for this day").
+      let result: { resp: Response; json: CreateResult };
       try {
-        payload = await tryPost(`/api/gym-booking-create`);
+        result = await tryPost(`/api/gym-booking-create`);
+        if (result.resp.status === 404) {
+          result = await tryPost(`/gym-booking-create`);
+        }
       } catch (_) {
-        payload = await tryPost(`/gym-booking-create`);
+        result = await tryPost(`/gym-booking-create`);
       }
+      const payload = result.json;
       if (!payload || !payload.ok) {
-        toast({
-          title: 'Registration failed',
-          description: payload?.error || 'An error occurred. Please try again.',
-          className: bookingToastClassName,
-        });
         setErrorInfo(payload?.error || 'An error occurred. Please try again.');
         setErrorOpen(true);
         return;
@@ -594,7 +600,7 @@ export default function RegisterPage() {
       const normalizedEmployeeId = String(data.employeeId || '').trim().toUpperCase();
       const employeeProfile = await fetchEmployeeProfile(normalizedEmployeeId);
 
-      const bId = payload && typeof payload.booking_id === 'number' ? payload.booking_id : null;
+      const bId = payload && typeof payload.booking_id === 'number' && payload.booking_id > 0 ? payload.booking_id : null;
       const dateStr = format(data.date, 'yyyy-MM-dd');
       const bookingDetails = bId ? await fetchBookingDetails(bId, dateStr) : null;
       if (selectedSession) {
@@ -603,7 +609,7 @@ export default function RegisterPage() {
           date: data.date,
           sessionName: displaySessionName(selectedSession.session_name),
           timeStart: selectedSession.time_start,
-          timeEnd: timeEndForSession(selectedSession),
+          timeEnd: selectedSession.time_end,
           employeeId: normalizedEmployeeId,
           employeeName: bookingDetails?.name ?? employeeProfile?.name ?? null,
           department: bookingDetails?.department ?? employeeProfile?.department ?? null,
@@ -612,7 +618,7 @@ export default function RegisterPage() {
       }
 
       if (selectedDate && selectedGymDbSession) {
-        const key = selectedGymDbSession.time_start;
+        const key = availKey(selectedGymDbSession);
         setAvailability((prev) => {
           const existing = prev[key];
           if (existing) {
@@ -630,7 +636,6 @@ export default function RegisterPage() {
     } catch (error: unknown) {
       console.error('Registration error:', error);
       const msg = error instanceof Error ? error.message : 'An error occurred. Please try again.';
-      toast({ title: 'Registration failed', description: msg, className: bookingToastClassName });
       setErrorInfo(msg);
       setErrorOpen(true);
     } finally {
@@ -681,7 +686,7 @@ export default function RegisterPage() {
       toast({
         title: 'Validation Error',
         description: errorMessages.join(', ') || 'Please check the form for errors.',
-        className: bookingToastClassName,
+        variant: 'destructive',
       });
     }
   };
@@ -692,7 +697,11 @@ export default function RegisterPage() {
         variant="ghost"
         size="icon"
         className="fixed top-6 right-6 rounded-full bg-white dark:bg-slate-800 shadow-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
-        onClick={() => document.documentElement.classList.toggle('dark')}
+        onClick={() => {
+          const next = !document.documentElement.classList.contains('dark');
+          document.documentElement.classList.toggle('dark', next);
+          localStorage.setItem('theme', next ? 'dark' : 'light');
+        }}
       >
         <Sun className="h-4 w-4 dark:hidden" />
         <Moon className="h-4 w-4 hidden dark:block" />
@@ -733,7 +742,7 @@ export default function RegisterPage() {
               Book your gym session <br /> quick and easy.
             </h1>
             <p className="text-slate-500 dark:text-slate-400 mb-8 leading-relaxed">
-              Reserve your spot for tomorrow or the next day. Stay fit, stay healthy!
+              Reserve your spot for an upcoming session. Stay fit, stay healthy!
             </p>
             <div className="flex justify-center gap-2">
               {carouselImages.map((_, idx) => (
@@ -778,7 +787,7 @@ export default function RegisterPage() {
                         <SelectItem value="VISITOR">Visitor</SelectItem>
                       </SelectContent>
                     </Select>
-                    <div className="text-xs text-slate-500 mt-1">Non‑MTI bookings require admin approval.</div>
+                    <div className="text-xs text-slate-500 mt-1">All bookings are confirmed instantly — no admin approval needed.</div>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -970,7 +979,7 @@ export default function RegisterPage() {
                       <>
                         <span className={`inline-block h-2 w-2 rounded-full ${sessionDotColor(selectedGymDbSession.session_name)} mr-2`} />
                         <span className="font-medium text-slate-800 dark:text-slate-100">
-                          {selectedGymDbSession.time_start} - {timeEndForSession(selectedGymDbSession)}
+                          {sessionTimeLabel(selectedGymDbSession)}
                         </span>
                       </>
                     ) : (
@@ -980,14 +989,14 @@ export default function RegisterPage() {
                 </div>
 
                 <div className="space-y-2">
-                  <div className="text-sm font-medium text-slate-700 dark:text-slate-300 mt-2 md:mt-0">Available</div>
+                  <div className="text-sm font-medium text-slate-700 dark:text-slate-300 mt-2 md:mt-0">Booked</div>
                   <div className={`flex h-12 w-full items-center rounded-lg px-3 py-2 text-sm ${selectedGymDbSession ? sessionFieldTone(selectedGymDbSession.session_name) : 'bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400 dark:text-slate-500'}`}>
                     {selectedGymDbSession ? (
                       availabilityLoading ? (
                         <span className="text-slate-600">Loading...</span>
                       ) : (
                         (() => {
-                          const a = availability[selectedGymDbSession.time_start];
+                          const a = availability[availKey(selectedGymDbSession)];
                           const booked = a ? a.booked : 0;
                           const quota = a ? a.quota : selectedGymDbSession.quota;
                           const remaining = Math.max(0, quota - booked);
@@ -1008,7 +1017,7 @@ export default function RegisterPage() {
                   <div className="text-xs text-slate-600">
                     {selectedGymDbSession
                       ? (() => {
-                          const a = availability[selectedGymDbSession.time_start];
+                          const a = availability[availKey(selectedGymDbSession)];
                           const booked = a ? a.booked : 0;
                           const quota = a ? a.quota : selectedGymDbSession.quota;
                           const remaining = Math.max(0, quota - booked);
@@ -1073,7 +1082,7 @@ export default function RegisterPage() {
                 <DialogTitle>Registration Successful</DialogTitle>
                 <DialogDescription>
                   {successInfo
-                    ? `${successInfo.sessionName} on ${successInfo.date ? format(successInfo.date, 'MMMM d, yyyy') : ''} (${successInfo.timeStart} - ${successInfo.timeEnd})`
+                    ? `${successInfo.sessionName} on ${successInfo.date ? format(successInfo.date, 'MMMM d, yyyy') : ''} (${successInfo.timeStart}${successInfo.timeEnd && successInfo.timeEnd !== successInfo.timeStart ? ' - ' + successInfo.timeEnd : ''})`
                     : ''}
                 </DialogDescription>
               </DialogHeader>
