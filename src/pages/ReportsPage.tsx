@@ -75,9 +75,12 @@ function parseLocalDate(value: string): Date | undefined {
 
 // Escape a value for CSV: quote when it contains a comma/quote/newline (doubling
 // internal quotes) and neutralise spreadsheet formula injection (=, +, -, @).
+// A lone "-" placeholder or a plain (negative) number is NOT a formula, so it is
+// left untouched — otherwise every empty "-" cell would export as "'-".
 function csvEscape(value: unknown): string {
   let s = value == null ? '' : String(value);
-  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+  const isPlainNumberOrDash = s === '-' || /^-?\d+([.,]\d+)?$/.test(s);
+  if (!isPlainNumberOrDash && /^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   if (/[",\n\r]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
   return s;
 }
