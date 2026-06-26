@@ -126,6 +126,21 @@ function getJwtSecret() {
   return s;
 }
 
+function requireGymAdmin(req, res, next) {
+  const auth = req.headers.authorization || '';
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  if (!m) return res.status(401).json({ ok: false, error: 'Missing bearer token' });
+  let payload;
+  try { payload = jwt.verify(m[1], getJwtSecret()); }
+  catch (e) { return res.status(401).json({ ok: false, error: 'Invalid token' }); }
+  const role = String(payload?.role || '').toLowerCase();
+  if (!['superadmin', 'admin', 'committee', 'system'].includes(role)) {
+    return res.status(403).json({ ok: false, error: 'Forbidden' });
+  }
+  req.authUser = payload;
+  next();
+}
+
 const gymBookingsCache = new Map();
 const gymSessionsCache = new Map();
 const gymReportsCache = new Map();
@@ -216,8 +231,9 @@ router.post('/gym-reports-init', async (req, res) => {
     pool: { max: 6, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const existsRes = await pool.request().query("SELECT OBJECT_ID('dbo.gym_reports', 'U') AS id;");
     const exists = Boolean(existsRes?.recordset?.[0]?.id);
     if (!exists) {
@@ -297,11 +313,12 @@ router.post('/gym-reports-init', async (req, res) => {
         "IF COL_LENGTH('dbo.gym_reports','BookingDate') IS NOT NULL AND COL_LENGTH('dbo.gym_reports','TimeStart') IS NOT NULL BEGIN EXEC('CREATE UNIQUE INDEX UX_gym_reports_EmpDateSessionStart ON dbo.gym_reports(EmployeeID, BookingDate, SessionName, TimeStart)') END"
       );
     }
-    await pool.close();
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(500).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -534,8 +551,9 @@ router.post('/gym-session-create', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     await ensureGymScheduleIsActiveColumn(pool);
     const request = pool.request();
     const columnsCheck = await request.query(
@@ -544,7 +562,6 @@ router.post('/gym-session-create', async (req, res) => {
     const present = new Set((columnsCheck?.recordset || []).map((r) => String(r.COLUMN_NAME)));
     const missing = ['Session','StartTime','EndTime','Quota'].filter((c) => !present.has(c));
     if (missing.length > 0) {
-      await pool.close();
       return res.status(200).json({ ok: false, error: `Missing columns in dbo.gym_schedule: ${missing.join(', ')}` });
     }
 
@@ -555,12 +572,13 @@ router.post('/gym-session-create', async (req, res) => {
     await request.query(
       'INSERT INTO dbo.gym_schedule (Session, StartTime, EndTime, Quota) VALUES (@session_name, CAST(@time_start AS time(0)), CAST(@time_end AS time(0)), @quota)'
     );
-    await pool.close();
     gymSessionsCache.clear();
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -608,8 +626,9 @@ router.post('/gym-session-update', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const request = pool.request();
     request.input('original_session_name', sql.VarChar(20), String(original_session_name));
     request.input('original_time_start', sql.VarChar(5), String(original_time_start));
@@ -622,8 +641,6 @@ router.post('/gym-session-update', async (req, res) => {
       'UPDATE dbo.gym_schedule SET Session = @session_name, StartTime = CAST(@time_start AS time(0)), EndTime = CAST(@time_end AS time(0)), Quota = @quota WHERE Session = @original_session_name AND StartTime = CAST(@original_time_start AS time(0))'
     );
 
-    await pool.close();
-
     const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
     if (affected < 1) {
       return res.status(200).json({ ok: false, error: 'Session not found or not updated' });
@@ -634,6 +651,8 @@ router.post('/gym-session-update', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -672,8 +691,9 @@ router.post('/gym-session-delete', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const request = pool.request();
     let result;
     if (hasScheduleId) {
@@ -689,8 +709,6 @@ router.post('/gym-session-delete', async (req, res) => {
       );
     }
 
-    await pool.close();
-
     const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
     if (affected < 1) {
       return res.status(200).json({ ok: false, error: 'Session not found or not deleted' });
@@ -701,6 +719,8 @@ router.post('/gym-session-delete', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -745,8 +765,9 @@ router.post('/gym-schedule-create', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const request = pool.request();
     request.input('schedule_time', sql.DateTime, scheduleDate);
     request.input('status', sql.VarChar(20), status);
@@ -769,11 +790,12 @@ router.post('/gym-schedule-create', async (req, res) => {
       }
     }
 
-    await pool.close();
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -865,8 +887,9 @@ router.get('/gym-bookings', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const baseFromSql = `FROM dbo.gym_booking gb
       LEFT JOIN dbo.gym_schedule s
         ON s.ScheduleID = gb.ScheduleID
@@ -1061,6 +1084,8 @@ router.get('/gym-bookings', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, bookings: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -1088,8 +1113,9 @@ router.get('/gym-bookings-by-ids', async (req, res) => {
     options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
     pool: { max: 4, min: 0, idleTimeoutMillis: 5000 },
   };
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const baseFromSql = `FROM dbo.gym_booking gb
       LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
       LEFT JOIN MTIMasterEmployeeDB.dbo.employee_core ec ON gb.EmployeeID = ec.employee_id
@@ -1113,7 +1139,6 @@ router.get('/gym-bookings-by-ids', async (req, res) => {
       ${baseFromSql}
       ${whereSql}`;
     const result = await pool.request().query(dataSql);
-    await pool.close();
     const bookings = Array.isArray(result?.recordset)
       ? result.recordset.map((r) => ({
           booking_id: Number(r.booking_id),
@@ -1131,6 +1156,8 @@ router.get('/gym-bookings-by-ids', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, bookings: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 router.get('/carddb-staff', async (req, res) => {
@@ -1165,8 +1192,9 @@ router.get('/carddb-staff', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const allowVendorUseGym = await getAllowVendorUseGym(pool);
     const request = pool.request();
     request.input('q', sql.VarChar(100), likeParam);
@@ -1182,16 +1210,17 @@ router.get('/carddb-staff', async (req, res) => {
          ${likeClause} ${excludeMti} ${excludeVendor}
        ORDER BY c.StaffNo`
     );
-    await pool.close();
     const employees = (result?.recordset || []).map((r) => String(r.staff_no || '').trim()).filter(Boolean);
     return res.json({ success: true, employees });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ success: false, error: message, employees: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
-router.post('/gym-booking-update-status', async (req, res) => {
+router.post('/gym-booking-update-status', requireGymAdmin, async (req, res) => {
   const {
     DB_SERVER,
     DB_PORT,
@@ -1230,8 +1259,9 @@ router.post('/gym-booking-update-status', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const request = pool.request();
     request.input('booking_id', sql.Int, Number(booking_id));
     request.input('approval_status', sql.VarChar(20), statusUpper);
@@ -1239,8 +1269,6 @@ router.post('/gym-booking-update-status', async (req, res) => {
     const result = await request.query(
       'UPDATE dbo.gym_booking SET ApprovalStatus = @approval_status WHERE BookingID = @booking_id'
     );
-
-    await pool.close();
 
     const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
     if (affected < 1) {
@@ -1251,10 +1279,12 @@ router.post('/gym-booking-update-status', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
-router.post('/gym-controller-access', async (req, res) => {
+router.post('/gym-controller-access', requireGymAdmin, async (req, res) => {
   const debug = envBool(process.env.GYM_CONTROLLER_ACCESS_DEBUG, false);
   const reqId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const debugEvents = [];
@@ -1310,15 +1340,17 @@ router.post('/gym-controller-access', async (req, res) => {
   };
 
   if (allow && classifyEmployeeIdKind(employeeId) === 'VENDOR') {
+    let prePool = null;
     try {
-      const pool = await new sql.ConnectionPool(config).connect();
-      const allowVendorUseGym = await getAllowVendorUseGym(pool);
-      await pool.close();
+      prePool = await new sql.ConnectionPool(config).connect();
+      const allowVendorUseGym = await getAllowVendorUseGym(prePool);
       if (!allowVendorUseGym) {
         return res.status(200).json({ ok: false, error: 'Vendor belum diizinkan menggunakan gym' });
       }
     } catch (_) {
       return res.status(200).json({ ok: false, error: 'Vendor belum diizinkan menggunakan gym' });
+    } finally {
+      if (prePool) await prePool.close().catch(() => {});
     }
   }
 
@@ -1338,6 +1370,7 @@ router.post('/gym-controller-access', async (req, res) => {
     return String(m[1]).replace(/\r\n/g, '\n').trim();
   };
 
+  let pool = null;
   try {
     let cardNo = card_no != null ? String(card_no).trim() : '';
     // Prevent stale gym_booking cards passed by the worker from blocking fresh CardDB lookups
@@ -1529,7 +1562,7 @@ router.post('/gym-controller-access', async (req, res) => {
 
     // Lowest priority fallback: cached records from scheduled bookings or live tap logs
     if (!cardNo || allowDuplicateCardPerEmployee) {
-      const pool = await new sql.ConnectionPool(config).connect();
+      pool = await new sql.ConnectionPool(config).connect();
       const req1 = pool.request();
       req1.input('emp', sql.VarChar(50), employeeId);
       const r1 = await req1.query(
@@ -1550,8 +1583,6 @@ router.post('/gym-controller-access', async (req, res) => {
           pushCard(row?.CardNo, 'gym_live_taps');
         }
       }
-
-      await pool.close();
     }
 
     const cardNos = allowDuplicateCardPerEmployee ? Array.from(cardSet).slice(0, 20) : cardNo ? [cardNo] : [];
@@ -1569,7 +1600,7 @@ router.post('/gym-controller-access', async (req, res) => {
       url.searchParams.set('CardNo', currentCardNo);
       url.searchParams.set('UnitNo', unitNo);
       url.searchParams.set('CustomAccessTZ', customAccessTz);
-      const r = await fetch(url.toString(), { method: 'GET' });
+      const r = await fetch(url.toString(), { method: 'GET', signal: AbortSignal.timeout(8000) });
       const body = await r.text();
       const parsed = {
         unitNo: extractTag(body, 'UnitNo'),
@@ -1653,6 +1684,8 @@ router.post('/gym-controller-access', async (req, res) => {
     const message = error?.message || String(error);
     log('error', { message });
     return res.status(200).json({ ok: false, error: message, debug: debug ? { reqId, events: debugEvents } : undefined });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -1684,8 +1717,9 @@ router.post('/gym-booking-backfill-cardno', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const result = await pool.request().query(
       `UPDATE gb
        SET gb.CardNo = cd.CardNo
@@ -1700,13 +1734,14 @@ router.post('/gym-booking-backfill-cardno', async (req, res) => {
        ) cd
        WHERE gb.CardNo IS NULL AND cd.CardNo IS NOT NULL`
     );
-    await pool.close();
 
     const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
     return res.json({ ok: true, affected });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -1806,15 +1841,17 @@ router.post('/gym-booking-create', async (req, res) => {
   };
 
   if (employeeKind === 'VENDOR') {
+    let prePool = null;
     try {
-      const pool = await new sql.ConnectionPool(gymConfig).connect();
-      const allowVendorUseGym = await getAllowVendorUseGym(pool);
-      await pool.close();
+      prePool = await new sql.ConnectionPool(gymConfig).connect();
+      const allowVendorUseGym = await getAllowVendorUseGym(prePool);
       if (!allowVendorUseGym) {
         return res.status(200).json({ ok: false, error: 'Vendor belum diizinkan menggunakan gym' });
       }
     } catch (_) {
       return res.status(200).json({ ok: false, error: 'Vendor belum diizinkan menggunakan gym' });
+    } finally {
+      if (prePool) await prePool.close().catch(() => {});
     }
   }
 
@@ -2126,11 +2163,15 @@ router.post('/gym-booking-create', async (req, res) => {
     }
   };
 
+  let gymPool = null;
+  let masterPool = null;
+  let masterPool2 = null;
+  let gymPool2 = null;
   try {
     const bookingDate = new Date(bookingDateStr);
     if (isNaN(bookingDate.getTime())) throw new Error('Invalid booking_date');
 
-    const gymPool = await new sql.ConnectionPool(gymConfig).connect();
+    gymPool = await new sql.ConnectionPool(gymConfig).connect();
     await ensureGymScheduleIsActiveColumn(gymPool);
     await ensureGymBookingBanTable(gymPool);
     const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
@@ -2163,6 +2204,7 @@ router.post('/gym-booking-create', async (req, res) => {
       if (bannedUntil && bannedUntil.getTime() >= todayDate.getTime()) {
         const bannedStr = isNaN(bannedUntil.getTime()) ? null : bannedUntil.toISOString().slice(0, 10);
         await gymPool.close();
+        gymPool = null;
         return res.status(200).json({ ok: false, error: `You are banned from booking until ${bannedStr || 'a later date'}` });
       }
       let noShowSinceDate = null;
@@ -2262,6 +2304,7 @@ router.post('/gym-booking-create', async (req, res) => {
           const bannedUntil = new Date(todayDate.getTime() + 7 * 24 * 60 * 60 * 1000);
           const bannedStr = isNaN(bannedUntil.getTime()) ? null : bannedUntil.toISOString().slice(0, 10);
           await gymPool.close();
+          gymPool = null;
           return res.status(200).json({ ok: false, error: `You are banned from booking until ${bannedStr || 'a later date'}` });
         }
       }
@@ -2278,6 +2321,7 @@ router.post('/gym-booking-create', async (req, res) => {
     const quota = scheduleRow?.quota != null ? Number(scheduleRow.quota) : 15;
     if (!scheduleId || !Number.isFinite(scheduleId)) {
       await gymPool.close();
+      gymPool = null;
       return res.status(200).json({ ok: false, error: 'Session not found in GymDB' });
     }
 
@@ -2290,6 +2334,7 @@ router.post('/gym-booking-create', async (req, res) => {
     const duplicateCount = Number(dupResult?.recordset?.[0]?.cnt || 0);
     if (duplicateCount > 0) {
       await gymPool.close();
+      gymPool = null;
       return res.status(200).json({ ok: false, error: 'You are already registered for this day' });
     }
 
@@ -2302,10 +2347,12 @@ router.post('/gym-booking-create', async (req, res) => {
     const bookedCount = Number(quotaResult?.recordset?.[0]?.cnt || 0);
     if (bookedCount >= quota) {
       await gymPool.close();
+      gymPool = null;
       return res.status(200).json({ ok: false, error: 'This session is full' });
     }
 
     await gymPool.close();
+    gymPool = null;
 
     const buildIdCandidates = (raw) => {
       const base = String(raw || '').trim();
@@ -2322,7 +2369,7 @@ router.post('/gym-booking-create', async (req, res) => {
     let empRow = null;
     let department = '';
     if (employeeTypeGuess === 'MTI') {
-      const masterPool = await new sql.ConnectionPool(masterConfig).connect();
+      masterPool = await new sql.ConnectionPool(masterConfig).connect();
       const coreSchema = await pickSchemaForTable(masterPool, 'employee_core');
       if (coreSchema) {
         const columnsResult = await masterPool.request().query(
@@ -2373,6 +2420,7 @@ router.post('/gym-booking-create', async (req, res) => {
       }
       if (!empRow) {
         await masterPool.close();
+        masterPool = null;
         // Fallback for MTI when employee_core misses/mismatches but CardDB has valid staff data.
         const staffFallback = (await tryLoadCardDbStaff(employeeId)) || (await tryLoadCardDbStaffFromGym(employeeId));
         if (staffFallback) {
@@ -2406,7 +2454,8 @@ router.post('/gym-booking-create', async (req, res) => {
       try {
         if (masterPool?.connected) await masterPool.close();
       } catch (_) {}
-      const masterPool2 = await new sql.ConnectionPool(masterConfig).connect();
+      masterPool = null;
+      masterPool2 = await new sql.ConnectionPool(masterConfig).connect();
       const employmentSchema = await pickSchemaForTable(masterPool2, 'employee_employment');
       if (employmentSchema) {
         const empColsResult = await masterPool2.request().query(
@@ -2434,6 +2483,7 @@ router.post('/gym-booking-create', async (req, res) => {
         }
       }
       await masterPool2.close();
+      masterPool2 = null;
     } else {
       const staff = (await tryLoadCardDbStaff(employeeId)) || (await tryLoadCardDbStaffFromGym(employeeId));
       if (staff) {
@@ -2461,7 +2511,7 @@ router.post('/gym-booking-create', async (req, res) => {
     const cardNo = (cardNoCardDbPrimary || cardNoCardDbFallback) ?? cardNoMaster;
     const gender = empRow.gender != null && String(empRow.gender).trim() ? String(empRow.gender).trim() : 'UNKNOWN';
 
-    const gymPool2 = await new sql.ConnectionPool(gymConfig).connect();
+    gymPool2 = await new sql.ConnectionPool(gymConfig).connect();
     // Ensure local employee directory and upsert minimal info
     await gymPool2.request().query(
       `IF OBJECT_ID('dbo.gym_employee','U') IS NULL BEGIN
@@ -2514,12 +2564,16 @@ router.post('/gym-booking-create', async (req, res) => {
       'INSERT INTO dbo.gym_booking (EmployeeID, CardNo, EmployeeName, Department, Gender, SessionName, ScheduleID, BookingDate, Status, ApprovalStatus) OUTPUT INSERTED.BookingID AS booking_id VALUES (@employee_id, @card_no, @employee_name, @department, @gender, @session_name, @schedule_id, @booking_date, \'BOOKED\', \'APPROVED\')'
     );
 
-    await gymPool2.close();
     const bookingId = Number(insertResult?.recordset?.[0]?.booking_id || 0);
     return res.json({ ok: true, booking_id: bookingId, schedule_id: scheduleId });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (gymPool) await gymPool.close().catch(() => {});
+    if (masterPool) await masterPool.close().catch(() => {});
+    if (masterPool2) await masterPool2.close().catch(() => {});
+    if (gymPool2) await gymPool2.close().catch(() => {});
   }
 });
 
@@ -2557,8 +2611,9 @@ router.post('/gym-booking-init', async (req, res) => {
   };
 
   let duplicates = [];
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const tx = new sql.Transaction(pool);
     await tx.begin();
     const exec = async (q) => tx.request().query(q);
@@ -2700,7 +2755,6 @@ router.post('/gym-booking-init', async (req, res) => {
       "SELECT 1 AS ok FROM sys.indexes WHERE name = 'IX_gym_booking_today' AND object_id = OBJECT_ID('dbo.gym_booking')"
     );
 
-    await pool.close();
     const columns = Array.isArray(schemaResult?.recordset) ? schemaResult.recordset : [];
     const index_ok = Array.isArray(indexResult?.recordset) && indexResult.recordset.length > 0;
     const index_today_ok = Array.isArray(todayIndexResult?.recordset) && todayIndexResult.recordset.length > 0;
@@ -2708,6 +2762,8 @@ router.post('/gym-booking-init', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -2890,8 +2946,10 @@ router.get('/gym-live-sync', async (req, res) => {
     return null;
   };
 
+  let gymPool = null;
+  let cardPool = null;
   try {
-    const gymPool = await sql.connect(gymConfig);
+    gymPool = await new sql.ConnectionPool(gymConfig).connect();
     const tx = new sql.Transaction(gymPool);
     await tx.begin();
     const exec = async (q) => tx.request().query(q);
@@ -2918,11 +2976,13 @@ router.get('/gym-live-sync', async (req, res) => {
     END`);
     await tx.commit();
 
-    const cardPool = await new sql.ConnectionPool(cardConfig).connect();
+    cardPool = await new sql.ConnectionPool(cardConfig).connect();
     const src = await discoverSource(cardPool);
     if (!src) {
-      await cardPool.close();
-      await gymPool.close();
+      await cardPool.close().catch(() => {});
+      cardPool = null;
+      await gymPool.close().catch(() => {});
+      gymPool = null;
       return res.status(200).json({ ok: false, error: 'No transaction source table discovered' });
     }
 
@@ -2976,7 +3036,8 @@ router.get('/gym-live-sync', async (req, res) => {
       `${txnTimeExpr} AS TxnTime`
     ].join(', ')} FROM [${src.schema}].[${src.table}] ${where} ORDER BY ${orderBy}`;
     const result = await req2.query(query);
-    await cardPool.close();
+    await cardPool.close().catch(() => {});
+    cardPool = null;
 
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
 
@@ -3091,6 +3152,7 @@ router.get('/gym-live-sync', async (req, res) => {
     }
 
     let inserted = 0;
+    let updated = 0;
     for (const r of rows) {
       const onlyValidSync = envBool(process.env.GYM_SYNC_ONLY_VALID, true);
       const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
@@ -3116,18 +3178,25 @@ router.get('/gym-live-sync', async (req, res) => {
       ) BEGIN
         UPDATE dbo.gym_live_taps SET EmployeeID = CASE WHEN (EmployeeID IS NULL OR LTRIM(RTRIM(EmployeeID)) = '') AND @EmployeeID IS NOT NULL THEN @EmployeeID ELSE EmployeeID END
         WHERE ISNULL(CardNo,'') = ISNULL(@CardNo,'') AND TxnTime = @TxnTime AND ISNULL(TrController,'') = ISNULL(@TrController,'');
+        SELECT 'update' AS op;
       END ELSE BEGIN
-        INSERT INTO dbo.gym_live_taps (TrName, TrController, [Transaction], CardNo, UnitNo, EmployeeID, TrDate, TrTime, TxnTime) VALUES (@TrName, @TrController, @Transaction, @CardNo, @UnitNo, @EmployeeID, @TrDate, @TrTime, @TxnTime)
+        INSERT INTO dbo.gym_live_taps (TrName, TrController, [Transaction], CardNo, UnitNo, EmployeeID, TrDate, TrTime, TxnTime) VALUES (@TrName, @TrController, @Transaction, @CardNo, @UnitNo, @EmployeeID, @TrDate, @TrTime, @TxnTime);
+        SELECT 'insert' AS op;
       END`);
-      const affected = Array.isArray(insRes?.rowsAffected) ? Number(insRes.rowsAffected[0] || 0) : 0;
-      if (affected > 0) inserted += affected;
+      const op = insRes?.recordset?.[0]?.op || null;
+      if (op === 'insert') inserted += 1;
+      else if (op === 'update') updated += 1;
     }
 
-    await gymPool.close();
-    return res.json({ ok: true, inserted, fetched: rows.length });
+    await gymPool.close().catch(() => {});
+    gymPool = null;
+    return res.json({ ok: true, inserted, updated, fetched: rows.length });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (cardPool) await cardPool.close().catch(() => {});
+    if (gymPool) await gymPool.close().catch(() => {});
   }
 });
 
@@ -3147,8 +3216,9 @@ router.get('/gym-live-persisted', async (req, res) => {
   const allowAll = allStr.length > 0 && ['1', 'true', 'yes', 'y'].includes(allStr.toLowerCase());
   const limit = Number(String(req.query.limit || '100'));
   const maxRows = Number.isFinite(limit) && limit > 0 && limit <= 1000 ? limit : 100;
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const req2 = pool.request();
     const whereParts = [];
     if (sinceStr) {
@@ -3191,7 +3261,6 @@ router.get('/gym-live-persisted', async (req, res) => {
     const where = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
     const q = `SELECT TOP ${maxRows} TrName, TrController, [Transaction], CardNo, UnitNo, EmployeeID, TrDate, TrTime, TxnTime FROM dbo.gym_live_taps ${where} ORDER BY TxnTime DESC`;
     const r = await req2.query(q);
-    await pool.close();
     const rows = Array.isArray(r?.recordset) ? r.recordset : [];
     const out = rows.map((x) => ({
       TrName: x.TrName != null ? String(x.TrName) : null,
@@ -3208,6 +3277,8 @@ router.get('/gym-live-persisted', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -3221,8 +3292,9 @@ router.post('/gym-accounts-init', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
   }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const tx = new sql.Transaction(pool);
     await tx.begin();
     const exec = async (q) => tx.request().query(q);
@@ -3292,11 +3364,12 @@ router.post('/gym-accounts-init', async (req, res) => {
       EXEC('CREATE TRIGGER dbo.tr_gym_account_SetUpdatedAt ON dbo.gym_account AFTER UPDATE AS BEGIN SET NOCOUNT ON; UPDATE a SET UpdatedAt = SYSDATETIME() FROM dbo.gym_account a INNER JOIN inserted i ON a.AccountID = i.AccountID; END');
     END`);
     await tx.commit();
-    await pool.close();
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -3310,8 +3383,9 @@ router.get('/gym-accounts', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
   }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const hasLastSignInAt = await pool.request().query("SELECT 1 AS ok FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'LastSignInAt'");
     const hasLastSignIn = await pool.request().query("SELECT 1 AS ok FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = 'dbo' AND TABLE_NAME = 'gym_account' AND COLUMN_NAME = 'LastSignIn'");
     const colLastSignInAt = Array.isArray(hasLastSignInAt?.recordset) && hasLastSignInAt.recordset.length > 0;
@@ -3334,7 +3408,6 @@ router.get('/gym-accounts', async (req, res) => {
         `SELECT ${minimalCols.join(', ')} FROM dbo.gym_account ORDER BY CreatedAt DESC`
       );
     }
-    await pool.close();
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
     const accounts = rows.map((r) => {
       const dbRole = r.Role != null ? String(r.Role) : '';
@@ -3357,6 +3430,8 @@ router.get('/gym-accounts', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, accounts: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -3372,8 +3447,9 @@ router.get('/gym-bookings-by-employee', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'employee_id, from, to are required (yyyy-MM-dd)', bookings: [] });
   }
   const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const request = pool.request();
     request.input('fromDate', sql.Date, new Date(from));
     request.input('toDate', sql.Date, new Date(to));
@@ -3411,7 +3487,6 @@ router.get('/gym-bookings-by-employee', async (req, res) => {
         AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
       ORDER BY gb.BookingDate DESC, time_start DESC, gb.CreatedAt DESC`
     );
-    await pool.close();
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
     const bookings = rows.map((r) => ({
       booking_id: Number(r.booking_id),
@@ -3432,6 +3507,8 @@ router.get('/gym-bookings-by-employee', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, bookings: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -3447,19 +3524,21 @@ router.post('/gym-booking-status', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'booking_id and valid status are required' });
   }
   const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const req1 = pool.request();
     req1.input('id', sql.Int, Number(booking_id));
     req1.input('status', sql.VarChar(20), statusUpper);
     const result = await req1.query('UPDATE dbo.gym_booking SET Status = @status WHERE BookingID = @id');
-    await pool.close();
     const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
     if (affected < 1) return res.status(200).json({ ok: false, error: 'Not updated' });
     return res.json({ ok: true, affected });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -3477,24 +3556,26 @@ router.post('/gym-booking-cancel', async (req, res) => {
   const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
   const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
   const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const req1 = pool.request();
     req1.input('id', sql.Int, id);
     req1.input('employeeId', sql.VarChar(20), employeeId);
     req1.input('today', sql.Date, todayDate);
     const result = await req1.query("UPDATE dbo.gym_booking SET Status = 'CANCELLED' WHERE BookingID = @id AND EmployeeID = @employeeId AND Status = 'BOOKED' AND BookingDate >= @today");
-    await pool.close();
     const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
     if (affected < 1) return res.status(200).json({ ok: false, error: 'Booking not found or cannot be cancelled' });
     return res.json({ ok: true, affected });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
-router.delete('/gym-booking/:id', async (req, res) => {
+router.delete('/gym-booking/:id', requireGymAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
@@ -3504,18 +3585,20 @@ router.delete('/gym-booking/:id', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Invalid id' });
   }
   const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     const req1 = pool.request();
     req1.input('id', sql.Int, id);
     const r = await req1.query('DELETE FROM dbo.gym_booking WHERE BookingID = @id');
-    await pool.close();
     const affected = Array.isArray(r?.rowsAffected) ? Number(r.rowsAffected[0] || 0) : 0;
     if (affected < 1) return res.status(200).json({ ok: false, error: 'Not deleted' });
     return res.json({ ok: true, affected });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -3539,8 +3622,9 @@ router.get('/gym-controller-settings', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     await pool.request().query(`IF OBJECT_ID('dbo.gym_controller_settings','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_controller_settings (
         Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
@@ -3585,7 +3669,6 @@ router.get('/gym-controller-settings', async (req, res) => {
       INSERT INTO dbo.gym_controller_settings (Id, EnableAutoOrganize, BookingMinDaysAhead, BookingMaxDaysAhead) VALUES (1, 0, 1, 2)`);
 
     const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, AllowDuplicateCardPerEmployee, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
-    await pool.close();
 
     const row = r?.recordset?.[0] || null;
     const updatedAt = row?.UpdatedAt ? new Date(row.UpdatedAt).toISOString() : row?.CreatedAt ? new Date(row.CreatedAt).toISOString() : null;
@@ -3605,6 +3688,8 @@ router.get('/gym-controller-settings', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -3679,8 +3764,9 @@ router.post('/gym-controller-settings', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     await pool.request().query(`IF OBJECT_ID('dbo.gym_controller_settings','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_controller_settings (
         Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
@@ -3750,7 +3836,6 @@ router.post('/gym-controller-settings', async (req, res) => {
       VALUES (1, COALESCE(@EnableAutoOrganize, 0), COALESCE(@EnableManagerAllSessionAccess, 0), COALESCE(@AllowVendorUseGym, 0), COALESCE(@AllowDuplicateCardPerEmployee, 0), COALESCE(@GraceBeforeMin, 0), COALESCE(@GraceAfterMin, 0), COALESCE(@WorkerIntervalMs, 60000), COALESCE(@BookingMinDaysAhead, 1), COALESCE(@BookingMaxDaysAhead, 2), SYSDATETIME())`);
 
     const r = await pool.request().query(`SELECT TOP 1 EnableAutoOrganize, EnableManagerAllSessionAccess, AllowVendorUseGym, AllowDuplicateCardPerEmployee, GraceBeforeMin, GraceAfterMin, WorkerIntervalMs, BookingMinDaysAhead, BookingMaxDaysAhead, UpdatedAt, CreatedAt FROM dbo.gym_controller_settings WHERE Id = 1`);
-    await pool.close();
 
     const row = r?.recordset?.[0] || null;
     const updatedAt = row?.UpdatedAt ? new Date(row.UpdatedAt).toISOString() : row?.CreatedAt ? new Date(row.CreatedAt).toISOString() : null;
@@ -3773,6 +3858,8 @@ router.post('/gym-controller-settings', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4018,8 +4105,9 @@ router.get('/gym-access-committee', async (req, res) => {
 
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
 
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     await pool.request().query(`IF OBJECT_ID('dbo.gym_access_committee','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_access_committee (
         EmployeeID VARCHAR(20) NOT NULL,
@@ -4046,7 +4134,6 @@ router.get('/gym-access-committee', async (req, res) => {
        WHERE UnitNo = @unit AND IsActive = 1
        ORDER BY EmployeeID ASC`
     );
-    await pool.close();
     const rows = Array.isArray(r?.recordset) ? r.recordset : [];
     const members = rows.map((x) => ({
       employee_id: String(x.EmployeeID ?? '').trim(),
@@ -4058,6 +4145,8 @@ router.get('/gym-access-committee', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, members: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4081,8 +4170,9 @@ router.post('/gym-access-committee-add', async (req, res) => {
 
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
 
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     await pool.request().query(`IF OBJECT_ID('dbo.gym_access_committee','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_access_committee (
         EmployeeID VARCHAR(20) NOT NULL,
@@ -4101,12 +4191,13 @@ router.post('/gym-access-committee-add', async (req, res) => {
       UPDATE dbo.gym_access_committee SET IsActive=1, UpdatedAt=SYSDATETIME() WHERE EmployeeID=@emp AND UnitNo=@unit
     ELSE
       INSERT INTO dbo.gym_access_committee (EmployeeID, UnitNo, IsActive, UpdatedAt) VALUES (@emp, @unit, 1, SYSDATETIME())`);
-    await pool.close();
 
     return res.json({ ok: true, employee_id: employeeId, unit_no: unitNo });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4130,8 +4221,9 @@ router.post('/gym-access-committee-remove', async (req, res) => {
 
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
 
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     await pool.request().query(`IF OBJECT_ID('dbo.gym_access_committee','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_access_committee (
         EmployeeID VARCHAR(20) NOT NULL,
@@ -4148,12 +4240,13 @@ router.post('/gym-access-committee-remove', async (req, res) => {
     req1.input('unit', sql.VarChar(20), unitNo);
     await req1.query(`IF EXISTS (SELECT 1 FROM dbo.gym_access_committee WHERE EmployeeID=@emp AND UnitNo=@unit)
       UPDATE dbo.gym_access_committee SET IsActive=0, UpdatedAt=SYSDATETIME() WHERE EmployeeID=@emp AND UnitNo=@unit`);
-    await pool.close();
 
     return res.json({ ok: true, employee_id: employeeId, unit_no: unitNo });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4180,8 +4273,9 @@ router.get('/gym-committee-roster', async (req, res) => {
   }
 
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 3, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const exec = async (q) => { await pool.request().query(q); };
     await exec(`IF OBJECT_ID('dbo.gym_committee_roster','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_committee_roster (
@@ -4222,7 +4316,6 @@ router.get('/gym-committee-roster', async (req, res) => {
       LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = r.ScheduleID
       WHERE r.UnitNo = @unit AND r.DutyDate = @date AND r.IsActive = 1
       ORDER BY s.StartTime ASC, r.EmployeeID ASC`);
-    await pool.close();
     const rows = Array.isArray(r?.recordset) ? r.recordset : [];
     const roster = rows.map((x) => ({
       roster_id: Number(x.roster_id || 0) || 0,
@@ -4240,6 +4333,8 @@ router.get('/gym-committee-roster', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, roster: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4264,8 +4359,9 @@ router.post('/gym-committee-roster-assign', async (req, res) => {
   }
 
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 3, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const exec = async (q) => { await pool.request().query(q); };
     await exec(`IF OBJECT_ID('dbo.gym_committee_roster','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_committee_roster (
@@ -4295,7 +4391,6 @@ router.post('/gym-committee-roster-assign', async (req, res) => {
     const countRes = await reqCount.query(`SELECT COUNT(1) AS total FROM dbo.gym_committee_roster WHERE UnitNo=@unit AND DutyDate=@date AND ScheduleID=@schedule AND IsActive = 1`);
     const totalActive = Number(countRes?.recordset?.[0]?.total || 0);
     if (totalActive >= 2) {
-      await pool.close();
       return res.status(200).json({ ok: false, error: 'Maksimal 2 penjaga untuk sesi ini' });
     }
 
@@ -4311,11 +4406,12 @@ router.post('/gym-committee-roster-assign', async (req, res) => {
     ELSE
       INSERT INTO dbo.gym_committee_roster (UnitNo, DutyDate, ScheduleID, EmployeeID, IsActive, UpdatedAt)
       VALUES (@unit, @date, @schedule, @emp, 1, SYSDATETIME())`);
-    await pool.close();
     return res.json({ ok: true, employee_id: employeeId, schedule_id: scheduleId, duty_date: dateRaw, unit_no: unitNo });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4340,8 +4436,9 @@ router.post('/gym-committee-roster-remove', async (req, res) => {
   }
 
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 3, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const exec = async (q) => { await pool.request().query(q); };
     await exec(`IF OBJECT_ID('dbo.gym_committee_roster','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_committee_roster (
@@ -4365,11 +4462,12 @@ router.post('/gym-committee-roster-remove', async (req, res) => {
         SELECT 1 FROM dbo.gym_committee_roster WHERE UnitNo=@unit AND DutyDate=@date AND ScheduleID=@schedule AND EmployeeID=@emp
       )
       UPDATE dbo.gym_committee_roster SET IsActive=0, UpdatedAt=SYSDATETIME() WHERE UnitNo=@unit AND DutyDate=@date AND ScheduleID=@schedule AND EmployeeID=@emp`);
-    await pool.close();
     return res.json({ ok: true, employee_id: employeeId, schedule_id: scheduleId, duty_date: dateRaw, unit_no: unitNo });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4383,8 +4481,9 @@ router.post('/db-connections-init', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
   }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const exec = async (q) => { await pool.request().query(q); };
     await exec(`IF OBJECT_ID('dbo.gym_database_connections','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_database_connections (
@@ -4407,11 +4506,12 @@ router.post('/db-connections-init', async (req, res) => {
     await exec(`IF OBJECT_ID('dbo.tr_gym_database_connections_SetUpdatedAt','TR') IS NULL BEGIN
       EXEC('CREATE TRIGGER dbo.tr_gym_database_connections_SetUpdatedAt ON dbo.gym_database_connections AFTER UPDATE AS BEGIN SET NOCOUNT ON; UPDATE c SET UpdatedAt = SYSDATETIME() FROM dbo.gym_database_connections c INNER JOIN inserted i ON c.Id = i.Id; END');
     END`);
-    await pool.close();
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4425,10 +4525,10 @@ router.get('/db-connections', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
   }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const r = await pool.request().query(`SELECT Id, DisplayName, DatabaseType, Host, Port, DatabaseName, Username, PasswordEncrypted, IsActive, ConnectionStatus, LastTestedAt, CreatedAt, UpdatedAt FROM dbo.gym_database_connections ORDER BY CreatedAt DESC`);
-    await pool.close();
     const rows = Array.isArray(r?.recordset) ? r.recordset : [];
     const connections = rows.map((x) => ({
       id: String(x.Id),
@@ -4450,6 +4550,8 @@ router.get('/db-connections', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, connections: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4467,8 +4569,9 @@ router.post('/db-connections', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Missing required fields' });
   }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const req1 = pool.request();
     req1.input('DisplayName', sql.VarChar(100), String(display_name));
     req1.input('DatabaseType', sql.VarChar(30), String(database_type));
@@ -4480,11 +4583,12 @@ router.post('/db-connections', async (req, res) => {
     req1.input('IsActive', sql.Bit, is_active === false ? 0 : 1);
     const r = await req1.query(`INSERT INTO dbo.gym_database_connections (DisplayName, DatabaseType, Host, Port, DatabaseName, Username, PasswordEncrypted, IsActive) OUTPUT inserted.Id VALUES (@DisplayName, @DatabaseType, @Host, @Port, @DatabaseName, @Username, @PasswordEncrypted, @IsActive)`);
     const id = r?.recordset?.[0]?.Id ? String(r.recordset[0].Id) : null;
-    await pool.close();
     return res.json({ ok: true, id });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4500,8 +4604,9 @@ router.post('/db-connections-update', async (req, res) => {
   const { id, display_name, database_type, host, port, database_name, username, password_encrypted, is_active } = req.body || {};
   if (!id) return res.status(400).json({ ok: false, error: 'id is required' });
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const req1 = pool.request();
     req1.input('Id', sql.UniqueIdentifier, id);
     req1.input('DisplayName', sql.VarChar(100), display_name ?? null);
@@ -4523,11 +4628,12 @@ router.post('/db-connections-update', async (req, res) => {
       IsActive = COALESCE(@IsActive, IsActive),
       UpdatedAt = SYSDATETIME()
     WHERE Id = @Id`);
-    await pool.close();
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4543,16 +4649,18 @@ router.post('/db-connections-delete', async (req, res) => {
   const { id } = req.body || {};
   if (!id) return res.status(400).json({ ok: false, error: 'id is required' });
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const req1 = pool.request();
     req1.input('Id', sql.UniqueIdentifier, id);
     await req1.query(`DELETE FROM dbo.gym_database_connections WHERE Id = @Id`);
-    await pool.close();
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4568,11 +4676,12 @@ router.post('/db-connections-test', async (req, res) => {
   const { id } = req.body || {};
   if (!id) return res.status(400).json({ ok: false, error: 'id is required' });
   const gymConfig = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(gymConfig).connect();
+    pool = await new sql.ConnectionPool(gymConfig).connect();
     const row = await pool.request().input('Id', sql.UniqueIdentifier, id).query(`SELECT TOP 1 Host, Port, DatabaseName, Username, PasswordEncrypted, DatabaseType FROM dbo.gym_database_connections WHERE Id = @Id`);
     const item = row?.recordset?.[0] || null;
-    if (!item) { await pool.close(); return res.status(200).json({ ok: false, error: 'Not found' }); }
+    if (!item) { return res.status(200).json({ ok: false, error: 'Not found' }); }
     const testConfig = {
       server: String(item.Host),
       port: Number(item.Port || 1433),
@@ -4583,24 +4692,27 @@ router.post('/db-connections-test', async (req, res) => {
       pool: { max: 1, min: 0, idleTimeoutMillis: 3000 },
     };
     let success = false;
+    let tpool = null;
     try {
-      const tpool = await new sql.ConnectionPool(testConfig).connect();
+      tpool = await new sql.ConnectionPool(testConfig).connect();
       await tpool.request().query('SELECT 1 AS ok');
-      await tpool.close();
       success = true;
     } catch (_) {
       success = false;
+    } finally {
+      if (tpool) await tpool.close().catch(() => {});
     }
     const req1 = pool.request();
     req1.input('Id', sql.UniqueIdentifier, id);
     req1.input('Status', sql.VarChar(20), success ? 'connected' : 'error');
     req1.input('At', sql.DateTime, new Date());
     await req1.query(`UPDATE dbo.gym_database_connections SET ConnectionStatus = @Status, LastTestedAt = @At WHERE Id = @Id`);
-    await pool.close();
     return res.json({ ok: true, success });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4618,8 +4730,9 @@ router.post('/gym-accounts', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'username, email, role are required' });
   }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const req1 = pool.request();
     const dbRole = String(role).toLowerCase() === 'superadmin' ? 'SuperAdmin' : String(role).toLowerCase() === 'admin' ? 'Admin' : 'Staff';
     req1.input('Username', sql.VarChar(50), String(username));
@@ -4636,11 +4749,12 @@ router.post('/gym-accounts', async (req, res) => {
       ? "INSERT INTO dbo.gym_account (Username, Email, Role, IsActive, PasswordHash) VALUES (@Username, @Email, @Role, @IsActive, @PasswordHashText)"
       : "INSERT INTO dbo.gym_account (Username, Email, Role, IsActive) VALUES (@Username, @Email, @Role, @IsActive)";
     await req1.query(q);
-    await pool.close();
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4659,8 +4773,9 @@ router.put('/gym-accounts/:id', async (req, res) => {
   }
   const { username, email, role, is_active, password: rawPassword, last_sign_in_at } = req.body || {};
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const req1 = pool.request();
     req1.input('Id', sql.Int, id);
     if (username != null) req1.input('Username', sql.VarChar(50), String(username));
@@ -4688,12 +4803,10 @@ router.put('/gym-accounts/:id', async (req, res) => {
       }
     }
     if (setParts.length < 1) {
-      await pool.close();
       return res.status(400).json({ ok: false, error: 'No fields to update' });
     }
     const q = `UPDATE dbo.gym_account SET ${setParts.join(', ')}, UpdatedAt = SYSDATETIME() WHERE AccountID = @Id`;
     const r = await req1.query(q);
-    await pool.close();
     const affected = Array.isArray(r?.rowsAffected) ? Number(r.rowsAffected[0] || 0) : 0;
     if (affected < 1) {
       return res.status(200).json({ ok: false, error: 'Account not found or not updated' });
@@ -4702,6 +4815,8 @@ router.put('/gym-accounts/:id', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -4719,12 +4834,12 @@ router.delete('/gym-accounts/:id', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Invalid id' });
   }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const req1 = pool.request();
     req1.input('Id', sql.Int, id);
     const r = await req1.query('DELETE FROM dbo.gym_account WHERE AccountID = @Id');
-    await pool.close();
     const affected = Array.isArray(r?.rowsAffected) ? Number(r.rowsAffected[0] || 0) : 0;
     if (affected < 1) {
       return res.status(200).json({ ok: false, error: 'Account not found or not deleted' });
@@ -4733,6 +4848,8 @@ router.delete('/gym-accounts/:id', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -5578,8 +5695,9 @@ router.get('/gym-booking-ban-list', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     await ensureGymBookingBanTable(pool);
     const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
     const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
@@ -5638,7 +5756,6 @@ router.get('/gym-booking-ban-list', async (req, res) => {
        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`
     );
 
-    await pool.close();
     const rows = Array.isArray(dataRes?.recordset) ? dataRes.recordset : [];
     const bans = rows.map((r) => ({
       employee_id: String(r.employee_id ?? '').trim(),
@@ -5659,6 +5776,8 @@ router.get('/gym-booking-ban-list', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message, bans: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -5714,8 +5833,9 @@ router.post('/gym-booking-ban-reset', async (req, res) => {
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
 
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     await ensureGymBookingBanTable(pool);
     const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
     const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
@@ -5735,7 +5855,6 @@ router.post('/gym-booking-ban-reset', async (req, res) => {
           UpdatedAt = GETDATE()
       WHERE EmployeeID = @employee_id
     `);
-    await pool.close();
     const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
     if (affected < 1) {
       return res.status(200).json({ ok: false, error: 'Employee ban not found' });
@@ -5744,6 +5863,8 @@ router.post('/gym-booking-ban-reset', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -5780,15 +5901,17 @@ router.get('/gym-reports-schema', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', columns: [] });
   }
   const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
   try {
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
     const r = await pool.request().query("SELECT COLUMN_NAME AS name, DATA_TYPE AS type FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='gym_reports' ORDER BY ORDINAL_POSITION");
-    await pool.close();
     const columns = Array.isArray(r?.recordset) ? r.recordset : [];
     return res.json({ ok: true, columns });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(500).json({ ok: false, error: message, columns: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
@@ -5824,6 +5947,7 @@ router.get('/gym-reports', async (req, res) => {
     options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) },
     pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
   };
+  let pool = null;
   try {
     const cacheKey = [fromStr, toStr, page, limit, sortKeyRaw, sortDirRaw, qRaw, empFilter, deptFilter, genderFilterRaw, sessionFilter].map((x) => String(x)).join('|');
     const cached = gymReportsCache.get(cacheKey);
@@ -5831,7 +5955,7 @@ router.get('/gym-reports', async (req, res) => {
     if (cached && nowMs - cached.atMs < 2000) {
       return res.json(cached.payload);
     }
-    const pool = await new sql.ConnectionPool(config).connect();
+    pool = await new sql.ConnectionPool(config).connect();
 
     const colsQ = await pool.request().query("SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='dbo' AND TABLE_NAME='gym_reports'");
     const colNames = new Set((Array.isArray(colsQ?.recordset) ? colsQ.recordset : []).map((r) => String(r.name)));
@@ -5941,7 +6065,6 @@ router.get('/gym-reports', async (req, res) => {
     const aggRes = await reqCount.query(aggSql);
     const dataRes = await reqData.query(dataSql);
 
-    await pool.close();
     const total = Number(aggRes?.recordset?.[0]?.total || 0);
     const aggRow = Array.isArray(aggRes?.recordset) ? aggRes.recordset[0] : {};
     const timeInTotal = Number(aggRow?.time_in_total || 0);
@@ -5959,6 +6082,8 @@ router.get('/gym-reports', async (req, res) => {
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(500).json({ ok: false, error: message, reports: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 

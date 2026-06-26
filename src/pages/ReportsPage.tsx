@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ElementType } from 'react';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfYear, endOfYear, subDays, addDays } from 'date-fns';
 import { FileText, Download, Calendar, Users, Clock, Filter, ArrowUpDown, ChevronUp, ChevronDown } from 'lucide-react';
@@ -269,6 +269,14 @@ export default function ReportsPage() {
   const [sortBy, setSortBy] = useState<null | 'department' | 'employee_id' | 'name' | 'gender' | 'session' | 'booking_id'>(null);
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
+  // In-flight guards for the auto-fired DB write jobs (backfill POST / live-sync
+  // GET). Each effect fires on every [dateRange, fromKey, toKey] change and on
+  // mount; without a guard, overlapping requests for the same range can pile up.
+  // Each ref holds the range key currently being processed (null = idle), so a
+  // re-fire for the same key while one is still in flight is skipped.
+  const backfillInFlightKeyRef = useRef<string | null>(null);
+  const liveSyncInFlightKeyRef = useRef<string | null>(null);
+
   const { start, end } = getDateRange(
     dateRange,
     parseLocalDate(customStartDate),
@@ -382,10 +390,19 @@ export default function ReportsPage() {
     if (dateRange === 'all') return;
     const rangeDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
     if (!Number.isFinite(rangeDays) || rangeDays > 45) return;
+    // Skip if a backfill for this exact range is already in flight, so overlapping
+    // heavyweight DB write jobs for the same range can't pile up.
+    const rangeKey = `${fromKey}__${toKey}`;
+    if (backfillInFlightKeyRef.current === rangeKey) return;
+    backfillInFlightKeyRef.current = rangeKey;
     const path = `/gym-reports-backfill?from=${encodeURIComponent(fromKey)}&to=${encodeURIComponent(toKey)}`;
     fetch(`${API_BASES[0]}${path}`, { method: 'POST' })
       .catch(() => fetch(`${API_BASES[1]}${path}`, { method: 'POST' }))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        // Clear only if no newer range has claimed the ref in the meantime.
+        if (backfillInFlightKeyRef.current === rangeKey) backfillInFlightKeyRef.current = null;
+      });
     // Depend on the stable yyyy-MM-dd keys, not the Date objects (which are new
     // each render and would otherwise re-fire this POST on every render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -408,11 +425,20 @@ export default function ReportsPage() {
 
   // In/Out now sourced directly from gym_reports (TimeIn/TimeOut)
 
+  // Render In/Out in gym wall-clock time regardless of the browser TZ. BOTH sources
+  // already carry the gym wall-clock in the ISO *time component*: the liveTapMap
+  // overlay as '...HH:MM:SS+08:00' (built by the backend toUtc8Iso helper) and the
+  // gym_reports fallback as '...HH:MM:SSZ' (the naive stored wall-clock serialized
+  // with a 'Z'). They do NOT represent the same instant, so a blanket +8h shift is
+  // wrong for the 'Z' source. Read the HH:MM literally from the string instead.
   const formatTimeOnly = (iso: string | null): string => {
     if (!iso) return '-';
-    const d = new Date(iso);
+    const s = String(iso);
+    const m = /T(\d{2}):(\d{2})/.exec(s);
+    if (m) return `${m[1]}:${m[2]}`;
+    const d = new Date(s);
     if (isNaN(d.getTime())) return '-';
-    return format(d, 'HH:mm');
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
   };
 
   // Filter options come from the backend (distinct over the whole date range, not
@@ -450,10 +476,19 @@ export default function ReportsPage() {
     if (dateRange === 'all') return;
     const rangeDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
     if (!Number.isFinite(rangeDays) || rangeDays > 45) return;
+    // Skip if a live-sync for this exact range is already in flight, so overlapping
+    // heavyweight DB write jobs for the same range can't pile up.
+    const rangeKey = `${fromKey}__${toKey}`;
+    if (liveSyncInFlightKeyRef.current === rangeKey) return;
+    liveSyncInFlightKeyRef.current = rangeKey;
     const path = `/gym-live-sync?from=${encodeURIComponent(fromKey)}&to=${encodeURIComponent(toKey)}`;
     fetch(`${API_BASES[0]}${path}`)
       .catch(() => fetch(`${API_BASES[1]}${path}`))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        // Clear only if no newer range has claimed the ref in the meantime.
+        if (liveSyncInFlightKeyRef.current === rangeKey) liveSyncInFlightKeyRef.current = null;
+      });
     // Stable yyyy-MM-dd keys (see backfill effect) — avoid re-firing every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateRange, fromKey, toKey]);
@@ -540,6 +575,45 @@ export default function ReportsPage() {
     } catch (_) {
       exportRows = bookingData;
     }
+
+    // The on-screen liveTapMap is scoped to the CURRENT PAGE's date span, so rows
+    // outside that span would miss the In/Out/Schedule/Session overlay on export.
+    // Fetch a dedicated overlay covering the FULL selected range (fromKey..toKey)
+    // — same endpoint/shape as the liveTapMap query — and use it for the CSV. On
+    // any failure, fall back to the page-scoped liveTapMap.
+    type TapOverlay = { time_in: string | null; time_out: string | null; session_name: string | null; time_start: string | null; time_end: string | null };
+    let exportTapMap: Map<string, TapOverlay> = liveTapMap;
+    try {
+      const fetchRangeTaps = async (base: string) => {
+        const resp = await fetch(`${base}/gym-live-status-range?from=${encodeURIComponent(fromKey)}&to=${encodeURIComponent(toKey)}`);
+        const json = await resp.json();
+        if (!json || !json.ok) throw new Error(String(json?.error || 'Request failed'));
+        const taps = Array.isArray(json.taps) ? json.taps : [];
+        const map = new Map<string, TapOverlay>();
+        taps.forEach((r: unknown) => {
+          const obj = r as { employee_id?: string; date?: string; time_in?: string | null; time_out?: string | null; session_name?: string | null; time_start?: string | null; time_end?: string | null };
+          const employee_id = String(obj.employee_id ?? '').trim();
+          const date = String(obj.date ?? '');
+          if (!employee_id || !date) return;
+          map.set(`${employee_id}__${date}`, {
+            time_in: obj.time_in != null ? String(obj.time_in) : null,
+            time_out: obj.time_out != null ? String(obj.time_out) : null,
+            session_name: obj.session_name != null ? String(obj.session_name) : null,
+            time_start: obj.time_start != null ? String(obj.time_start) : null,
+            time_end: obj.time_end != null ? String(obj.time_end) : null,
+          });
+        });
+        return map;
+      };
+      try {
+        exportTapMap = await fetchRangeTaps('/api');
+      } catch (_) {
+        exportTapMap = await fetchRangeTaps('');
+      }
+    } catch (_) {
+      exportTapMap = liveTapMap;
+    }
+
     const headers = ['No', 'Booking ID', 'Date', 'ID Card', 'Name', 'Employee ID', 'Department', 'Gender', 'In', 'Out', 'Time Schedule', 'Session'];
       const rows = exportRows.map((record, idx) => [
       String(idx + 1),
@@ -550,11 +624,11 @@ export default function ReportsPage() {
         String(record.employee_id ?? ''),
         String(record.department ?? ''),
         getGenderLabel(record.gender),
-      formatTimeOnly(liveTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_in ?? record.time_in),
-      formatTimeOnly(liveTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_out ?? record.time_out),
+      formatTimeOnly(exportTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_in ?? record.time_in),
+      formatTimeOnly(exportTapMap.get(`${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`)?.time_out ?? record.time_out),
       (() => {
         const key = `${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`;
-        const live = liveTapMap.get(key);
+        const live = exportTapMap.get(key);
         const start = (live?.time_start ?? record.time_start) ?? null;
         const end = (live?.time_end ?? record.time_end) ?? null;
         if (start && end) return `${start} - ${end}`;
@@ -563,15 +637,17 @@ export default function ReportsPage() {
           ? '05:00 - 12:00'
           : sl.startsWith('afternoon')
           ? '12:00 - 18:00'
+          : sl.includes('evening')
+          ? '17:00 - 19:00'
           : sl.includes('night') && sl.includes('1')
           ? '18:00 - 21:00'
-          : sl.includes('night') && sl.includes('2')
+          : (sl.includes('night') && sl.includes('2')) || (sl.includes('night') && sl.includes('ramadhan'))
           ? '21:00 - 23:59'
           : '-';
       })(),
         (() => {
           const key = `${String(record.employee_id || '').trim()}__${String(record.booking_date || '').slice(0,10)}`;
-          const live = liveTapMap.get(key);
+          const live = exportTapMap.get(key);
           return String((live?.session_name ?? record.session_name) ?? '');
         })(),
     ]);

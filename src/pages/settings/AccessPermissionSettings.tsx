@@ -253,10 +253,11 @@ export default function AccessPermissionSettings() {
 
   const bulkCommitteeAccessMutation = useMutation({
     mutationFn: async (allow: boolean) => {
+      const token = localStorage.getItem('auth_token') || '';
       const postOne = async (url: string, employeeId: string) => {
         const resp = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           body: JSON.stringify({ employee_id: employeeId, access: allow, source: 'MANUAL_LOCK' }),
         });
         const json = (await resp.json().catch(() => null)) as { ok?: boolean; error?: string } | null;

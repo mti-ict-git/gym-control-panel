@@ -440,7 +440,9 @@ export function useDeleteSchedule() {
 
   return useMutation({
     mutationFn: async (scheduleId: string) => {
-      const resp = await fetch(`/api/gym-booking/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' }).catch(() => fetch(`/gym-booking/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' }));
+      const token = localStorage.getItem('auth_token') || '';
+      const opts: RequestInit = { method: 'DELETE', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } };
+      const resp = await fetch(`/api/gym-booking/${encodeURIComponent(scheduleId)}`, opts).catch(() => fetch(`/gym-booking/${encodeURIComponent(scheduleId)}`, opts));
       const json: { ok: boolean; affected?: number; error?: string } = await resp.json();
       if (!json.ok) throw new Error(json.error || 'Failed to delete booking');
     },

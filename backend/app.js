@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import sql from 'mssql';
+import jwt from 'jsonwebtoken';
 import testerRouter from './routes/tester.js';
 import masterRouter from './routes/master.js';
 import gymRouter from './routes/gym.js';
@@ -494,7 +495,10 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
       try {
         const resp = await fetch(`http://localhost:${PORT}/gym-controller-access`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${jwt.sign({ role: 'system', username: 'gym-worker' }, envTrim(process.env.JWT_SECRET), { expiresIn: '5m', issuer: 'gym-control' })}`,
+          },
           body: JSON.stringify(body),
         });
         const json = await resp.json().catch(() => null);

@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useVaultUsersPaged, VaultUser } from '@/hooks/useVaultUsers';
 import { useQueryClient, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -118,10 +118,11 @@ export default function VaultPage() {
 
   const toggleAccessMutation = useMutation({
     mutationFn: async ({ employee_id, grant_access }: { employee_id: string; grant_access: boolean }) => {
+      const token = localStorage.getItem('auth_token') || '';
       const tryPost = async (url: string) => {
         const r = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           body: JSON.stringify({ employee_id, access: grant_access, source: 'MANUAL_LOCK' }),
         });
         const j = await r.json();
@@ -148,10 +149,11 @@ export default function VaultPage() {
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({ booking_id, status }: { booking_id: number; status: 'APPROVED' | 'REJECTED' }) => {
+      const token = localStorage.getItem('auth_token') || '';
       const tryPost = async (url: string) => {
         const r = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           body: JSON.stringify({ booking_id, approval_status: status }),
         });
         const j = await r.json();
@@ -249,6 +251,10 @@ export default function VaultPage() {
   const totalCountFiltered = pagedData.total;
   const totalPagesFiltered = Math.max(1, Math.ceil(totalCountFiltered / pageSize));
 
+  useEffect(() => {
+    if (page > totalPagesFiltered) setPage(totalPagesFiltered);
+  }, [page, totalPagesFiltered]);
+
   const isLoading = isLoadingWithFilters;
   const vaultError = vaultErrorWithFilters;
 
@@ -341,9 +347,13 @@ export default function VaultPage() {
 
   const deleteBookingMutation = useMutation({
     mutationFn: async (bookingId: number) => {
+      const token = localStorage.getItem('auth_token') || '';
       const encodedId = encodeURIComponent(String(bookingId));
       const tryDelete = async (url: string) => {
-        const resp = await fetch(url, { method: 'DELETE' });
+        const resp = await fetch(url, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        });
         const json: { ok: boolean; affected?: number; error?: string } = await resp.json();
         if (!json.ok) {
           throw new Error(json.error || 'Failed to delete booking');
@@ -384,8 +394,11 @@ export default function VaultPage() {
                 </CardTitle>
                 <CardDescription>Booking list created from the Register page.</CardDescription>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {Object.entries(sessionCounts).map(([name, count]) => getSessionCountChip(name, count, name))}
+              <div className="flex flex-col items-start gap-1 md:items-end">
+                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Sessions on this page</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  {Object.entries(sessionCounts).map(([name, count]) => getSessionCountChip(name, count, name))}
+                </div>
               </div>
             </div>
           </CardHeader>
@@ -505,6 +518,7 @@ export default function VaultPage() {
                 </div>
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Status on this page</span>
                 {Object.entries(statusCounts).map(([name, count]) => getStatusCountChip(name, count, name))}
               </div>
             </div>
@@ -529,7 +543,7 @@ export default function VaultPage() {
                       <User className="h-5 w-5 text-blue-600" />
                     </div>
                     <div>
-                      <p className="text-sm text-muted-foreground">Male</p>
+                      <p className="text-sm text-muted-foreground">Male (this page)</p>
                       <p className="text-2xl font-bold">{genderCounts.male}</p>
                     </div>
                   </div>
@@ -542,7 +556,7 @@ export default function VaultPage() {
                       <User className="h-5 w-5 text-pink-600" />
                     </div>
                     <div>
-                      <p className="text-sm text-muted-foreground">Female</p>
+                      <p className="text-sm text-muted-foreground">Female (this page)</p>
                       <p className="text-2xl font-bold">{genderCounts.female}</p>
                     </div>
                   </div>
@@ -641,7 +655,7 @@ export default function VaultPage() {
                                   variant="outline"
                                   className="h-8 w-8 text-green-600 hover:text-green-700 hover:bg-green-50"
                                   onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'APPROVED' })}
-                                  disabled={updateStatusMutation.isPending || user.approval_status === 'APPROVED'}
+                                  disabled={(updateStatusMutation.isPending && updateStatusMutation.variables?.booking_id === user.booking_id) || user.approval_status === 'APPROVED'}
                                   aria-label={`Approve booking for ${user.name || user.employee_id}`}
                                 >
                                   <Check className="h-4 w-4" />
@@ -653,7 +667,7 @@ export default function VaultPage() {
                                   variant="outline"
                                   className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
                                   onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'REJECTED' })}
-                                  disabled={updateStatusMutation.isPending || user.approval_status === 'REJECTED'}
+                                  disabled={(updateStatusMutation.isPending && updateStatusMutation.variables?.booking_id === user.booking_id) || user.approval_status === 'REJECTED'}
                                   aria-label={`Reject booking for ${user.name || user.employee_id}`}
                                 >
                                   <X className="h-4 w-4" />
@@ -665,7 +679,7 @@ export default function VaultPage() {
                                   variant="outline"
                                   className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                                   onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: true })}
-                                  disabled={toggleAccessMutation.isPending}
+                                  disabled={toggleAccessMutation.isPending && toggleAccessMutation.variables?.employee_id === user.employee_id}
                                   aria-label={`Give gym access for ${user.name || user.employee_id}`}
                                 >
                                   <Unlock className="h-4 w-4" />
@@ -677,7 +691,7 @@ export default function VaultPage() {
                                   variant="outline"
                                   className="h-8 w-8 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
                                   onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: false })}
-                                  disabled={toggleAccessMutation.isPending}
+                                  disabled={toggleAccessMutation.isPending && toggleAccessMutation.variables?.employee_id === user.employee_id}
                                   aria-label={`Disable gym access for ${user.name || user.employee_id}`}
                                 >
                                   <Lock className="h-4 w-4" />
@@ -689,7 +703,7 @@ export default function VaultPage() {
                                   variant="outline"
                                   className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
                                   onClick={() => setDeleteBookingId(user.booking_id)}
-                                  disabled={deleteBookingMutation.isPending}
+                                  disabled={deleteBookingMutation.isPending && deleteBookingMutation.variables === user.booking_id}
                                   aria-label={`Delete booking for ${user.name || user.employee_id}`}
                                 >
                                   <Trash2 className="h-4 w-4" />
@@ -791,7 +805,7 @@ export default function VaultPage() {
                                       variant="outline"
                                       className="h-8 w-8 p-0 text-green-600 hover:text-green-700 hover:bg-green-50"
                                       onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'APPROVED' })}
-                                      disabled={updateStatusMutation.isPending || user.approval_status === 'APPROVED'}
+                                      disabled={(updateStatusMutation.isPending && updateStatusMutation.variables?.booking_id === user.booking_id) || user.approval_status === 'APPROVED'}
                                       title="Approve"
                                     >
                                       <Check className="h-4 w-4" />
@@ -803,7 +817,7 @@ export default function VaultPage() {
                                       variant="outline"
                                       className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
                                       onClick={() => updateStatusMutation.mutate({ booking_id: user.booking_id, status: 'REJECTED' })}
-                                      disabled={updateStatusMutation.isPending || user.approval_status === 'REJECTED'}
+                                      disabled={(updateStatusMutation.isPending && updateStatusMutation.variables?.booking_id === user.booking_id) || user.approval_status === 'REJECTED'}
                                       title="Reject"
                                     >
                                       <X className="h-4 w-4" />
@@ -815,7 +829,7 @@ export default function VaultPage() {
                                       variant="outline"
                                       className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                                       onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: true })}
-                                      disabled={toggleAccessMutation.isPending}
+                                      disabled={toggleAccessMutation.isPending && toggleAccessMutation.variables?.employee_id === user.employee_id}
                                       title="Give Access"
                                     >
                                       <Unlock className="h-4 w-4" />
@@ -827,7 +841,7 @@ export default function VaultPage() {
                                       variant="outline"
                                       className="h-8 w-8 p-0 text-orange-600 hover:text-orange-700 hover:bg-orange-50"
                                       onClick={() => toggleAccessMutation.mutate({ employee_id: user.employee_id, grant_access: false })}
-                                      disabled={toggleAccessMutation.isPending}
+                                      disabled={toggleAccessMutation.isPending && toggleAccessMutation.variables?.employee_id === user.employee_id}
                                       title="Disable Access"
                                     >
                                       <Lock className="h-4 w-4" />
@@ -839,7 +853,7 @@ export default function VaultPage() {
                                       variant="outline"
                                       className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                                       onClick={() => setDeleteBookingId(user.booking_id)}
-                                      disabled={deleteBookingMutation.isPending}
+                                      disabled={deleteBookingMutation.isPending && deleteBookingMutation.variables === user.booking_id}
                                       title="Delete Booking"
                                     >
                                       <Trash2 className="h-4 w-4" />
