@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users, Calendar, BarChart3, LayoutDashboard, CheckCircle, RefreshCw, Dumbbell } from 'lucide-react';
 import { format } from 'date-fns';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/StatCard';
 import { OccupancyCard } from '@/components/OccupancyCard';
@@ -98,15 +98,12 @@ export default function DashboardPage() {
     );
   }, [weeklyTrendsData]);
 
-  // One solid stacked bar per day (booked + completed + no-show = total) so the
-  // chart never shows empty gaps when completed/no-show are 0.
+  // Smooth single-series trend of total bookings per day.
   const weeklyChartData = useMemo(() => {
-    return ((weeklyTrendsData as DailyData[] | undefined) ?? []).map((d) => {
-      const total = Number(d.total || 0);
-      const completed = Number(d.completed || 0);
-      const noShow = Number(d.noShow || 0);
-      return { day: d.day, open: Math.max(0, total - completed - noShow), completed, noShow, total };
-    });
+    return ((weeklyTrendsData as DailyData[] | undefined) ?? []).map((d) => ({
+      day: d.day,
+      total: Number(d.total || 0),
+    }));
   }, [weeklyTrendsData]);
 
   // Capacity is the largest session quota (used by the occupancy gauge + banner),
@@ -316,7 +313,7 @@ export default function DashboardPage() {
               </span>
               Tren Booking Minggu Ini
             </CardTitle>
-            <CardDescription>Komposisi booking per hari: booked vs. selesai vs. no-show</CardDescription>
+            <CardDescription>Total booking per hari (minggu ini)</CardDescription>
           </CardHeader>
           <CardContent className="pt-6">
             <div className="h-[300px]">
@@ -324,16 +321,19 @@ export default function DashboardPage() {
                 <Skeleton className="h-full w-full" />
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={weeklyChartData} maxBarSize={44}>
+                  <AreaChart data={weeklyChartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="weeklyTrendFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
                     <XAxis dataKey="day" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
                     <YAxis tickLine={false} axisLine={false} width={28} tick={{ fontSize: 12 }} allowDecimals={false} />
-                    <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.4)' }} contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="open" stackId="a" fill="hsl(var(--primary))" name="Booked" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="completed" stackId="a" fill="hsl(var(--chart-2))" name="Completed" />
-                    <Bar dataKey="noShow" stackId="a" fill="hsl(var(--destructive))" name="No-show" radius={[4, 4, 0, 0]} />
-                  </BarChart>
+                    <Tooltip cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 1, strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
+                    <Area type="monotone" dataKey="total" name="Total booking" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#weeklyTrendFill)" dot={{ r: 3, fill: 'hsl(var(--primary))', strokeWidth: 0 }} activeDot={{ r: 5 }} />
+                  </AreaChart>
                 </ResponsiveContainer>
               )}
             </div>
