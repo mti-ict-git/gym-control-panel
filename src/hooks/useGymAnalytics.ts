@@ -1,68 +1,73 @@
 import { useQuery } from '@tanstack/react-query';
-import { startOfDay, endOfDay, startOfWeek, endOfWeek, subDays, format } from 'date-fns';
-
-export interface HourlyData {
-  hour: string;
-  count: number;
-}
+import { startOfWeek, endOfWeek, format } from 'date-fns';
 
 export interface DailyData {
   day: string;
   total: number;
   completed: number;
   noShow: number;
+  approved: number;
+  rejected: number;
 }
 
-export interface OccupancyPattern {
-  time: string;
-  avgOccupancy: number;
+export interface SessionToday {
+  schedule_id: number;
+  session_name: string;
+  time_start: string;
+  time_end: string | null;
+  quota: number;
+  booked: number;
+  checkedIn: number;
+  noShow: number;
 }
 
-export interface HeatmapCell {
-  day: string;
-  hour: string;
-  count: number;
+interface BookingRow {
+  booking_date?: string;
+  schedule_id?: number | null;
+  status?: string | null;
+  approval_status?: string | null;
 }
 
-export function usePeakHoursData() {
-  return useQuery({
-    queryKey: ['analytics-peak-hours'],
-    queryFn: async () => {
-      const today = new Date();
-      const dateStr = format(today, 'yyyy-MM-dd');
-      const r = await fetch(`/api/gym-bookings?from=${dateStr}&to=${dateStr}`).catch(() => fetch(`/gym-bookings?from=${dateStr}&to=${dateStr}`));
-      const j: { ok: boolean; bookings?: Array<{ booking_date: string; time_start: string | null }>; error?: string } = await r.json();
-      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
-      const hourCounts: Record<number, number> = {};
-      for (let i = 6; i <= 22; i++) hourCounts[i] = 0;
-      (j.bookings || []).forEach((b) => {
-        const hhmm = b.time_start || '00:00';
-        const hour = Number(hhmm.split(':')[0] || '0');
-        if (hour >= 6 && hour <= 22) hourCounts[hour]++;
-      });
-      return Object.entries(hourCounts).map(([hour, count]) => ({ hour: `${hour}:00`, count })) as HourlyData[];
-    },
-  });
+interface AvailabilityRow {
+  schedule_id?: number;
+  session_name?: string;
+  time_start?: string;
+  time_end?: string | null;
+  quota?: number;
+}
+
+// Fetch /api/<path> first, fall back to the bare /<path> (dev/prod proxy variance).
+async function fetchJson<T>(path: string): Promise<T | null> {
+  for (const url of [`/api/${path}`, `/${path}`]) {
+    try {
+      const r = await fetch(url);
+      return (await r.json()) as T;
+    } catch (_) {
+      // try the next base
+    }
+  }
+  return null;
 }
 
 export function useWeeklyTrendsData() {
   return useQuery({
     queryKey: ['analytics-weekly-trends'],
-    queryFn: async () => {
+    queryFn: async (): Promise<DailyData[]> => {
       const today = new Date();
-      const weekStart = startOfWeek(today, { weekStartsOn: 0 });
-      const weekEnd = endOfWeek(today, { weekStartsOn: 0 });
-      const from = format(weekStart, 'yyyy-MM-dd');
-      const to = format(weekEnd, 'yyyy-MM-dd');
-      const r = await fetch(`/api/gym-bookings?from=${from}&to=${to}`).catch(() => fetch(`/gym-bookings?from=${from}&to=${to}`));
-      const j: { ok: boolean; bookings?: Array<{ booking_date: string; status: string; approval_status?: string | null }>; error?: string } = await r.json();
-      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
-      const dayData: Record<string, { total: number; completed: number; noShow: number; approved: number; rejected: number }> = {};
+      const from = format(startOfWeek(today, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+      const to = format(endOfWeek(today, { weekStartsOn: 0 }), 'yyyy-MM-dd');
+      const j = await fetchJson<{ ok: boolean; bookings?: BookingRow[]; error?: string }>(
+        `gym-bookings?from=${from}&to=${to}`
+      );
+      if (!j || !j.ok) throw new Error(j?.error || 'Failed to load bookings');
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      days.forEach((day) => { dayData[day] = { total: 0, completed: 0, noShow: 0, approved: 0, rejected: 0 }; });
+      const dayData: Record<string, Omit<DailyData, 'day'>> = {};
+      days.forEach((day) => {
+        dayData[day] = { total: 0, completed: 0, noShow: 0, approved: 0, rejected: 0 };
+      });
       (j.bookings || []).forEach((b) => {
-        const day = format(new Date(b.booking_date), 'EEE');
-        const status = String(b.status).toUpperCase();
+        const day = format(new Date(String(b.booking_date)), 'EEE');
+        const status = String(b.status || '').toUpperCase();
         const appr = String(b.approval_status || '').toUpperCase();
         if (dayData[day]) {
           dayData[day].total++;
@@ -72,105 +77,61 @@ export function useWeeklyTrendsData() {
           if (appr === 'REJECTED') dayData[day].rejected++;
         }
       });
-      return days.map((day) => ({ day, ...dayData[day] })) as Array<DailyData & { approved: number; rejected: number }>;
+      return days.map((day) => ({ day, ...dayData[day] }));
     },
   });
 }
 
-export function useOccupancyPatternData() {
+// Today's bookings + check-ins + no-shows grouped per session (the gym runs on
+// fixed sessions, so this is far clearer than an hourly breakdown).
+export function useTodaySessionBreakdown() {
   return useQuery({
-    queryKey: ['analytics-occupancy-pattern'],
-    queryFn: async () => {
-      const today = new Date();
-      const from = format(startOfDay(subDays(today, 7)), 'yyyy-MM-dd');
-      const to = format(endOfDay(today), 'yyyy-MM-dd');
-      const r = await fetch(`/api/gym-bookings?from=${from}&to=${to}`).catch(() => fetch(`/gym-bookings?from=${from}&to=${to}`));
-      const j: { ok: boolean; bookings?: Array<{ booking_date: string; time_start: string | null; status: string }>; error?: string } = await r.json();
-      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
-      const hourActual: Record<number, number[]> = {};
-      const hourBooked: Record<number, number[]> = {};
-      for (let i = 6; i <= 22; i++) { hourActual[i] = []; hourBooked[i] = []; }
-      const dayGroups: Record<string, Array<{ hour: number; status: string }>> = {};
-      (j.bookings || []).forEach((b) => {
-        const dayKey = b.booking_date;
-        const hour = Number((b.time_start || '00:00').split(':')[0] || '0');
-        const status = String(b.status).toUpperCase();
-        if (!dayGroups[dayKey]) dayGroups[dayKey] = [];
-        dayGroups[dayKey].push({ hour, status });
-      });
-      Object.values(dayGroups).forEach((dayBookings) => {
-        for (let hour = 6; hour <= 22; hour++) {
-          const countActual = dayBookings.filter((b) => b.hour === hour && (b.status === 'CHECKIN' || b.status === 'COMPLETED')).length;
-          const countBooked = dayBookings.filter((b) => b.hour === hour && b.status === 'BOOKED').length;
-          hourActual[hour].push(countActual);
-          hourBooked[hour].push(countBooked);
-        }
-      });
-      const actualSum = Object.values(hourActual).reduce((acc, arr) => acc + arr.reduce((a, b) => a + b, 0), 0);
-      const source = actualSum > 0 ? hourActual : hourBooked;
-      return Object.entries(source).map(([hour, counts]) => ({
-        time: `${hour}:00`,
-        avgOccupancy: counts.length > 0 ? Math.round((counts.reduce((a, b) => a + b, 0) / counts.length) * 10) / 10 : 0,
-      })) as OccupancyPattern[];
-    },
-  });
-}
+    queryKey: ['analytics-today-sessions'],
+    queryFn: async (): Promise<SessionToday[]> => {
+      const dateStr = format(new Date(), 'yyyy-MM-dd');
+      const availability = await fetchJson<{ success: boolean; sessions?: AvailabilityRow[] }>(
+        `gym-availability?date=${dateStr}`
+      );
+      const sessions = availability && availability.success && Array.isArray(availability.sessions)
+        ? availability.sessions
+        : [];
+      const bookingsRes = await fetchJson<{ ok: boolean; bookings?: BookingRow[] }>(
+        `gym-bookings?from=${dateStr}&to=${dateStr}`
+      );
+      const bookings = bookingsRes && bookingsRes.ok && Array.isArray(bookingsRes.bookings)
+        ? bookingsRes.bookings
+        : [];
 
-export function usePeakHoursHeatmapData() {
-  return useQuery({
-    queryKey: ['analytics-peak-heatmap'],
-    queryFn: async () => {
-      const today = new Date();
-      const from = format(startOfWeek(today, { weekStartsOn: 0 }), 'yyyy-MM-dd');
-      const to = format(endOfWeek(today, { weekStartsOn: 0 }), 'yyyy-MM-dd');
-      const r = await fetch(`/api/gym-bookings?from=${from}&to=${to}`).catch(() => fetch(`/gym-bookings?from=${from}&to=${to}`));
-      const j: { ok: boolean; bookings?: Array<{ booking_date: string; time_start: string | null; status: string }>; error?: string } = await r.json();
-      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
-      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const START_HOUR = 5;
-      const END_HOUR = 22;
-      const hours: string[] = Array.from({ length: END_HOUR - START_HOUR + 1 }, (_, i) => `${i + START_HOUR}:00`);
-      const grid: Record<string, Record<string, number>> = {};
-      days.forEach((d) => { grid[d] = {}; hours.forEach((h) => { grid[d][h] = 0; }); });
-      (j.bookings || []).forEach((b) => {
-        const day = format(new Date(b.booking_date), 'EEE');
-        const hh = Number((b.time_start || '00:00').split(':')[0] || '0');
-        if (hh >= START_HOUR && hh <= END_HOUR) {
-          const hour = `${hh}:00`;
-          grid[day][hour] += 1;
-        }
+      const bySched: Record<number, { booked: number; checkedIn: number; noShow: number }> = {};
+      bookings.forEach((b) => {
+        const sid = Number(b.schedule_id);
+        if (!Number.isFinite(sid)) return;
+        const status = String(b.status || '').toUpperCase();
+        const appr = String(b.approval_status || '').toUpperCase();
+        if (status === 'CANCELLED' || appr === 'REJECTED') return; // freed the slot
+        if (!bySched[sid]) bySched[sid] = { booked: 0, checkedIn: 0, noShow: 0 };
+        bySched[sid].booked++;
+        if (['CHECKIN', 'COMPLETED', 'OUT'].includes(status)) bySched[sid].checkedIn++;
+        if (status === 'EXPIRED') bySched[sid].noShow++;
       });
-      const cells: HeatmapCell[] = [];
-      days.forEach((d) => {
-        hours.forEach((h) => {
-          cells.push({ day: d, hour: h, count: grid[d][h] });
-        });
-      });
-      return { days, hours, cells } as { days: string[]; hours: string[]; cells: HeatmapCell[] };
-    },
-    staleTime: 300000,
-  });
-}
 
-export function useMonthlyStats() {
-  return useQuery({
-    queryKey: ['analytics-monthly-stats'],
-    queryFn: async () => {
-      const today = new Date();
-      const monthStart = format(new Date(today.getFullYear(), today.getMonth(), 1), 'yyyy-MM-dd');
-      const monthEnd = format(new Date(today.getFullYear(), today.getMonth() + 1, 0), 'yyyy-MM-dd');
-      const r = await fetch(`/api/gym-bookings?from=${monthStart}&to=${monthEnd}`).catch(() => fetch(`/gym-bookings?from=${monthStart}&to=${monthEnd}`));
-      const j: { ok: boolean; bookings?: Array<{ status: string }>; error?: string } = await r.json();
-      if (!j.ok) throw new Error(j.error || 'Failed to load bookings');
-      const bookings = j.bookings || [];
-      const stats = {
-        total: bookings.length,
-        completed: bookings.filter((s) => ['COMPLETED', 'OUT'].includes(String(s.status).toUpperCase())).length,
-        inProgress: bookings.filter((s) => String(s.status).toUpperCase() === 'CHECKIN').length,
-        noShow: bookings.filter((s) => ['EXPIRED', 'CANCELLED'].includes(String(s.status).toUpperCase())).length,
-        booked: bookings.filter((s) => String(s.status).toUpperCase() === 'BOOKED').length,
-      };
-      return stats;
+      return sessions
+        .map((s) => {
+          const sid = Number(s.schedule_id) || 0;
+          const agg = bySched[sid] || { booked: 0, checkedIn: 0, noShow: 0 };
+          return {
+            schedule_id: sid,
+            session_name: String(s.session_name || ''),
+            time_start: String(s.time_start || ''),
+            time_end: s.time_end != null ? String(s.time_end) : null,
+            quota: Number(s.quota || 15),
+            booked: agg.booked,
+            checkedIn: agg.checkedIn,
+            noShow: agg.noShow,
+          };
+        })
+        .sort((a, b) => a.time_start.localeCompare(b.time_start));
     },
+    staleTime: 30000,
   });
 }
