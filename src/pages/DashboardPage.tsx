@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Calendar, BarChart3, LayoutDashboard, CheckCircle, RefreshCw, Dumbbell } from 'lucide-react';
+import { Users, Calendar, BarChart3, LayoutDashboard, CheckCircle, RefreshCw, Dumbbell, Activity } from 'lucide-react';
 import { format } from 'date-fns';
 import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -27,6 +27,52 @@ const titleCase = (raw: string): string =>
 
 const sessionTimeLabel = (s: SessionToday): string =>
   s.time_end && s.time_end !== s.time_start ? `${s.time_start} - ${s.time_end}` : s.time_start;
+
+interface DonutItem {
+  label: string;
+  value: number;
+  hex: string;
+  dot: string;
+}
+
+// Reusable doughnut: ring chart + center total + legend (label · count · %).
+function DonutBreakdown({ items }: { items: DonutItem[] }) {
+  const total = items.reduce((acc, i) => acc + Number(i.value || 0), 0);
+  if (total === 0) {
+    return <div className="text-sm text-muted-foreground">Belum ada data hari ini.</div>;
+  }
+  const pieData = items.filter((i) => i.value > 0);
+  return (
+    <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
+      <div className="relative h-[180px] w-[180px] shrink-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={pieData} dataKey="value" nameKey="label" innerRadius={58} outerRadius={82} paddingAngle={2} stroke="none">
+              {pieData.map((d) => (
+                <Cell key={d.label} fill={d.hex} />
+              ))}
+            </Pie>
+            <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <div className="text-2xl font-bold leading-none">{total}</div>
+          <div className="mt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Total</div>
+        </div>
+      </div>
+      <div className="w-full flex-1 space-y-2">
+        {items.map((i) => (
+          <div key={i.label} className="flex items-center gap-2 text-sm">
+            <span className={`h-2.5 w-2.5 rounded-full ${i.dot}`} />
+            <span className="flex-1">{i.label}</span>
+            <span className="font-medium tabular-nums">{i.value}</span>
+            <span className="w-12 text-right tabular-nums text-muted-foreground">{Math.round((i.value / total) * 100)}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -266,87 +312,82 @@ export default function DashboardPage() {
             <CardContent className="pt-6">
               {breakdownLoading ? (
                 <Skeleton className="h-[180px] w-full" />
-              ) : gender.total === 0 ? (
-                <div className="text-sm text-muted-foreground">Belum ada booking hari ini.</div>
               ) : (
-                (() => {
-                  const items = [
+                <DonutBreakdown
+                  items={[
                     { label: 'Pria', value: gender.male, hex: '#3b82f6', dot: 'bg-blue-500' },
                     { label: 'Wanita', value: gender.female, hex: '#ec4899', dot: 'bg-pink-500' },
                     { label: 'Lainnya', value: gender.unknown, hex: '#94a3b8', dot: 'bg-slate-400' },
-                  ];
-                  const pieData = items.filter((i) => i.value > 0);
-                  return (
-                    <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
-                      <div className="relative h-[180px] w-[180px] shrink-0">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie data={pieData} dataKey="value" nameKey="label" innerRadius={58} outerRadius={82} paddingAngle={2} stroke="none">
-                              {pieData.map((d) => (
-                                <Cell key={d.label} fill={d.hex} />
-                              ))}
-                            </Pie>
-                            <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
-                          </PieChart>
-                        </ResponsiveContainer>
-                        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                          <div className="text-2xl font-bold leading-none">{gender.total}</div>
-                          <div className="mt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Total</div>
-                        </div>
-                      </div>
-                      <div className="w-full flex-1 space-y-2">
-                        {items.map((i) => (
-                          <div key={i.label} className="flex items-center gap-2 text-sm">
-                            <span className={`h-2.5 w-2.5 rounded-full ${i.dot}`} />
-                            <span className="flex-1">{i.label}</span>
-                            <span className="font-medium tabular-nums">{i.value}</span>
-                            <span className="w-12 text-right tabular-nums text-muted-foreground">{Math.round((i.value / gender.total) * 100)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()
+                  ]}
+                />
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Weekly trend (full width) */}
-        <Card>
-          <CardHeader className="border-b bg-muted/30">
-            <CardTitle className="flex items-center gap-2">
-              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <BarChart3 className="h-4 w-4" />
-              </span>
-              Tren Booking Minggu Ini
-            </CardTitle>
-            <CardDescription>Total booking per hari (minggu ini)</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-6">
-            <div className="h-[300px]">
-              {weeklyLoading ? (
-                <Skeleton className="h-full w-full" />
+        {/* Status breakdown + weekly trend */}
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader className="border-b bg-muted/30">
+              <CardTitle className="flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Activity className="h-4 w-4" />
+                </span>
+                Status Hari Ini
+              </CardTitle>
+              <CardDescription>Sebaran status booking hari ini</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6">
+              {statsLoading ? (
+                <Skeleton className="h-[180px] w-full" />
               ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={weeklyChartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="weeklyTrendFill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="day" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
-                    <YAxis tickLine={false} axisLine={false} width={28} tick={{ fontSize: 12 }} allowDecimals={false} />
-                    <Tooltip cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 1, strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
-                    <Area type="monotone" dataKey="total" name="Total booking" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#weeklyTrendFill)" dot={{ r: 3, fill: 'hsl(var(--primary))', strokeWidth: 0 }} activeDot={{ r: 5 }} />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <DonutBreakdown
+                  items={[
+                    { label: 'Booked', value: todayStats?.booked || 0, hex: '#f59e0b', dot: 'bg-amber-500' },
+                    { label: 'Inside', value: todayStats?.checkin || 0, hex: '#22c55e', dot: 'bg-green-500' },
+                    { label: 'Completed', value: todayStats?.completed || 0, hex: '#3b82f6', dot: 'bg-blue-500' },
+                    { label: 'No-show', value: todayStats?.noShow || 0, hex: '#ef4444', dot: 'bg-red-500' },
+                  ]}
+                />
               )}
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="border-b bg-muted/30">
+              <CardTitle className="flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <BarChart3 className="h-4 w-4" />
+                </span>
+                Tren Booking Minggu Ini
+              </CardTitle>
+              <CardDescription>Total booking per hari (minggu ini)</CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="h-[300px]">
+                {weeklyLoading ? (
+                  <Skeleton className="h-full w-full" />
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={weeklyChartData} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="weeklyTrendFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
+                          <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis dataKey="day" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
+                      <YAxis tickLine={false} axisLine={false} width={28} tick={{ fontSize: 12 }} allowDecimals={false} />
+                      <Tooltip cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 1, strokeDasharray: '3 3' }} contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
+                      <Area type="monotone" dataKey="total" name="Total booking" stroke="hsl(var(--primary))" strokeWidth={2.5} fill="url(#weeklyTrendFill)" dot={{ r: 3, fill: 'hsl(var(--primary))', strokeWidth: 0 }} activeDot={{ r: 5 }} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
           <CommandInput placeholder="Cari perintah..." />
