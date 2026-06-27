@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Calendar, Clock, BarChart3, LayoutDashboard, CheckCircle, RefreshCw, Dumbbell } from 'lucide-react';
+import { Users, Calendar, BarChart3, LayoutDashboard, CheckCircle, RefreshCw, Dumbbell } from 'lucide-react';
 import { format } from 'date-fns';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -14,8 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { CommandDialog, CommandInput, CommandList, CommandGroup, CommandItem, CommandEmpty, CommandSeparator, CommandShortcut } from '@/components/ui/command';
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
 import { Badge } from '@/components/ui/badge';
-import { useGymOccupancy, useTodayBookingStats, usePendingApprovalsList, useTodayBookingsSimple } from '@/hooks/useGymSchedules';
-import { useWeeklyTrendsData, useTodaySessionBreakdown, DailyData, SessionToday } from '@/hooks/useGymAnalytics';
+import { useGymOccupancy, useTodayBookingStats, useTodayBookingsSimple } from '@/hooks/useGymSchedules';
+import { useWeeklyTrendsData, useTodayBreakdown, DailyData, SessionToday } from '@/hooks/useGymAnalytics';
 
 const titleCase = (raw: string): string =>
   String(raw || '')
@@ -46,7 +46,9 @@ export default function DashboardPage() {
   });
 
   const { data: weeklyTrendsData, isLoading: weeklyLoading } = useWeeklyTrendsData();
-  const { data: sessionsToday, isLoading: sessionsLoading } = useTodaySessionBreakdown();
+  const { data: todayBreakdown, isLoading: breakdownLoading } = useTodayBreakdown();
+  const sessionsToday = useMemo(() => todayBreakdown?.sessions ?? [], [todayBreakdown]);
+  const gender = todayBreakdown?.gender ?? { male: 0, female: 0, unknown: 0, total: 0 };
 
   const isLoading = occupancyLoading || statsLoading;
 
@@ -71,8 +73,7 @@ export default function DashboardPage() {
   }, []);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerType, setDrawerType] = useState<'pending' | 'booked' | null>(null);
-  const { data: approvalsList } = usePendingApprovalsList(10);
+  const [drawerType, setDrawerType] = useState<'booked' | null>(null);
   const { data: bookedList } = useTodayBookingsSimple(10);
 
   const weeklySparkBooked = useMemo(() => {
@@ -154,7 +155,7 @@ export default function DashboardPage() {
         </div>
 
         {/* KPI cards */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {occupancyLoading ? (
             <Skeleton className="h-32" />
           ) : (
@@ -165,13 +166,11 @@ export default function DashboardPage() {
               <Skeleton className="h-32" />
               <Skeleton className="h-32" />
               <Skeleton className="h-32" />
-              <Skeleton className="h-32" />
             </>
           ) : (
             <>
               <StatCard title="Booked Today" value={todayStats?.booked || 0} icon={Calendar} variant="info" badgeText="Week" sparklineData={weeklySparkBooked} onClick={() => { setDrawerType('booked'); setDrawerOpen(true); }} />
               <StatCard title="Completed Today" value={todayStats?.completed || 0} icon={CheckCircle} variant="success" badgeText="Week" sparklineData={weeklySparkCompleted} onClick={() => navigate('/reports')} />
-              <StatCard title="Pending Approvals" value={todayStats?.pending || 0} icon={Clock} variant="warning" onClick={() => { setDrawerType('pending'); setDrawerOpen(true); }} />
               <StatCard title="Approved Today" value={todayStats?.approved || 0} icon={CheckCircle} variant="info" onClick={() => navigate('/gym_booking')} />
             </>
           )}
@@ -207,7 +206,7 @@ export default function DashboardPage() {
               <CardDescription>Booking & kehadiran per sesi</CardDescription>
             </CardHeader>
             <CardContent className="pt-6 space-y-4">
-              {sessionsLoading ? (
+              {breakdownLoading ? (
                 <>
                   <Skeleton className="h-14 w-full" />
                   <Skeleton className="h-14 w-full" />
@@ -250,34 +249,85 @@ export default function DashboardPage() {
             <CardHeader className="border-b bg-muted/30">
               <CardTitle className="flex items-center gap-2">
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <BarChart3 className="h-4 w-4" />
+                  <Users className="h-4 w-4" />
                 </span>
-                Tren Booking Minggu Ini
+                Gender Hari Ini
               </CardTitle>
-              <CardDescription>Total vs. selesai vs. no-show per hari</CardDescription>
+              <CardDescription>Sebaran gender booking aktif hari ini</CardDescription>
             </CardHeader>
             <CardContent className="pt-6">
-              <div className="h-[300px]">
-                {weeklyLoading ? (
-                  <Skeleton className="h-full w-full" />
-                ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={weeklyTrendsData} barGap={2}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                      <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
-                      <Bar dataKey="total" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Total" />
-                      <Bar dataKey="completed" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} name="Completed" />
-                      <Bar dataKey="noShow" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} name="No-show" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
+              {breakdownLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : gender.total === 0 ? (
+                <div className="text-sm text-muted-foreground">Belum ada booking hari ini.</div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
+                    {gender.male > 0 ? <div className="bg-blue-500" style={{ width: `${Math.round((gender.male / gender.total) * 100)}%` }} /> : null}
+                    {gender.female > 0 ? <div className="bg-pink-500" style={{ width: `${Math.round((gender.female / gender.total) * 100)}%` }} /> : null}
+                    {gender.unknown > 0 ? <div className="bg-slate-400" style={{ width: `${Math.round((gender.unknown / gender.total) * 100)}%` }} /> : null}
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div className="rounded-lg border bg-background p-3">
+                      <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="h-2 w-2 rounded-full bg-blue-500" /> Pria
+                      </div>
+                      <div className="text-2xl font-semibold text-blue-600 dark:text-blue-400">{gender.male}</div>
+                      <div className="text-xs text-muted-foreground">{Math.round((gender.male / gender.total) * 100)}%</div>
+                    </div>
+                    <div className="rounded-lg border bg-background p-3">
+                      <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="h-2 w-2 rounded-full bg-pink-500" /> Wanita
+                      </div>
+                      <div className="text-2xl font-semibold text-pink-600 dark:text-pink-400">{gender.female}</div>
+                      <div className="text-xs text-muted-foreground">{Math.round((gender.female / gender.total) * 100)}%</div>
+                    </div>
+                    <div className="rounded-lg border bg-background p-3">
+                      <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                        <span className="h-2 w-2 rounded-full bg-slate-400" /> Lainnya
+                      </div>
+                      <div className="text-2xl font-semibold text-slate-600 dark:text-slate-300">{gender.unknown}</div>
+                      <div className="text-xs text-muted-foreground">{Math.round((gender.unknown / gender.total) * 100)}%</div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
+
+        {/* Weekly trend (full width) */}
+        <Card>
+          <CardHeader className="border-b bg-muted/30">
+            <CardTitle className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <BarChart3 className="h-4 w-4" />
+              </span>
+              Tren Booking Minggu Ini
+            </CardTitle>
+            <CardDescription>Total vs. selesai vs. no-show per hari</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="h-[300px]">
+              {weeklyLoading ? (
+                <Skeleton className="h-full w-full" />
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={weeklyTrendsData} barGap={2}>
+                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="day" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
+                    <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
+                    <Legend wrapperStyle={{ fontSize: 12 }} />
+                    <Bar dataKey="total" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Total" />
+                    <Bar dataKey="completed" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} name="Completed" />
+                    <Bar dataKey="noShow" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} name="No-show" />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
           <CommandInput placeholder="Cari perintah..." />
@@ -314,22 +364,10 @@ export default function DashboardPage() {
         <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
           <DrawerContent>
             <DrawerHeader>
-              <DrawerTitle>{drawerType === 'pending' ? 'Pending Approvals (10 terbaru)' : drawerType === 'booked' ? 'Booked Hari Ini (10 terdekat)' : 'Detail'}</DrawerTitle>
+              <DrawerTitle>{drawerType === 'booked' ? 'Booked Hari Ini (10 terdekat)' : 'Detail'}</DrawerTitle>
             </DrawerHeader>
             <div className="p-4">
-              {drawerType === 'pending' ? (
-                <div className="space-y-2">
-                  {(approvalsList || []).map((b) => (
-                    <div key={b.id} className="row-interactive rounded-md border p-2 flex items-center justify-between">
-                      <div className="text-sm">{b.employee_name || b.employee_id} • {b.session_name || '-'} • {b.time_start || '-'}</div>
-                      <Button variant="outline" size="sm" onClick={() => navigate('/gym_booking')}>Buka</Button>
-                    </div>
-                  ))}
-                  {(!approvalsList || approvalsList.length === 0) && (
-                    <div className="text-sm text-muted-foreground">Tidak ada data</div>
-                  )}
-                </div>
-              ) : drawerType === 'booked' ? (
+              {drawerType === 'booked' ? (
                 <div className="space-y-2">
                   {(bookedList || []).map((b) => (
                     <div key={b.id} className="row-interactive rounded-md border p-2 flex items-center justify-between">

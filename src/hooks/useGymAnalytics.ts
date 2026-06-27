@@ -21,11 +21,24 @@ export interface SessionToday {
   noShow: number;
 }
 
+export interface GenderBreakdown {
+  male: number;
+  female: number;
+  unknown: number;
+  total: number;
+}
+
+export interface TodayBreakdown {
+  sessions: SessionToday[];
+  gender: GenderBreakdown;
+}
+
 interface BookingRow {
   booking_date?: string;
   schedule_id?: number | null;
   status?: string | null;
   approval_status?: string | null;
+  gender?: string | null;
 }
 
 interface AvailabilityRow {
@@ -82,12 +95,13 @@ export function useWeeklyTrendsData() {
   });
 }
 
-// Today's bookings + check-ins + no-shows grouped per session (the gym runs on
-// fixed sessions, so this is far clearer than an hourly breakdown).
-export function useTodaySessionBreakdown() {
+// Today's bookings grouped per session (the gym runs on fixed sessions, so this
+// is far clearer than an hourly breakdown) plus the gender split of today's
+// active bookings.
+export function useTodayBreakdown() {
   return useQuery({
-    queryKey: ['analytics-today-sessions'],
-    queryFn: async (): Promise<SessionToday[]> => {
+    queryKey: ['analytics-today-breakdown'],
+    queryFn: async (): Promise<TodayBreakdown> => {
       const dateStr = format(new Date(), 'yyyy-MM-dd');
       const availability = await fetchJson<{ success: boolean; sessions?: AvailabilityRow[] }>(
         `gym-availability?date=${dateStr}`
@@ -115,7 +129,19 @@ export function useTodaySessionBreakdown() {
         if (status === 'EXPIRED') bySched[sid].noShow++;
       });
 
-      return sessions
+      const gender: GenderBreakdown = { male: 0, female: 0, unknown: 0, total: 0 };
+      bookings.forEach((b) => {
+        const status = String(b.status || '').toUpperCase();
+        const appr = String(b.approval_status || '').toUpperCase();
+        if (status === 'CANCELLED' || appr === 'REJECTED') return; // exclude freed slots
+        const g = String(b.gender || '').trim().toUpperCase();
+        gender.total++;
+        if (g === 'M' || g === 'MALE') gender.male++;
+        else if (g === 'F' || g === 'FEMALE') gender.female++;
+        else gender.unknown++;
+      });
+
+      const sessionList = sessions
         .map((s) => {
           const sid = Number(s.schedule_id) || 0;
           const agg = bySched[sid] || { booked: 0, checkedIn: 0, noShow: 0 };
@@ -131,6 +157,8 @@ export function useTodaySessionBreakdown() {
           };
         })
         .sort((a, b) => a.time_start.localeCompare(b.time_start));
+
+      return { sessions: sessionList, gender };
     },
     staleTime: 30000,
   });
