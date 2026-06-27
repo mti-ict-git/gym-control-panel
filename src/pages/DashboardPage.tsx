@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Users, Calendar, BarChart3, LayoutDashboard, CheckCircle, RefreshCw, Dumbbell } from 'lucide-react';
 import { format } from 'date-fns';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/StatCard';
 import { OccupancyCard } from '@/components/OccupancyCard';
@@ -265,40 +265,48 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent className="pt-6">
               {breakdownLoading ? (
-                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-[180px] w-full" />
               ) : gender.total === 0 ? (
                 <div className="text-sm text-muted-foreground">Belum ada booking hari ini.</div>
               ) : (
-                <div className="space-y-4">
-                  <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
-                    {gender.male > 0 ? <div className="bg-blue-500" style={{ width: `${Math.round((gender.male / gender.total) * 100)}%` }} /> : null}
-                    {gender.female > 0 ? <div className="bg-pink-500" style={{ width: `${Math.round((gender.female / gender.total) * 100)}%` }} /> : null}
-                    {gender.unknown > 0 ? <div className="bg-slate-400" style={{ width: `${Math.round((gender.unknown / gender.total) * 100)}%` }} /> : null}
-                  </div>
-                  <div className="grid grid-cols-3 gap-3 text-center">
-                    <div className="rounded-lg border bg-background p-3">
-                      <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                        <span className="h-2 w-2 rounded-full bg-blue-500" /> Pria
+                (() => {
+                  const items = [
+                    { label: 'Pria', value: gender.male, hex: '#3b82f6', dot: 'bg-blue-500' },
+                    { label: 'Wanita', value: gender.female, hex: '#ec4899', dot: 'bg-pink-500' },
+                    { label: 'Lainnya', value: gender.unknown, hex: '#94a3b8', dot: 'bg-slate-400' },
+                  ];
+                  const pieData = items.filter((i) => i.value > 0);
+                  return (
+                    <div className="flex flex-col items-center gap-4 sm:flex-row sm:gap-6">
+                      <div className="relative h-[180px] w-[180px] shrink-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie data={pieData} dataKey="value" nameKey="label" innerRadius={58} outerRadius={82} paddingAngle={2} stroke="none">
+                              {pieData.map((d) => (
+                                <Cell key={d.label} fill={d.hex} />
+                              ))}
+                            </Pie>
+                            <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                          <div className="text-2xl font-bold leading-none">{gender.total}</div>
+                          <div className="mt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Total</div>
+                        </div>
                       </div>
-                      <div className="text-2xl font-semibold text-blue-600 dark:text-blue-400">{gender.male}</div>
-                      <div className="text-xs text-muted-foreground">{Math.round((gender.male / gender.total) * 100)}%</div>
-                    </div>
-                    <div className="rounded-lg border bg-background p-3">
-                      <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                        <span className="h-2 w-2 rounded-full bg-pink-500" /> Wanita
+                      <div className="w-full flex-1 space-y-2">
+                        {items.map((i) => (
+                          <div key={i.label} className="flex items-center gap-2 text-sm">
+                            <span className={`h-2.5 w-2.5 rounded-full ${i.dot}`} />
+                            <span className="flex-1">{i.label}</span>
+                            <span className="font-medium tabular-nums">{i.value}</span>
+                            <span className="w-12 text-right tabular-nums text-muted-foreground">{Math.round((i.value / gender.total) * 100)}%</span>
+                          </div>
+                        ))}
                       </div>
-                      <div className="text-2xl font-semibold text-pink-600 dark:text-pink-400">{gender.female}</div>
-                      <div className="text-xs text-muted-foreground">{Math.round((gender.female / gender.total) * 100)}%</div>
                     </div>
-                    <div className="rounded-lg border bg-background p-3">
-                      <div className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-                        <span className="h-2 w-2 rounded-full bg-slate-400" /> Lainnya
-                      </div>
-                      <div className="text-2xl font-semibold text-slate-600 dark:text-slate-300">{gender.unknown}</div>
-                      <div className="text-xs text-muted-foreground">{Math.round((gender.unknown / gender.total) * 100)}%</div>
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()
               )}
             </CardContent>
           </Card>
