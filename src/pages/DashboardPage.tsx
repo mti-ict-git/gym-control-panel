@@ -98,6 +98,17 @@ export default function DashboardPage() {
     );
   }, [weeklyTrendsData]);
 
+  // One solid stacked bar per day (booked + completed + no-show = total) so the
+  // chart never shows empty gaps when completed/no-show are 0.
+  const weeklyChartData = useMemo(() => {
+    return ((weeklyTrendsData as DailyData[] | undefined) ?? []).map((d) => {
+      const total = Number(d.total || 0);
+      const completed = Number(d.completed || 0);
+      const noShow = Number(d.noShow || 0);
+      return { day: d.day, open: Math.max(0, total - completed - noShow), completed, noShow, total };
+    });
+  }, [weeklyTrendsData]);
+
   // Capacity is the largest session quota (used by the occupancy gauge + banner),
   // not a hard-coded 15.
   const maxQuota = useMemo(() => {
@@ -305,7 +316,7 @@ export default function DashboardPage() {
               </span>
               Tren Booking Minggu Ini
             </CardTitle>
-            <CardDescription>Total vs. selesai vs. no-show per hari</CardDescription>
+            <CardDescription>Komposisi booking per hari: booked vs. selesai vs. no-show</CardDescription>
           </CardHeader>
           <CardContent className="pt-6">
             <div className="h-[300px]">
@@ -313,15 +324,15 @@ export default function DashboardPage() {
                 <Skeleton className="h-full w-full" />
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={weeklyTrendsData} barGap={2}>
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                    <XAxis dataKey="day" tick={{ fontSize: 12 }} />
-                    <YAxis tick={{ fontSize: 12 }} allowDecimals={false} />
-                    <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
+                  <BarChart data={weeklyChartData} maxBarSize={44}>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
+                    <XAxis dataKey="day" tickLine={false} axisLine={false} tick={{ fontSize: 12 }} />
+                    <YAxis tickLine={false} axisLine={false} width={28} tick={{ fontSize: 12 }} allowDecimals={false} />
+                    <Tooltip cursor={{ fill: 'hsl(var(--muted) / 0.4)' }} contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '8px' }} />
                     <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="total" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} name="Total" />
-                    <Bar dataKey="completed" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} name="Completed" />
-                    <Bar dataKey="noShow" fill="hsl(var(--destructive))" radius={[4, 4, 0, 0]} name="No-show" />
+                    <Bar dataKey="open" stackId="a" fill="hsl(var(--primary))" name="Booked" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="completed" stackId="a" fill="hsl(var(--chart-2))" name="Completed" />
+                    <Bar dataKey="noShow" stackId="a" fill="hsl(var(--destructive))" name="No-show" radius={[4, 4, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
