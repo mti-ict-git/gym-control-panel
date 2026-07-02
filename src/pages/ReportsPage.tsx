@@ -20,6 +20,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar as DatePickerCalendar } from '@/components/ui/calendar';
+import type { Matcher } from 'react-day-picker';
 import { cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 
@@ -91,7 +92,7 @@ function DatePickerField({
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
-  disabled?: { before?: Date; after?: Date };
+  disabled?: Matcher;
 }) {
   const [open, setOpen] = useState(false);
   const selected = parseLocalDate(value);
@@ -123,11 +124,9 @@ function DatePickerField({
             initialFocus
             className="pointer-events-auto"
             classNames={{
-              // Make "today" stand out: a bold amber ring + text, distinct from a
-              // plain day and from the selected day (which stays filled primary).
-              // The ring layers over the selected fill, so today+selected reads as
-              // a filled cell with an amber outline.
-              day_today: 'font-semibold text-amber-600 ring-2 ring-inset ring-amber-500 rounded-md',
+              // Highlight "today" as a soft pink chip (matching the app's badge
+              // style), so it clearly stands out from a plain day.
+              day_today: 'bg-pink-100 text-pink-700 border border-pink-200 rounded-md font-medium',
             }}
           />
           {selected && (
@@ -816,24 +815,30 @@ export default function ReportsPage() {
                   </div>
                 </div>
 
-                {dateRange === 'custom' && (
-                  <>
-                    <DatePickerField
-                      label="Start Date"
-                      value={customStartDate}
-                      onChange={setCustomStartDate}
-                      placeholder="Pick a start date"
-                      disabled={parseLocalDate(customEndDate) ? { after: parseLocalDate(customEndDate) } : undefined}
-                    />
-                    <DatePickerField
-                      label="End Date"
-                      value={customEndDate}
-                      onChange={setCustomEndDate}
-                      placeholder="Pick an end date"
-                      disabled={parseLocalDate(customStartDate) ? { before: parseLocalDate(customStartDate) } : undefined}
-                    />
-                  </>
-                )}
+                {dateRange === 'custom' && (() => {
+                  // Compute each bound once so the truthy branch narrows to Date
+                  // (a valid DateAfter/DateBefore matcher), not Date | undefined.
+                  const startObj = parseLocalDate(customStartDate);
+                  const endObj = parseLocalDate(customEndDate);
+                  return (
+                    <>
+                      <DatePickerField
+                        label="Start Date"
+                        value={customStartDate}
+                        onChange={setCustomStartDate}
+                        placeholder="Pick a start date"
+                        disabled={endObj ? { after: endObj } : undefined}
+                      />
+                      <DatePickerField
+                        label="End Date"
+                        value={customEndDate}
+                        onChange={setCustomEndDate}
+                        placeholder="Pick an end date"
+                        disabled={startObj ? { before: startObj } : undefined}
+                      />
+                    </>
+                  );
+                })()}
 
                 <div className="space-y-2">
                   <Label>Employee ID</Label>
