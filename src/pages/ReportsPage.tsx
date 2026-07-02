@@ -121,7 +121,10 @@ function DatePickerField({
                 setOpen(false);
               }
             }}
-            initialFocus
+            // Only auto-focus when a date is already chosen. Otherwise react-day-picker
+            // focuses today, and the focused cell's blue ring (--ring) makes today look
+            // "selected" (blue) before the user has picked anything, hiding the pink chip.
+            initialFocus={!!selected}
             className="pointer-events-auto"
             classNames={{
               // Highlight "today" as a soft pink chip (matching the app's badge
