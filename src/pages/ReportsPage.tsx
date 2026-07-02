@@ -122,6 +122,13 @@ function DatePickerField({
             }}
             initialFocus
             className="pointer-events-auto"
+            classNames={{
+              // Make "today" stand out: a bold amber ring + text, distinct from a
+              // plain day and from the selected day (which stays filled primary).
+              // The ring layers over the selected fill, so today+selected reads as
+              // a filled cell with an amber outline.
+              day_today: 'font-semibold text-amber-600 ring-2 ring-inset ring-amber-500 rounded-md',
+            }}
           />
           {selected && (
             <div className="flex justify-end border-t p-2">
