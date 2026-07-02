@@ -130,6 +130,11 @@ function DatePickerField({
               // Highlight "today" as a soft pink chip (matching the app's badge
               // style), so it clearly stands out from a plain day.
               day_today: 'bg-pink-100 text-pink-700 border border-pink-200 rounded-md font-medium',
+              // The picked day is a soft green chip (like the session chips) instead
+              // of the default blue. '!' keeps green winning over the pink "today"
+              // chip when the picked day happens to be today.
+              day_selected:
+                '!bg-green-100 !text-green-700 border border-green-200 rounded-md font-medium hover:!bg-green-100 hover:!text-green-700 focus:!bg-green-100 focus:!text-green-700',
             }}
           />
           {selected && (
