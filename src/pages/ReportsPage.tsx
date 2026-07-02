@@ -18,6 +18,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as DatePickerCalendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
 import { useQuery } from '@tanstack/react-query';
 
 type DateRange = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'custom' | 'all';
@@ -71,6 +74,74 @@ function parseLocalDate(value: string): Date | undefined {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim());
   if (!m) return undefined;
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+// A themed date picker (Popover + Calendar) replacing the native <input type="date">,
+// which renders an OS-styled control that ignores the app theme/dark mode. Value is
+// the same 'yyyy-MM-dd' string the rest of the page uses; `disabled` constrains the
+// selectable range (e.g. end date can't precede the start date).
+function DatePickerField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  disabled?: { before?: Date; after?: Date };
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = parseLocalDate(value);
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="outline"
+            className={cn('w-full justify-start text-left font-normal', !selected && 'text-muted-foreground')}
+          >
+            <Calendar className="mr-2 h-4 w-4 opacity-60" />
+            {selected ? format(selected, 'MMM d, yyyy') : placeholder}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-auto p-0" align="start">
+          <DatePickerCalendar
+            mode="single"
+            selected={selected}
+            defaultMonth={selected}
+            disabled={disabled}
+            onSelect={(d) => {
+              if (d) {
+                onChange(format(d, 'yyyy-MM-dd'));
+                setOpen(false);
+              }
+            }}
+            initialFocus
+            className="pointer-events-auto"
+          />
+          {selected && (
+            <div className="flex justify-end border-t p-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => {
+                  onChange('');
+                  setOpen(false);
+                }}
+              >
+                Clear
+              </Button>
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
 }
 
 // Escape a value for CSV: quote when it contains a comma/quote/newline (doubling
@@ -740,14 +811,20 @@ export default function ReportsPage() {
 
                 {dateRange === 'custom' && (
                   <>
-                    <div className="space-y-2">
-                      <Label>Start Date</Label>
-                      <Input type="date" value={customStartDate} onChange={(e) => setCustomStartDate(e.target.value)} className="w-full" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>End Date</Label>
-                      <Input type="date" value={customEndDate} onChange={(e) => setCustomEndDate(e.target.value)} className="w-full" />
-                    </div>
+                    <DatePickerField
+                      label="Start Date"
+                      value={customStartDate}
+                      onChange={setCustomStartDate}
+                      placeholder="Pick a start date"
+                      disabled={parseLocalDate(customEndDate) ? { after: parseLocalDate(customEndDate) } : undefined}
+                    />
+                    <DatePickerField
+                      label="End Date"
+                      value={customEndDate}
+                      onChange={setCustomEndDate}
+                      placeholder="Pick an end date"
+                      disabled={parseLocalDate(customStartDate) ? { before: parseLocalDate(customStartDate) } : undefined}
+                    />
                   </>
                 )}
 
