@@ -213,6 +213,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
   };
 
   const lastRequiredState = new Map();
+  const notRequiredStreak = new Map();
 
   const runOnce = async () => {
     const cfg = gymDbConfig();
@@ -464,6 +465,12 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
       24 * 60 * 60 * 1000
     );
 
+    // A single tick can spuriously read "not required" (transient DB hiccup, a booking
+    // row briefly missing its schedule join, etc.) even mid-session. Require the same
+    // negative reading on this many consecutive ticks before actually revoking access,
+    // so one bad tick can't lock someone out of a session they're still booked for.
+    const pruneConfirmTicks = clamp(envInt(process.env.GYM_PRUNE_CONFIRM_TICKS, 2), 1, 10);
+
     const updateEmployeeAccess = async (employeeId, allow, cardNo, source, opts = {}) => {
       const desiredTz = allow ? tzAllow : tzDeny;
       const current = overrideMap.get(employeeId) || null;
@@ -569,23 +576,37 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         const prevRequired = prevRequiredRaw === undefined ? Boolean(hadAllowOverride) : Boolean(prevRequiredRaw);
         const nowRequired = Boolean(inRange);
 
-        if (!prevRequired && nowRequired) {
-          console.log('[gym-worker] grant', {
-            employee_id: employeeId,
-            unit_no: unitNo,
-            card_no: booking?.card_no || null,
-          });
-          pushAccessEvent({ t: new Date().toISOString(), type: 'grant', employee_id: employeeId, unit_no: unitNo });
-          await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER');
-        } else if (nowRequired) {
-          await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER', { maxAgeMs: grantRefreshMaxAgeMs });
-        } else if (prevRequired && !nowRequired && current && isPrunableOverride) {
-          console.log('[gym-worker] prune', {
-            employee_id: employeeId,
-            unit_no: unitNo,
-          });
-          pushAccessEvent({ t: new Date().toISOString(), type: 'prune', employee_id: employeeId, unit_no: unitNo });
-          await updateEmployeeAccess(employeeId, false, booking?.card_no || null, 'WORKER');
+        if (nowRequired) {
+          notRequiredStreak.delete(employeeId);
+          if (!prevRequired) {
+            console.log('[gym-worker] grant', {
+              employee_id: employeeId,
+              unit_no: unitNo,
+              card_no: booking?.card_no || null,
+            });
+            pushAccessEvent({ t: new Date().toISOString(), type: 'grant', employee_id: employeeId, unit_no: unitNo });
+            await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER');
+          } else {
+            await updateEmployeeAccess(employeeId, true, booking?.card_no || null, 'WORKER', { maxAgeMs: grantRefreshMaxAgeMs });
+          }
+        } else if (prevRequired) {
+          const streak = (notRequiredStreak.get(employeeId) || 0) + 1;
+          if (streak < pruneConfirmTicks) {
+            // Not confirmed yet — keep treating him as still required so next tick's
+            // prevRequired stays true and a real grant edge isn't lost mid-debounce.
+            notRequiredStreak.set(employeeId, streak);
+            lastRequiredState.set(employeeId, true);
+            continue;
+          }
+          notRequiredStreak.delete(employeeId);
+          if (current && isPrunableOverride) {
+            console.log('[gym-worker] prune', {
+              employee_id: employeeId,
+              unit_no: unitNo,
+            });
+            pushAccessEvent({ t: new Date().toISOString(), type: 'prune', employee_id: employeeId, unit_no: unitNo });
+            await updateEmployeeAccess(employeeId, false, booking?.card_no || null, 'WORKER');
+          }
         }
 
         lastRequiredState.set(employeeId, nowRequired);
