@@ -1598,6 +1598,35 @@ router.post('/gym-controller-access', requireGymAdmin, async (req, res) => {
     }
     log('cardNo_resolved', { source: cardNoSource, count: cardNos.length, duplicate_enabled: allowDuplicateCardPerEmployee });
 
+    // Self-heal the PIN before uploading. Vault Base64-decodes PinCardNo inside
+    // UploadCardByDoorUnitNo, so a PIN whose length is not a multiple of 4 makes the
+    // call throw "Invalid length for a Base-64 char array or string" and the door grant
+    // NEVER lands — the user then taps and gets "Wrong Time Zone" forever (and can even
+    // be auto-banned for the system's own failure). Card issuance keeps re-introducing
+    // junk defaults ('1', '12345', '123456'), so a one-off cleanup is not enough: blank
+    // the offending PIN here, on the grant path, every time.
+    try {
+      const pinPool = await new sql.ConnectionPool(config).connect();
+      try {
+        const pinReq = pinPool.request();
+        const params = cardNos.map((c, i) => {
+          pinReq.input(`pc${i}`, sql.VarChar(50), c);
+          return `@pc${i}`;
+        });
+        const fixed = await pinReq.query(
+          `UPDATE DataDBEnt.dbo.CardDB SET PinCardNo = ''
+           WHERE CardNo IN (${params.join(', ')}) AND (LEN(PinCardNo) % 4) <> 0`
+        );
+        const n = Array.isArray(fixed?.rowsAffected) ? Number(fixed.rowsAffected[0] || 0) : 0;
+        if (n > 0) log('pin_sanitized', { cards: n });
+      } finally {
+        await pinPool.close();
+      }
+    } catch (e) {
+      // Non-fatal: still attempt the upload, it may simply succeed.
+      log('pin_sanitize_failed', { message: e?.message || String(e) });
+    }
+
     const uploadResults = [];
     for (const currentCardNo of cardNos) {
       const url = new URL(`${baseUrl.replace(/\/+$/, '')}/UploadCardByDoorUnitNo`);
@@ -2235,10 +2264,18 @@ router.post('/gym-booking-create', async (req, res) => {
         noShowReq.input('employee_id', sql.VarChar(20), employeeId);
         noShowReq.input('today', sql.Date, todayDate);
         noShowReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
+        noShowReq.input('gymUnit', sql.VarChar(20), unitNo);
         const sinceWhere = noShowSinceDate ? 'AND gb.BookingDate >= @since' : '';
         if (noShowSinceDate) {
           noShowReq.input('since', sql.Date, noShowSinceDate);
         }
+        // "Showed up" = a valid entry tap OR *any* tap at the gym door that day —
+        // including a REJECTED one ("Wrong Time Zone"), which proves the person
+        // physically came but a failed access grant blocked them. Rejected taps are
+        // never synced into gym_live_taps (GYM_SYNC_ONLY_VALID=1), so read the raw
+        // controller log and map CardNo -> StaffNo via CardDB. Without this, a broken
+        // grant gets the user auto-banned for the system's own failure.
+        // Mirrors the proactive scanner's DayAttempt logic in app.js.
         const noShowRes = await noShowReq.query(
           `SELECT TOP 3 gb.BookingDate AS booking_date,
              CASE WHEN EXISTS (
@@ -2246,6 +2283,13 @@ router.post('/gym-booking-create', async (req, res) => {
                WHERE t.EmployeeID = @employee_id
                  AND CONVERT(date, t.TxnTime) = gb.BookingDate
                  AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @entryPat
+             ) OR EXISTS (
+               SELECT 1
+               FROM DataDBEnt.dbo.tblTransaction tx
+               INNER JOIN DataDBEnt.dbo.CardDB cd ON cd.CardNo = tx.CardNo
+               WHERE cd.StaffNo = @employee_id
+                 AND tx.UnitNo = @gymUnit
+                 AND CONVERT(date, tx.TrDateTime) = gb.BookingDate
              ) THEN 1 ELSE 0 END AS has_entry_tap
            FROM dbo.gym_booking gb
            WHERE gb.EmployeeID = @employee_id
