@@ -68,6 +68,8 @@ export default function RegisterPage() {
     employeeId: string;
     employeeName: string | null;
     department: string | null;
+    noShowCount: number;
+    noShowLimit: number;
   } | null>(null);
   const [datePopoverOpen, setDatePopoverOpen] = useState(false);
   const defaultContactName = 'Gym Coordinator';
@@ -559,7 +561,15 @@ export default function RegisterPage() {
   const submitRegistration = async (data: FormData) => {
     setIsSubmitting(true);
     try {
-      type CreateResult = { ok: boolean; error?: string; booking_id?: number; schedule_id?: number } | null;
+      type CreateResult = {
+        ok: boolean;
+        error?: string;
+        booking_id?: number;
+        schedule_id?: number;
+        no_show_count?: number;
+        no_show_limit?: number;
+        no_show_warning?: boolean;
+      } | null;
       const tryPost = async (url: string): Promise<{ resp: Response; json: CreateResult }> => {
         const normalizedEmployeeId = String(data.employeeId || '').trim().toUpperCase();
         const resp = await fetch(url, {
@@ -613,6 +623,8 @@ export default function RegisterPage() {
           employeeId: normalizedEmployeeId,
           employeeName: bookingDetails?.name ?? employeeProfile?.name ?? null,
           department: bookingDetails?.department ?? employeeProfile?.department ?? null,
+          noShowCount: typeof payload.no_show_count === 'number' ? payload.no_show_count : 0,
+          noShowLimit: typeof payload.no_show_limit === 'number' ? payload.no_show_limit : 3,
         });
         setSuccessOpen(true);
       }
@@ -1095,6 +1107,18 @@ export default function RegisterPage() {
                     <div>Name: {successInfo.employeeName || '-'}</div>
                     <div>Department: {successInfo.department || '-'}</div>
                     <div>Employee ID: {successInfo.employeeId}</div>
+                  </div>
+                ) : null}
+                {successInfo && successInfo.noShowCount > 0 ? (
+                  <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900">
+                    <div className="font-medium">
+                      Peringatan: {successInfo.noShowCount} kali tidak hadir berturut-turut
+                    </div>
+                    <div className="mt-1 text-xs">
+                      {successInfo.noShowCount >= successInfo.noShowLimit - 1
+                        ? `Satu kali lagi tidak hadir, akun Anda diblokir dari booking selama 7 hari.`
+                        : `Tidak hadir ${successInfo.noShowLimit} kali berturut-turut akan memblokir booking Anda selama 7 hari.`}
+                    </div>
                   </div>
                 ) : null}
                 <div className="mt-3 text-slate-600">
