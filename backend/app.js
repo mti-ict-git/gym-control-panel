@@ -817,6 +817,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
           SELECT
             br.EmployeeID,
             br.rn,
+            br.BookingDate,
             CASE WHEN ISNULL(de.HasEntry, 0) = 1 OR da.TapDate IS NOT NULL OR gfd.TapDate IS NOT NULL THEN 1 ELSE 0 END AS HasEntry,
             MIN(CASE WHEN ISNULL(de.HasEntry, 0) = 1 OR da.TapDate IS NOT NULL OR gfd.TapDate IS NOT NULL THEN br.rn END) OVER (PARTITION BY br.EmployeeID) AS firstEntryRn
           FROM BookingRows br
@@ -833,12 +834,24 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
         NoShowCount AS (
           SELECT
             a.EmployeeID,
-            SUM(CASE WHEN a.HasEntry = 0 AND (a.firstEntryRn IS NULL OR a.rn < a.firstEntryRn) THEN 1 ELSE 0 END) AS ConsecutiveNoShow
+            SUM(CASE WHEN a.HasEntry = 0 AND (a.firstEntryRn IS NULL OR a.rn < a.firstEntryRn) THEN 1 ELSE 0 END) AS ConsecutiveNoShow,
+            MAX(CASE WHEN a.HasEntry = 0 AND (a.firstEntryRn IS NULL OR a.rn < a.firstEntryRn) THEN a.BookingDate END) AS LastNoShowDate
           FROM Annotated a
           GROUP BY a.EmployeeID
         ),
         ToBan AS (
-          SELECT n.EmployeeID, n.ConsecutiveNoShow
+          -- The 7 days run from the offence, not from whenever the scan happened to
+          -- notice it: this scan runs every 6h and the booking path only checks when the
+          -- person books again, so anchoring to detection made the same offence end on a
+          -- different date depending on timing. Floor it at @today so a late detection
+          -- still costs at least the rest of the day rather than expiring on arrival.
+          SELECT
+            n.EmployeeID,
+            n.ConsecutiveNoShow,
+            CASE
+              WHEN DATEADD(day, 7, n.LastNoShowDate) > @today THEN DATEADD(day, 7, n.LastNoShowDate)
+              ELSE @today
+            END AS BannedUntil
           FROM NoShowCount n
           WHERE n.ConsecutiveNoShow >= 3
         )
@@ -847,7 +860,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
         ON tgt.EmployeeID = src.EmployeeID
         WHEN MATCHED THEN
           UPDATE SET
-            BannedUntil = DATEADD(day, 7, @today),
+            BannedUntil = src.BannedUntil,
             Reason = 'NO_SHOW_3X',
             ConsecutiveNoShow = src.ConsecutiveNoShow,
             UnbanRemark = NULL,
@@ -856,7 +869,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
             UpdatedAt = GETDATE()
         WHEN NOT MATCHED THEN
           INSERT (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow)
-          VALUES (src.EmployeeID, DATEADD(day, 7, @today), 'NO_SHOW_3X', src.ConsecutiveNoShow);
+          VALUES (src.EmployeeID, src.BannedUntil, 'NO_SHOW_3X', src.ConsecutiveNoShow);
 
         UPDATE gb
         SET

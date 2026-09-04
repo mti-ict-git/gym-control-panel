@@ -2368,10 +2368,16 @@ router.post('/gym-booking-create', async (req, res) => {
         );
         const noShowRows = Array.isArray(noShowRes?.recordset) ? noShowRes.recordset : [];
         let consecutiveNoShow = 0;
+        let lastNoShowDate = null;
         for (const row of noShowRows) {
           const hasEntry = Number(row?.has_entry_tap || 0) === 1;
           if (hasEntry) break;
           consecutiveNoShow += 1;
+          // Rows come back newest-first, so the first one is the most recent miss.
+          if (lastNoShowDate === null && row?.booking_date) {
+            const d = row.booking_date instanceof Date ? row.booking_date : new Date(String(row.booking_date));
+            if (!isNaN(d.getTime())) lastNoShowDate = d;
+          }
         }
         const updateCountReq = gymPool.request();
         updateCountReq.input('employee_id', sql.VarChar(20), employeeId);
@@ -2399,17 +2405,27 @@ router.post('/gym-booking-create', async (req, res) => {
         noShowCount = consecutiveNoShow;
         const shouldBan = consecutiveNoShow >= 3;
         if (shouldBan) {
+          // The 7 days run from the offence, not from whenever it was noticed. This path
+          // only checks when the person books again, which can be long after the misses,
+          // so anchoring to detection punished a late booker far more than a prompt one.
+          // Floor it at today so a very late detection still costs at least the rest of
+          // the day instead of expiring the moment it is applied.
+          const DAY_MS = 24 * 60 * 60 * 1000;
+          const anchored = lastNoShowDate ? new Date(lastNoShowDate.getTime() + 7 * DAY_MS) : null;
+          const bannedUntil = anchored && anchored.getTime() > todayDate.getTime() ? anchored : todayDate;
           const banReq = gymPool.request();
           banReq.input('employee_id', sql.VarChar(20), employeeId);
           banReq.input('today', sql.Date, todayDate);
+          banReq.input('banned_until', sql.Date, bannedUntil);
           banReq.input('reason', sql.VarChar(255), 'NO_SHOW_3X');
+          banReq.input('consecutive_no_show', sql.Int, consecutiveNoShow);
           await banReq.query(
             `IF EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id)
              BEGIN
                UPDATE dbo.gym_booking_ban
-               SET BannedUntil = DATEADD(day, 7, @today),
+               SET BannedUntil = @banned_until,
                    Reason = @reason,
-                   ConsecutiveNoShow = 3,
+                   ConsecutiveNoShow = @consecutive_no_show,
                   UnbanRemark = NULL,
                   UnbanAt = NULL,
                   ActionBy = NULL,
@@ -2419,9 +2435,9 @@ router.post('/gym-booking-create', async (req, res) => {
              ELSE
              BEGIN
                INSERT INTO dbo.gym_booking_ban (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow)
-               VALUES (@employee_id, DATEADD(day, 7, @today), @reason, 3);
+               VALUES (@employee_id, @banned_until, @reason, @consecutive_no_show);
              END;
-             
+
              UPDATE dbo.gym_booking
              SET Status = 'CANCELLED',
                  RejectedReason = 'Auto-cancelled by System due to 3x No-Show Ban'
@@ -2429,7 +2445,6 @@ router.post('/gym-booking-create', async (req, res) => {
                AND BookingDate >= @today
                AND Status IN ('BOOKED','CHECKIN');`
           );
-          const bannedUntil = new Date(todayDate.getTime() + 7 * 24 * 60 * 60 * 1000);
           const bannedStr = isNaN(bannedUntil.getTime()) ? null : bannedUntil.toISOString().slice(0, 10);
           await gymPool.close();
           gymPool = null;
