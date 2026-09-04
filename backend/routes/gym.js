@@ -55,6 +55,29 @@ async function ensureGymBookingBanTable(pool) {
   );
 }
 
+// Records days on which the door grant demonstrably failed for someone, so the no-show
+// logic can tell "did not come" apart from "came but the system never let them in".
+// A rejected tap already proves attendance, but a user whose grant never landed often
+// gives up without tapping at all (or sees others rejected and leaves) - they left no
+// trace anywhere and were being auto-banned for the system's own failure.
+async function ensureGymGrantFailureTable(pool) {
+  await pool.request().query(
+    `IF OBJECT_ID('dbo.gym_grant_failure','U') IS NULL BEGIN
+       CREATE TABLE dbo.gym_grant_failure (
+         Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+         EmployeeID VARCHAR(20) NOT NULL,
+         UnitNo VARCHAR(20) NOT NULL,
+         FailDate DATE NOT NULL,
+         FailedAt DATETIME NOT NULL CONSTRAINT DF_gym_grant_failure_FailedAt DEFAULT GETDATE(),
+         Reason VARCHAR(500) NULL
+       );
+     END`
+  );
+  await pool.request().query(
+    "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_grant_failure_emp_date' AND object_id = OBJECT_ID('dbo.gym_grant_failure')) BEGIN CREATE INDEX IX_gym_grant_failure_emp_date ON dbo.gym_grant_failure(EmployeeID, FailDate); END"
+  );
+}
+
 function classifyEmployeeIdKind(employeeId) {
   const id = String(employeeId ?? '').trim();
   if (!id) return 'UNKNOWN';
@@ -1694,6 +1717,41 @@ router.post('/gym-controller-access', requireGymAdmin, async (req, res) => {
       }
     } else {
       log('override_write_skipped_upload_failed', { unit_no: unitNo, tz: customAccessTz });
+      // Leave a trace that the door grant failed today, but only for an ALLOW attempt -
+      // a failed prune does not stop anyone from entering. The no-show logic reads this
+      // so the user is not counted absent (and eventually auto-banned) on a day the
+      // system itself never opened the door for them.
+      if (customAccessTz === tzAllow) {
+        try {
+          const failPool = await new sql.ConnectionPool(config).connect();
+          try {
+            await ensureGymGrantFailureTable(failPool);
+            const failReq = failPool.request();
+            failReq.input('emp', sql.VarChar(20), employeeId);
+            failReq.input('unit', sql.VarChar(20), unitNo);
+            failReq.input(
+              'reason',
+              sql.VarChar(500),
+              String(primaryUpload?.parsed?.log || primaryUpload?.body || '').trim().slice(0, 500) || null
+            );
+            // One row per employee per day: the worker retries every 60s, so an
+            // unguarded insert would add thousands of rows over a single session.
+            await failReq.query(
+              `DECLARE @d DATE = CONVERT(date, DATEADD(hour, 8, GETUTCDATE()));
+               IF NOT EXISTS (
+                 SELECT 1 FROM dbo.gym_grant_failure
+                 WHERE EmployeeID = @emp AND UnitNo = @unit AND FailDate = @d
+               )
+               INSERT INTO dbo.gym_grant_failure (EmployeeID, UnitNo, FailDate, Reason)
+               VALUES (@emp, @unit, @d, @reason)`
+            );
+          } finally {
+            await failPool.close();
+          }
+        } catch (e) {
+          log('grant_failure_record_failed', { message: e?.message || String(e) });
+        }
+      }
     }
 
     const finalOk = uploadOk;
@@ -2207,6 +2265,7 @@ router.post('/gym-booking-create', async (req, res) => {
     gymPool = await new sql.ConnectionPool(gymConfig).connect();
     await ensureGymScheduleIsActiveColumn(gymPool);
     await ensureGymBookingBanTable(gymPool);
+    await ensureGymGrantFailureTable(gymPool);
     const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
     const unitNo = envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
     const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
@@ -2223,6 +2282,9 @@ router.post('/gym-booking-create', async (req, res) => {
       isCommittee = Array.isArray(committeeRes?.recordset) && committeeRes.recordset.length > 0;
     }
     const isManager = await isEmployeeManager(employeeId);
+    // Surfaced on the successful booking response so the user can be warned BEFORE the
+    // third strike. Previously the first they knew of it was their booking being refused.
+    let noShowCount = 0;
     if (!isCommittee && !isManager) {
       const banCheckReq = gymPool.request();
       banCheckReq.input('employee_id', sql.VarChar(20), employeeId);
@@ -2277,7 +2339,7 @@ router.post('/gym-booking-create', async (req, res) => {
         // grant gets the user auto-banned for the system's own failure.
         // Mirrors the proactive scanner's DayAttempt logic in app.js.
         const noShowRes = await noShowReq.query(
-          `SELECT TOP 3 gb.BookingDate AS booking_date,
+          `SELECT gb.BookingDate AS booking_date,
              CASE WHEN EXISTS (
                SELECT 1 FROM dbo.gym_live_taps t
                WHERE t.EmployeeID = @employee_id
@@ -2290,6 +2352,11 @@ router.post('/gym-booking-create', async (req, res) => {
                WHERE cd.StaffNo = @employee_id
                  AND tx.UnitNo = @gymUnit
                  AND CONVERT(date, tx.TrDateTime) = gb.BookingDate
+             ) OR EXISTS (
+               SELECT 1 FROM dbo.gym_grant_failure gf
+               WHERE gf.EmployeeID = @employee_id
+                 AND gf.UnitNo = @gymUnit
+                 AND gf.FailDate = gb.BookingDate
              ) THEN 1 ELSE 0 END AS has_entry_tap
            FROM dbo.gym_booking gb
            WHERE gb.EmployeeID = @employee_id
@@ -2309,14 +2376,27 @@ router.post('/gym-booking-create', async (req, res) => {
         const updateCountReq = gymPool.request();
         updateCountReq.input('employee_id', sql.VarChar(20), employeeId);
         updateCountReq.input('consecutive_no_show', sql.Int, consecutiveNoShow);
+        updateCountReq.input('today_date', sql.Date, todayDate);
+        // Persist the running count even for someone who has never been banned. The old
+        // UPDATE-only form silently dropped it for first-timers, so ConsecutiveNoShow was
+        // blank for exactly the people a warning would help, and the Ban List could not be
+        // trusted as an early warning. A row created here is NOT a ban: BannedUntil is
+        // backdated, so every "is this person banned" check (BannedUntil >= today) still
+        // reads false. Only write a row once there is something to warn about.
         await updateCountReq.query(
           `IF EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id)
            BEGIN
              UPDATE dbo.gym_booking_ban
              SET ConsecutiveNoShow = @consecutive_no_show
              WHERE EmployeeID = @employee_id;
+           END
+           ELSE IF @consecutive_no_show > 0
+           BEGIN
+             INSERT INTO dbo.gym_booking_ban (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow)
+             VALUES (@employee_id, DATEADD(day, -1, @today_date), NULL, @consecutive_no_show);
            END`
         );
+        noShowCount = consecutiveNoShow;
         const shouldBan = consecutiveNoShow >= 3;
         if (shouldBan) {
           const banReq = gymPool.request();
@@ -2613,7 +2693,15 @@ router.post('/gym-booking-create', async (req, res) => {
     );
 
     const bookingId = Number(insertResult?.recordset?.[0]?.booking_id || 0);
-    return res.json({ ok: true, booking_id: bookingId, schedule_id: scheduleId });
+    return res.json({
+      ok: true,
+      booking_id: bookingId,
+      schedule_id: scheduleId,
+      no_show_count: noShowCount,
+      no_show_limit: 3,
+      // 2 strikes means the next miss bans them for 7 days - worth telling them now.
+      no_show_warning: noShowCount >= 2,
+    });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ ok: false, error: message });

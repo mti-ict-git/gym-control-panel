@@ -684,6 +684,20 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
     );
   };
   const runProactiveScanQuery = async (pool, entryPattern, gymUnit) => {
+    // The scan joins gym_grant_failure; on a fresh database it would not exist yet and
+    // the whole scan would fail rather than just skipping that signal.
+    await pool.request().query(
+      `IF OBJECT_ID('dbo.gym_grant_failure','U') IS NULL BEGIN
+         CREATE TABLE dbo.gym_grant_failure (
+           Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+           EmployeeID VARCHAR(20) NOT NULL,
+           UnitNo VARCHAR(20) NOT NULL,
+           FailDate DATE NOT NULL,
+           FailedAt DATETIME NOT NULL CONSTRAINT DF_gym_grant_failure_FailedAt DEFAULT GETDATE(),
+           Reason VARCHAR(500) NULL
+         );
+       END`
+    );
     const scanReq = pool.request();
     scanReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
     scanReq.input('gymUnit', sql.VarChar(20), String(gymUnit || '0031'));
@@ -786,12 +800,25 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
             AND CONVERT(date, tx.TrDateTime) >= @windowStart
           GROUP BY cd.StaffNo, CONVERT(date, tx.TrDateTime)
         ),
+        -- Days on which the door grant itself failed for this person. A rejected tap
+        -- proves they came, but someone whose grant never landed often gives up without
+        -- tapping at all and leaves no trace anywhere - counting that as a no-show bans
+        -- them for the system's own failure. Written by /gym-controller-access.
+        DayGrantFail AS (
+          SELECT gf.EmployeeID, gf.FailDate AS TapDate
+          FROM dbo.gym_grant_failure gf
+          INNER JOIN Candidate c ON c.EmployeeID = gf.EmployeeID
+          WHERE gf.UnitNo = @gymUnit
+            AND gf.FailDate < @today
+            AND gf.FailDate >= @windowStart
+          GROUP BY gf.EmployeeID, gf.FailDate
+        ),
         Annotated AS (
           SELECT
             br.EmployeeID,
             br.rn,
-            CASE WHEN ISNULL(de.HasEntry, 0) = 1 OR da.TapDate IS NOT NULL THEN 1 ELSE 0 END AS HasEntry,
-            MIN(CASE WHEN ISNULL(de.HasEntry, 0) = 1 OR da.TapDate IS NOT NULL THEN br.rn END) OVER (PARTITION BY br.EmployeeID) AS firstEntryRn
+            CASE WHEN ISNULL(de.HasEntry, 0) = 1 OR da.TapDate IS NOT NULL OR gfd.TapDate IS NOT NULL THEN 1 ELSE 0 END AS HasEntry,
+            MIN(CASE WHEN ISNULL(de.HasEntry, 0) = 1 OR da.TapDate IS NOT NULL OR gfd.TapDate IS NOT NULL THEN br.rn END) OVER (PARTITION BY br.EmployeeID) AS firstEntryRn
           FROM BookingRows br
           LEFT JOIN DayEntry de
             ON de.EmployeeID = br.EmployeeID
@@ -799,6 +826,9 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
           LEFT JOIN DayAttempt da
             ON da.EmployeeID = br.EmployeeID
            AND da.TapDate = br.BookingDate
+          LEFT JOIN DayGrantFail gfd
+            ON gfd.EmployeeID = br.EmployeeID
+           AND gfd.TapDate = br.BookingDate
         ),
         NoShowCount AS (
           SELECT
