@@ -705,6 +705,31 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
               WHERE b.EmployeeID = gb.EmployeeID
                 AND b.BannedUntil >= @today
             )
+            -- Committee members are exempt from the ban check in /gym-booking-create,
+            -- so the scanner must not ban them either. Without this the two paths
+            -- disagree and a committee member can end up carrying a NO_SHOW_3X ban.
+            AND NOT EXISTS (
+              SELECT 1
+              FROM dbo.gym_access_committee cm
+              WHERE cm.EmployeeID = gb.EmployeeID
+                AND cm.UnitNo = @gymUnit
+                AND cm.IsActive = 1
+            )
+            -- Managers are likewise exempt in the booking path (isEmployeeManager) and
+            -- hold always-allow access. Match on both columns the rest of the codebase
+            -- treats as the role source (the booking path reads 'grade', the worker reads
+            -- 'job_title') so nobody is auto-banned by one definition but exempt by the other.
+            AND NOT EXISTS (
+              SELECT 1
+              FROM MTIMasterEmployeeDB.dbo.employee_employment em
+              WHERE em.employee_id = gb.EmployeeID
+                AND (
+                  UPPER(ISNULL(em.grade, '')) LIKE '%MANAGER%'
+                  OR UPPER(ISNULL(em.grade, '')) LIKE '%GM%'
+                  OR UPPER(ISNULL(em.job_title, '')) LIKE '%MANAGER%'
+                  OR UPPER(ISNULL(em.job_title, '')) LIKE '%GM%'
+                )
+            )
         ),
         BookingRows AS (
           SELECT
@@ -719,6 +744,17 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
           WHERE gb.BookingDate < @today
             AND gb.BookingDate >= @windowStart
             AND gb.Status IN ('BOOKED','CHECKIN')
+            -- Honour a manual unban: bookings from BEFORE the unban were already
+            -- forgiven by whoever lifted the ban. /gym-booking-create honours this via
+            -- noShowSinceDate; without the same cut-off here the scanner simply re-bans
+            -- the person on the same old bookings within 6h, silently undoing the unban.
+            AND NOT EXISTS (
+              SELECT 1
+              FROM dbo.gym_booking_ban ub
+              WHERE ub.EmployeeID = gb.EmployeeID
+                AND ub.UnbanAt IS NOT NULL
+                AND gb.BookingDate < CONVERT(date, ub.UnbanAt)
+            )
         ),
         DayEntry AS (
           SELECT
