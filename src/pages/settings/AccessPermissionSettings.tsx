@@ -1,4 +1,5 @@
 import { KeyRound, Plus, Search, Trash2 } from 'lucide-react';
+import { authHeaders, assertAuthorized, AuthError } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -70,9 +71,10 @@ export default function AccessPermissionSettings() {
       const post = async (url: string) => {
         const resp = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify(payload),
         });
+        assertAuthorized(resp);
         if (!resp.ok) throw new Error('Failed to update access permission settings');
         return (await resp.json()) as { ok: boolean; error?: string };
       };
@@ -81,7 +83,8 @@ export default function AccessPermissionSettings() {
         const json = await post('/api/gym-controller-settings');
         if (!json.ok) throw new Error(json.error || 'Failed to update access permission settings');
         return true;
-      } catch (_) {
+      } catch (e) {
+        if (e instanceof AuthError) throw e;
         const json = await post('/gym-controller-settings');
         if (!json.ok) throw new Error(json.error || 'Failed to update access permission settings');
         return true;
@@ -194,9 +197,10 @@ export default function AccessPermissionSettings() {
       const post = async (url: string) => {
         const resp = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({ employee_id: employeeId }),
         });
+        assertAuthorized(resp);
         if (!resp.ok) throw new Error('Failed to add committee member');
         return (await resp.json()) as { ok: boolean; error?: string };
       };
@@ -205,7 +209,8 @@ export default function AccessPermissionSettings() {
         const json = await post('/api/gym-access-committee-add');
         if (!json.ok) throw new Error(json.error || 'Failed to add committee member');
         return true;
-      } catch (_) {
+      } catch (e) {
+        if (e instanceof AuthError) throw e;
         const json = await post('/gym-access-committee-add');
         if (!json.ok) throw new Error(json.error || 'Failed to add committee member');
         return true;
@@ -225,9 +230,10 @@ export default function AccessPermissionSettings() {
       const post = async (url: string) => {
         const resp = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({ employee_id: employeeId }),
         });
+        assertAuthorized(resp);
         if (!resp.ok) throw new Error('Failed to remove committee member');
         return (await resp.json()) as { ok: boolean; error?: string };
       };
@@ -236,7 +242,8 @@ export default function AccessPermissionSettings() {
         const json = await post('/api/gym-access-committee-remove');
         if (!json.ok) throw new Error(json.error || 'Failed to remove committee member');
         return true;
-      } catch (_) {
+      } catch (e) {
+        if (e instanceof AuthError) throw e;
         const json = await post('/gym-access-committee-remove');
         if (!json.ok) throw new Error(json.error || 'Failed to remove committee member');
         return true;
@@ -260,6 +267,7 @@ export default function AccessPermissionSettings() {
           headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
           body: JSON.stringify({ employee_id: employeeId, access: allow, source: 'MANUAL_LOCK' }),
         });
+        assertAuthorized(resp);
         const json = (await resp.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
         if (resp.status >= 500) throw new Error(json?.error || 'Server error');
         return json as { ok: boolean; error?: string };
@@ -269,7 +277,8 @@ export default function AccessPermissionSettings() {
         let json: { ok: boolean; error?: string } = { ok: false };
         try {
           json = await postOne('/api/gym-controller-access', employeeId);
-        } catch (_) {
+        } catch (e) {
+          if (e instanceof AuthError) throw e;
           json = await postOne('/gym-controller-access', employeeId);
         }
         if (!json?.ok) throw new Error(json?.error || 'Failed to update controller access');
@@ -282,6 +291,7 @@ export default function AccessPermissionSettings() {
         try {
           await updateOne(id);
         } catch (e) {
+          if (e instanceof AuthError) throw e;
           const msg = e instanceof Error ? e.message : String(e);
           failures.push(`${id}: ${msg}`);
         }

@@ -30,7 +30,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { cn } from '@/lib/utils';
+import { cn, authHeaders, assertAuthorized, AuthError } from '@/lib/utils';
 
 export default function SchedulesPage() {
   const [sessionDialogOpen, setSessionDialogOpen] = useState(false);
@@ -163,7 +163,8 @@ export default function SchedulesPage() {
     mutationFn: async (payload: { employee_id: string; schedule_id: number; duty_date: string }) => {
       if (!payload.schedule_id || payload.schedule_id <= 0) throw new Error('ScheduleID tidak tersedia untuk sesi ini');
       const post = async (url: string) => {
-        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+        assertAuthorized(r);
         const j = await r.json();
         if (r.status >= 500) throw new Error(j?.error || 'Server error');
         if (!j?.ok) throw new Error(j?.error || 'Failed to assign');
@@ -171,7 +172,8 @@ export default function SchedulesPage() {
       };
       try {
         await post('/api/gym-committee-roster-assign');
-      } catch (_) {
+      } catch (e) {
+        if (e instanceof AuthError) throw e;
         await post('/gym-committee-roster-assign');
       }
       return true;
@@ -186,7 +188,8 @@ export default function SchedulesPage() {
   const removeRosterMutation = useMutation({
     mutationFn: async (payload: { employee_id: string; schedule_id: number; duty_date: string }) => {
       const post = async (url: string) => {
-        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+        assertAuthorized(r);
         const j = await r.json();
         if (r.status >= 500) throw new Error(j?.error || 'Server error');
         if (!j?.ok) throw new Error(j?.error || 'Failed to remove');
@@ -194,7 +197,8 @@ export default function SchedulesPage() {
       };
       try {
         await post('/api/gym-committee-roster-remove');
-      } catch (_) {
+      } catch (e) {
+        if (e instanceof AuthError) throw e;
         await post('/gym-committee-roster-remove');
       }
       return true;

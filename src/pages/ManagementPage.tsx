@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { authHeaders, assertAuthorized } from '@/lib/utils';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -73,9 +74,10 @@ export default function ManagementPage() {
     try {
       const res = await fetch(`/api/gym-accounts/${accountId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ role: newRole }),
       });
+      assertAuthorized(res);
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Failed to update role');
       toast.success('Role updated successfully');
@@ -116,9 +118,10 @@ export default function ManagementPage() {
       // Create account directly in GymDB
       const resp = await fetch('/api/gym-accounts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ username: newUserUsername, email: newUserEmail, role: newUserRole, is_active: true, password: newUserPassword }),
       });
+      assertAuthorized(resp);
       const j = await resp.json();
       if (!j.ok) {
         toast.error(j.error || 'Failed to create gym account');
@@ -179,9 +182,10 @@ export default function ManagementPage() {
       if (editPassword) payload.password = editPassword;
       const res = await fetch(`/api/gym-accounts/${editUserId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(payload),
       });
+      assertAuthorized(res);
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Failed to update account');
       toast.success('User updated');
@@ -200,7 +204,8 @@ export default function ManagementPage() {
   const handleDeleteUser = async () => {
     try {
       const accountId = isDeletingUserId;
-      const res = await fetch(`/api/gym-accounts/${accountId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/gym-accounts/${accountId}`, { method: 'DELETE', headers: authHeaders() });
+      assertAuthorized(res);
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Failed to delete');
       toast.success('User removed from listing');

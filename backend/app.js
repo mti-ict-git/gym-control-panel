@@ -9,6 +9,7 @@ import gymRouter from './routes/gym.js';
 import authRouter from './routes/auth.js';
 import settingsRouter from './routes/settings.js';
 import { envBool, envTrim, envInt, startOfDayUtcDateForOffsetMinutes } from './lib/env.js';
+import { enforcedBanExistsSql, committeeExemptSql, managerExemptSql, titleManagerSql } from './lib/gymBan.js';
 
 dotenv.config();
 
@@ -61,12 +62,17 @@ app.get('/gym-access-stream', (req, res) => {
   });
 });
 
+// Outcome of the most recent proactive ban scan. Kept apart from accessEvents because that
+// ring buffer rotates in about two minutes, and the scan only runs every 6h: its failure
+// went unnoticed for months while it lived only in the process console.
+let lastBanScan = null;
+
 app.get('/api/gym-access-log', (_req, res) => {
-  res.json({ ok: true, events: accessEvents.slice(-200) });
+  res.json({ ok: true, events: accessEvents.slice(-200), ban_scan: lastBanScan });
 });
 
 app.get('/gym-access-log', (_req, res) => {
-  res.json({ ok: true, events: accessEvents.slice(-200) });
+  res.json({ ok: true, events: accessEvents.slice(-200), ban_scan: lastBanScan });
 });
 
 // Support both /api prefix and root-level routes to tolerate different proxy setups
@@ -176,15 +182,6 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
 
   const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
-  const pickColumn = (columns, candidates) => {
-    const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
-    for (const cand of candidates) {
-      const hit = map.get(String(cand).toLowerCase());
-      if (hit) return hit;
-    }
-    return null;
-  };
-
   const pickSchemaForTable = async (pool, tableName) => {
     const req = pool.request();
     req.input('table', sql.VarChar(128), String(tableName));
@@ -198,22 +195,35 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     return row?.schema_name ? String(row.schema_name) : null;
   };
 
-  const normRole = (v) =>
-    String(v ?? '')
-      .trim()
-      .replace(/\s+/g, ' ')
-      .toUpperCase();
-
-  const isManagerRole = (role) => {
-    const r = normRole(role);
-    if (!r) return false;
-    if (r.includes('MANAGER')) return true;
-    if (r.includes('GM')) return true;
-    return false;
-  };
-
   const lastRequiredState = new Map();
   const notRequiredStreak = new Map();
+  // The pool a tick opened, so the tick loop can close it when a query throws mid-tick
+  // (runOnce used to leak one connection pool per failed tick).
+  let workerPool = null;
+
+  // Employee IDs are compared case-insensitively by SQL Server but not by a JS Map, and the
+  // override table does hold rows like 'mti260029' next to bookings for 'MTI260029'. Keyed
+  // raw, the worker saw two people: it granted one key and revoked the other, on the same
+  // card, every tick. Every map below is keyed through this.
+  const empKey = (v) => String(v ?? '').trim().toUpperCase();
+
+  // A revoke that fails (Vault down, card missing, timeout) used to be forgotten: the
+  // override stayed at the allow TZ and the door stayed open around the clock, with no
+  // booking needed. Revokes are now retried, but with backoff, so a card that can never be
+  // revoked does not cost an 8s Vault timeout on every tick.
+  const revokeBackoff = new Map();
+  const revokeDue = (id) => {
+    const b = revokeBackoff.get(id);
+    return !b || Date.now() >= b.nextAt;
+  };
+  const noteRevoke = (id, ok) => {
+    if (ok) {
+      revokeBackoff.delete(id);
+      return;
+    }
+    const fails = Math.min((revokeBackoff.get(id)?.fails || 0) + 1, 5);
+    revokeBackoff.set(id, { fails, nextAt: Date.now() + 60_000 * 2 ** (fails - 1) });
+  };
 
   const runOnce = async () => {
     const cfg = gymDbConfig();
@@ -236,6 +246,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     };
 
     const pool = await new sql.ConnectionPool(cfg).connect();
+    workerPool = pool;
     await pool.request().query(`IF OBJECT_ID('dbo.gym_controller_settings','U') IS NULL BEGIN
       CREATE TABLE dbo.gym_controller_settings (
         Id INT NOT NULL CONSTRAINT PK_gym_controller_settings PRIMARY KEY,
@@ -314,7 +325,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
       .query(`SELECT EmployeeID, CustomAccessTZ, UpdatedAt, Source FROM dbo.gym_controller_access_override WHERE UnitNo = @unit`);
     const overrideMap = new Map(
       (Array.isArray(overridesRes?.recordset) ? overridesRes.recordset : []).map((r) => [
-        String(r.EmployeeID).trim(),
+        empKey(r.EmployeeID),
         {
           tz: String(r.CustomAccessTZ).trim(),
           updatedAt: r?.UpdatedAt ? new Date(r.UpdatedAt).toISOString() : null,
@@ -330,7 +341,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
 
     const alwaysAllow = new Set(
       (Array.isArray(committeeRes?.recordset) ? committeeRes.recordset : [])
-        .map((r) => String(r.EmployeeID ?? '').trim())
+        .map((r) => empKey(r.EmployeeID))
         .filter(Boolean)
     );
 
@@ -340,96 +351,118 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     });
 
     if (enableManagerAllSessionAccess) {
+      let masterPool = null;
       try {
         const masterCfg = masterDbConfig();
         if (masterCfg) {
-          const masterPool = await new sql.ConnectionPool(masterCfg).connect();
+          masterPool = await new sql.ConnectionPool(masterCfg).connect();
           const employmentSchema = await pickSchemaForTable(masterPool, 'employee_employment');
           if (employmentSchema) {
-            const colsRes = await masterPool.request().query(
-              `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'employee_employment' AND TABLE_SCHEMA = '${employmentSchema.replace(/'/g, "''")}'`
+            // Same title rule the ban exemption uses (lib/gymBan.js), so everyone let in
+            // around the clock here is also exempt from bans - never "banned" while this
+            // list keeps opening the door for them.
+            const r = await masterPool.request().query(
+              `SELECT TOP 5000 em.employee_id
+               FROM [${employmentSchema.replace(/]/g, ']]')}].[employee_employment] em
+               WHERE UPPER(LTRIM(RTRIM(ISNULL(em.status, '')))) = 'ACTIVE'
+                 AND ${titleManagerSql('em')}`
             );
-            const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
-            const empIdCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
-            const roleCol = pickColumn(cols, [
-              'job_title',
-              'JobTitle',
-              'title',
-              'Title',
-              'position',
-              'Position',
-              'job_position',
-              'JobPosition',
-              'level',
-              'Level',
-              'band',
-              'Band',
-              'rank',
-              'Rank',
-            ]);
-            const gradeCol = pickColumn(cols, ['grade', 'Grade', 'job_grade', 'JobGrade']);
-            const statusCol = pickColumn(cols, ['status', 'Status', 'employment_status', 'EmploymentStatus', 'is_active', 'IsActive', 'active', 'Active']);
-            const endDateCol = pickColumn(cols, ['end_date', 'EndDate', 'enddate', 'termination_date', 'TerminationDate']);
-            const startDateCol = pickColumn(cols, ['start_date', 'StartDate', 'startdate', 'effective_date', 'EffectiveDate']);
-
-            if (empIdCol && roleCol) {
-              const reqEmp = masterPool.request();
-              if (statusCol) reqEmp.input('active', sql.VarChar(50), 'ACTIVE');
-              reqEmp.input('today', sql.Date, todayDate);
-              const whereParts = [];
-              if (statusCol) whereParts.push(`UPPER(LTRIM(RTRIM([${statusCol}]))) = UPPER(@active)`);
-              if (endDateCol) whereParts.push(`([${endDateCol}] IS NULL OR [${endDateCol}] >= @today)`);
-              if (startDateCol) whereParts.push(`([${startDateCol}] IS NULL OR [${startDateCol}] <= @today)`);
-              whereParts.push(`(UPPER(LTRIM(RTRIM([${roleCol}]))) LIKE '%GM%' OR UPPER(LTRIM(RTRIM([${roleCol}]))) LIKE '%MANAGER%')`);
-              if (gradeCol) whereParts.push(`UPPER(LTRIM(RTRIM([${gradeCol}]))) NOT LIKE '%SUPERVISOR%'`);
-
-              const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
-              const q = `SELECT TOP 5000 [${empIdCol}] AS employee_id, [${roleCol}] AS role_value FROM [${employmentSchema}].[employee_employment] ${whereSql}`;
-              const r = await reqEmp.query(q);
-              const rows = Array.isArray(r?.recordset) ? r.recordset : [];
-              for (const row of rows) {
-                const employeeId = String(row.employee_id ?? '').trim();
-                if (!employeeId) continue;
-                if (isManagerRole(row.role_value)) alwaysAllow.add(employeeId);
-              }
+            for (const row of r?.recordset || []) {
+              const employeeId = empKey(row.employee_id);
+              if (employeeId) alwaysAllow.add(employeeId);
             }
           }
-          await masterPool.close();
         }
       } catch (_) {
+      } finally {
+        if (masterPool) await masterPool.close().catch(() => {});
       }
     }
 
     if (!enabled && alwaysAllow.size === 0) {
       await pool.close();
+      workerPool = null;
       return { nextIntervalMs };
     }
 
     const bookingMap = new Map();
+    // People banned right now. The door is the only place a ban actually bites: a booking
+    // that outlived its owner's ban (the scanner never cancelled any) used to be honoured
+    // here, and banned employees walked in. Read separately and fail OPEN - with no ban
+    // list this tick the worker behaves as it did before, rather than refusing everyone.
+    const bannedSet = new Set();
+    // False when the list came from the fallback query without the manager exemption. It
+    // is then still good enough to withhold booking grants, but not to take a door away:
+    // an exempt manager with a leftover ban row would be revoked on every database blip.
+    let banListExact = false;
     if (enabled) {
+      const readBanned = async (withManagerExemption) => {
+        const r = await pool
+          .request()
+          .input('todayStr', sql.VarChar(10), todayStr)
+          .input('unit', sql.VarChar(20), unitNo)
+          .query(
+            `SELECT DISTINCT b0.EmployeeID FROM dbo.gym_booking_ban b0
+             WHERE ${enforcedBanExistsSql('b0.EmployeeID', 'CONVERT(date, @todayStr)', '@unit', { withManagerExemption })}`
+          );
+        for (const row of r?.recordset || []) {
+          const id = empKey(row.EmployeeID);
+          if (id && !alwaysAllow.has(id)) bannedSet.add(id);
+        }
+      };
+      try {
+        await readBanned(true);
+        banListExact = true;
+      } catch (e) {
+        // The manager exemption reads MTIMasterEmployeeDB; don't let that database take
+        // ban enforcement down with it.
+        console.log('[gym-worker] ban list with manager exemption failed, retrying without:', e?.message || String(e));
+        try {
+          await readBanned(false);
+        } catch (e2) {
+          console.log('[gym-worker] ban list unavailable this tick:', e2?.message || String(e2));
+        }
+      }
+
       const reqBookings = pool.request();
       reqBookings.input('todayStr', sql.VarChar(10), todayStr);
       reqBookings.input('yesterdayStr', sql.VarChar(10), yesterdayStr);
+      reqBookings.input('entryPat', sql.VarChar(120), `%${(envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase()}%`);
+      // A REJECTED booking must not open the door either; PENDING/NULL still do (older
+      // bookings were created PENDING and the approval step is otherwise advisory).
       const bookingsRes = await reqBookings.query(
         `SELECT
           gb.EmployeeID AS employee_id,
           gb.CardNo AS card_no,
           gb.Department AS department,
           gb.ApprovalStatus AS approval_status,
+          gb.Status AS status,
           CONVERT(varchar(10), gb.BookingDate, 23) AS booking_date,
           CONVERT(varchar(5), s.StartTime, 108) AS time_start,
-          CONVERT(varchar(5), s.EndTime, 108) AS time_end
+          CONVERT(varchar(5), s.EndTime, 108) AS time_end,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM dbo.gym_live_taps t
+            WHERE t.EmployeeID = gb.EmployeeID
+              AND CONVERT(date, t.TxnTime) = gb.BookingDate
+              AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @entryPat
+          ) THEN 1 ELSE 0 END AS attended
         FROM dbo.gym_booking gb
         LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
         WHERE CONVERT(varchar(10), gb.BookingDate, 23) IN (@todayStr, @yesterdayStr)
-          AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')`
+          AND gb.Status IN ('BOOKED','CHECKIN','COMPLETED')
+          AND ISNULL(gb.ApprovalStatus, '') <> 'REJECTED'`
       );
 
       const rows = Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset : [];
       for (const row of rows) {
-        const employeeId = String(row.employee_id ?? '').trim();
+        const employeeId = empKey(row.employee_id);
         if (!employeeId) continue;
         if (alwaysAllow.has(employeeId)) continue;
+        // A banned person gets no door from a booking - except the session they are
+        // already in (checked in, or tapped in that day). The scanner leaves exactly those
+        // bookings alone too, so a ban landing mid-session cannot shut someone out halfway.
+        const alreadyInside = String(row.status || '').toUpperCase() === 'CHECKIN' || Number(row.attended) === 1;
+        if (bannedSet.has(employeeId) && !alreadyInside) continue;
 
         const start = parseHHMM(row.time_start);
         if (!start) continue;
@@ -454,6 +487,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     }
 
     await pool.close();
+    workerPool = null;
 
     console.log('[gym-worker] today_bookings_rows', {
       rows: typeof bookingsRes !== 'undefined' && Array.isArray(bookingsRes?.recordset) ? bookingsRes.recordset.length : 0,
@@ -480,7 +514,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         const envMaxAge = Number(process.env.GYM_CONTROLLER_ACCESS_MAX_AGE_MS || 10 * 60 * 1000);
         const maxAgeMs = Number.isFinite(Number(opts?.maxAgeMs)) ? Number(opts.maxAgeMs) : envMaxAge;
         const recent = updatedAt ? (Date.now() - new Date(updatedAt).getTime()) < maxAgeMs : false;
-        if (recent) return;
+        if (recent) return true;
       }
       console.log('[gym-worker] attempt', {
         employee_id: employeeId,
@@ -518,6 +552,10 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
             tz: desiredTz,
           });
           pushAccessEvent({ t: new Date().toISOString(), type: 'success', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz });
+          // A fresh grant starts a new session: an old revoke backoff must not delay this
+          // session's own revoke by up to 16 minutes.
+          if (allow) revokeBackoff.delete(employeeId);
+          return true;
         } else {
           console.log('[gym-worker] fail', {
             employee_id: employeeId,
@@ -539,6 +577,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         });
         pushAccessEvent({ t: new Date().toISOString(), type: 'error', employee_id: employeeId, allow: Boolean(allow), unit_no: unitNo, tz: desiredTz, error: message });
       }
+      return false;
     };
 
     for (const employeeId of alwaysAllow) {
@@ -572,8 +611,41 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
         : false;
       const isPrunableOverride = isWorkerOverride || (isLegacyManualOverride && legacyManualFresh);
         const hadAllowOverride = currentTz === tzAllow;
+
+        // Banned: take the door away whatever put it there, a manual (MANUAL_LOCK) grant
+        // included - that source is otherwise never pruned, so one click in the Vault page
+        // outlived the ban. No debounce: the ban comes from its own query, so a flaky
+        // bookings read cannot trigger this. Exempt roles never reach here (alwaysAllow).
+        // Not while they are in the session they already entered (inRange is only true
+        // for a banned person in that case - see the bookings loop); that ends by itself.
+        if (bannedSet.has(employeeId) && !inRange) {
+          // If they were inside last tick, that came from the bookings read, which can
+          // flap (a row briefly missing its schedule join) - confirm like a normal prune.
+          if (lastRequiredState.get(employeeId) === true) {
+            const streak = (notRequiredStreak.get(employeeId) || 0) + 1;
+            if (streak < pruneConfirmTicks) {
+              notRequiredStreak.set(employeeId, streak);
+              continue;
+            }
+          }
+          notRequiredStreak.delete(employeeId);
+          lastRequiredState.set(employeeId, false);
+          if (banListExact && hadAllowOverride && revokeDue(employeeId)) {
+            console.log('[gym-worker] ban_revoke', { employee_id: employeeId, unit_no: unitNo, source: currentSource });
+            pushAccessEvent({ t: new Date().toISOString(), type: 'ban_revoke', employee_id: employeeId, unit_no: unitNo });
+            noteRevoke(employeeId, await updateEmployeeAccess(employeeId, false, null, 'WORKER'));
+          }
+          continue;
+        }
+
         const prevRequiredRaw = lastRequiredState.get(employeeId);
-        const prevRequired = prevRequiredRaw === undefined ? Boolean(hadAllowOverride) : Boolean(prevRequiredRaw);
+        // Also treat a still-open worker grant as "was required", even when memory says
+        // otherwise: that is exactly the state a failed revoke leaves behind (the override
+        // row is only rewritten on success), and without this nothing ever retried it.
+        const prevRequired =
+          prevRequiredRaw === undefined
+            ? Boolean(hadAllowOverride)
+            : Boolean(prevRequiredRaw) || (hadAllowOverride && isPrunableOverride);
         const nowRequired = Boolean(inRange);
 
         if (nowRequired) {
@@ -599,13 +671,13 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
             continue;
           }
           notRequiredStreak.delete(employeeId);
-          if (current && isPrunableOverride) {
+          if (current && isPrunableOverride && revokeDue(employeeId)) {
             console.log('[gym-worker] prune', {
               employee_id: employeeId,
               unit_no: unitNo,
             });
             pushAccessEvent({ t: new Date().toISOString(), type: 'prune', employee_id: employeeId, unit_no: unitNo });
-            await updateEmployeeAccess(employeeId, false, booking?.card_no || null, 'WORKER');
+            noteRevoke(employeeId, await updateEmployeeAccess(employeeId, false, booking?.card_no || null, 'WORKER'));
           }
         }
 
@@ -628,6 +700,11 @@ if (['1', 'true', 'yes', 'y'].includes(enableAutoOrganizeWorker)) {
     } catch (_) {
       nextIntervalMs = 60000;
     } finally {
+      if (workerPool) {
+        const p = workerPool;
+        workerPool = null;
+        await p.close().catch(() => {});
+      }
       pushAccessEvent({ t: new Date().toISOString(), type: 'worker_tick_end', next_interval_ms: clamp(nextIntervalMs, 5000, 60 * 60 * 1000) });
       running = false;
       setTimeout(loop, clamp(nextIntervalMs, 5000, 60 * 60 * 1000));
@@ -701,10 +778,18 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
     const scanReq = pool.request();
     scanReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
     scanReq.input('gymUnit', sql.VarChar(20), String(gymUnit || '0031'));
-    await scanReq.query(`
+    // XACT_ABORT + one transaction: the ban and its booking cancellation land together or
+    // not at all. The old batch had no transaction, and its cancel referenced a CTE that
+    // had already gone out of scope - an error TRY/CATCH cannot catch - so every run
+    // committed the bans and then died before cancelling a single booking.
+    const scanRes = await scanReq.query(`
+      SET XACT_ABORT ON;
       BEGIN TRY
         DECLARE @today DATE = CONVERT(date, DATEADD(hour, 8, GETUTCDATE()));
         DECLARE @windowStart DATE = DATEADD(day, -7, @today);
+        DECLARE @bansWritten INT = 0;
+        DECLARE @bookingsCancelled INT = 0;
+        BEGIN TRAN;
         ;WITH Candidate AS (
           SELECT DISTINCT gb.EmployeeID
           FROM dbo.gym_booking gb
@@ -719,31 +804,10 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
               WHERE b.EmployeeID = gb.EmployeeID
                 AND b.BannedUntil >= @today
             )
-            -- Committee members are exempt from the ban check in /gym-booking-create,
-            -- so the scanner must not ban them either. Without this the two paths
-            -- disagree and a committee member can end up carrying a NO_SHOW_3X ban.
-            AND NOT EXISTS (
-              SELECT 1
-              FROM dbo.gym_access_committee cm
-              WHERE cm.EmployeeID = gb.EmployeeID
-                AND cm.UnitNo = @gymUnit
-                AND cm.IsActive = 1
-            )
-            -- Managers are likewise exempt in the booking path (isEmployeeManager) and
-            -- hold always-allow access. Match on both columns the rest of the codebase
-            -- treats as the role source (the booking path reads 'grade', the worker reads
-            -- 'job_title') so nobody is auto-banned by one definition but exempt by the other.
-            AND NOT EXISTS (
-              SELECT 1
-              FROM MTIMasterEmployeeDB.dbo.employee_employment em
-              WHERE em.employee_id = gb.EmployeeID
-                AND (
-                  UPPER(ISNULL(em.grade, '')) LIKE '%MANAGER%'
-                  OR UPPER(ISNULL(em.grade, '')) LIKE '%GM%'
-                  OR UPPER(ISNULL(em.job_title, '')) LIKE '%MANAGER%'
-                  OR UPPER(ISNULL(em.job_title, '')) LIKE '%GM%'
-                )
-            )
+            -- Committee members and managers are exempt from bans - the one definition in
+            -- lib/gymBan.js that /gym-booking-create, the worker and the guards also use.
+            AND NOT ${committeeExemptSql('gb.EmployeeID', '@gymUnit')}
+            AND NOT ${managerExemptSql('gb.EmployeeID')}
         ),
         BookingRows AS (
           SELECT
@@ -870,23 +934,44 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
         WHEN NOT MATCHED THEN
           INSERT (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow)
           VALUES (src.EmployeeID, src.BannedUntil, 'NO_SHOW_3X', src.ConsecutiveNoShow);
+        SELECT @bansWritten = @@ROWCOUNT;
 
+        -- Cancel from the ban table's current state, not from this run's ToBan (a CTE,
+        -- which does not exist past the MERGE anyway). Keyed on state, every run also
+        -- sweeps up bookings a ban left behind - including the ones every earlier run
+        -- failed to cancel - and a booking that slipped in after the ban.
+        -- Only still-BOOKED rows from today on: a CHECKIN means they are inside right now,
+        -- and a booking they already attended today is attendance history. The ban is
+        -- checked against each booking's own date, so one dated after the ban ends stays.
         UPDATE gb
         SET
           gb.Status = 'CANCELLED',
           gb.RejectedReason = 'Auto-cancelled by System due to 3x No-Show Ban'
         FROM dbo.gym_booking gb
-        INNER JOIN ToBan b ON b.EmployeeID = gb.EmployeeID
         WHERE gb.BookingDate >= @today
-          AND gb.Status IN ('BOOKED','CHECKIN');
+          AND gb.Status = 'BOOKED'
+          AND ${enforcedBanExistsSql('gb.EmployeeID', 'gb.BookingDate', '@gymUnit')}
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.gym_live_taps t
+            WHERE t.EmployeeID = gb.EmployeeID
+              AND CONVERT(date, t.TxnTime) = gb.BookingDate
+              AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @entryPat
+          );
+        SELECT @bookingsCancelled = @@ROWCOUNT;
+
+        COMMIT;
+        SELECT @bansWritten AS bans_written, @bookingsCancelled AS bookings_cancelled;
       END TRY
       BEGIN CATCH
-        DECLARE @msg NVARCHAR(4000) = ERROR_MESSAGE();
-        DECLARE @sev INT = ERROR_SEVERITY();
-        DECLARE @st INT = ERROR_STATE();
-        RAISERROR(@msg, @sev, @st);
+        IF @@TRANCOUNT > 0 ROLLBACK;
+        THROW;
       END CATCH
     `);
+    const row = scanRes?.recordsets?.[scanRes.recordsets.length - 1]?.[0] || null;
+    return {
+      bansWritten: Number(row?.bans_written || 0),
+      bookingsCancelled: Number(row?.bookings_cancelled || 0),
+    };
   };
   const scanTick = async () => {
     if (runningScan) return;
@@ -913,8 +998,13 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
           let pool = null;
           try {
             pool = await new sql.ConnectionPool(cfg).connect();
-            await runProactiveScanQuery(pool, entryPattern, gymUnit);
-            console.log(`[gym-worker] Proactive Daily Ban Scanner cycle completed (attempt ${attempt}).`);
+            const outcome = await runProactiveScanQuery(pool, entryPattern, gymUnit);
+            console.log(
+              `[gym-worker] Proactive Daily Ban Scanner cycle completed (attempt ${attempt}): ` +
+                `${outcome.bansWritten} ban(s) written, ${outcome.bookingsCancelled} booking(s) cancelled.`
+            );
+            lastBanScan = { t: new Date().toISOString(), ok: true, attempt, bans_written: outcome.bansWritten, bookings_cancelled: outcome.bookingsCancelled };
+            pushAccessEvent({ t: lastBanScan.t, type: 'ban_scan', bans_written: outcome.bansWritten, bookings_cancelled: outcome.bookingsCancelled });
             done = true;
           } catch (e) {
             const transient = isTransientDbError(e);
@@ -931,6 +1021,8 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
       }
     } catch (e) {
       console.log('[gym-worker] Proactive Daily Ban Scanner error:', e.message);
+      lastBanScan = { t: new Date().toISOString(), ok: false, error: String(e?.message || e) };
+      pushAccessEvent({ t: lastBanScan.t, type: 'ban_scan_error', error: lastBanScan.error });
     } finally {
       runningScan = false;
       setTimeout(scanTick, 6 * 60 * 60 * 1000); // 6 hours

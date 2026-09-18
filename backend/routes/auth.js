@@ -203,8 +203,16 @@ router.post('/auth/refresh', async (req, res) => {
   const m = auth.match(/^Bearer\s+(.+)$/i);
   if (!m) return res.status(401).json({ ok: false, error: 'Missing bearer token' });
   const token = m[1];
+  // Status codes matter here: the panel logs the user out on 401 only. A bad or expired
+  // token and a missing/inactive account are 401; a database hiccup is 503, so a
+  // momentary outage does not throw every open admin session out.
+  let old;
   try {
-    const old = jwt.verify(token, getJwtSecret());
+    old = jwt.verify(token, getJwtSecret());
+  } catch (e) {
+    return res.status(401).json({ ok: false, error: 'Invalid token' });
+  }
+  try {
     const accountId = Number(old?.account_id || 0);
     if (!Number.isFinite(accountId) || accountId <= 0) {
       return res.status(401).json({ ok: false, error: 'Invalid token account' });
@@ -225,10 +233,10 @@ router.post('/auth/refresh', async (req, res) => {
       );
       const row = Array.isArray(r?.recordset) && r.recordset.length > 0 ? r.recordset[0] : null;
       if (!row) {
-        return res.status(200).json({ ok: false, error: 'Account not found' });
+        return res.status(401).json({ ok: false, error: 'Account not found' });
       }
       if (!row.IsActive) {
-        return res.status(200).json({ ok: false, error: 'Account is inactive' });
+        return res.status(401).json({ ok: false, error: 'Account is inactive' });
       }
       const last = hasLastSignIn ? row.LastSignIn : (hasLastSignInAt ? row.LastSignInAt : null);
       const now = Date.now();
@@ -256,6 +264,6 @@ router.post('/auth/refresh', async (req, res) => {
     }
   } catch (error) {
     const message = error?.message || String(error);
-    return res.status(200).json({ ok: false, error: message });
+    return res.status(503).json({ ok: false, error: message });
   }
 });

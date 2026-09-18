@@ -3,6 +3,8 @@ import sql from 'mssql';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { envTrim, envBool, envInt, startOfDayUtcDateForOffsetMinutes } from '../lib/env.js';
+import { getJwtSecret, requireGymAdmin, requireGymSuperAdmin } from '../lib/gymAuth.js';
+import { enforcedBanExistsSql, managerExemptSql } from '../lib/gymBan.js';
 
 const router = express.Router();
 
@@ -143,25 +145,35 @@ async function getAllowVendorUseGym(pool) {
   return value;
 }
 
-function getJwtSecret() {
-  const s = envTrim(process.env.JWT_SECRET);
-  if (!s) throw new Error('Missing JWT_SECRET');
-  return s;
-}
-
-function requireGymAdmin(req, res, next) {
-  const auth = req.headers.authorization || '';
-  const m = auth.match(/^Bearer\s+(.+)$/i);
-  if (!m) return res.status(401).json({ ok: false, error: 'Missing bearer token' });
-  let payload;
-  try { payload = jwt.verify(m[1], getJwtSecret()); }
-  catch (e) { return res.status(401).json({ ok: false, error: 'Invalid token' }); }
-  const role = String(payload?.role || '').toLowerCase();
-  if (!['superadmin', 'admin', 'committee', 'system'].includes(role)) {
-    return res.status(403).json({ ok: false, error: 'Forbidden' });
+// Is `empId` under an enforced ban on `refDate` (a WITA date)? The ban table is read first,
+// so the exemption lookup - which crosses into MTIMasterEmployeeDB - only runs for someone
+// who really has an active ban row: an outage there cannot refuse everybody else. If that
+// lookup fails it falls back to the committee-only exemption, like the door worker does.
+async function readEnforcedBan(pool, empId, refDate, unitNo) {
+  const base = await pool
+    .request()
+    .input('emp', sql.VarChar(20), empId)
+    .input('ref', sql.Date, refDate)
+    .query(
+      `SELECT CONVERT(varchar(10), MAX(BannedUntil), 23) AS until
+       FROM dbo.gym_booking_ban WHERE EmployeeID = @emp AND BannedUntil >= @ref`
+    );
+  const until = base?.recordset?.[0]?.until || null;
+  if (!until) return { banned: false, until: null };
+  const ask = async (withManagerExemption) => {
+    const r = await pool
+      .request()
+      .input('emp', sql.VarChar(20), empId)
+      .input('ref', sql.Date, refDate)
+      .input('unit', sql.VarChar(20), unitNo)
+      .query(`SELECT CASE WHEN ${enforcedBanExistsSql('@emp', '@ref', '@unit', { withManagerExemption })} THEN 1 ELSE 0 END AS banned`);
+    return Number(r?.recordset?.[0]?.banned) === 1;
+  };
+  try {
+    return { banned: await ask(true), until };
+  } catch (_) {
+    return { banned: await ask(false), until };
   }
-  req.authUser = payload;
-  next();
 }
 
 const gymBookingsCache = new Map();
@@ -1289,12 +1301,37 @@ router.post('/gym-booking-update-status', requireGymAdmin, async (req, res) => {
   let pool = null;
   try {
     pool = await new sql.ConnectionPool(config).connect();
+    // A rejection now cancels the booking (below), and approving it again would only flip
+    // the label back - APPROVED on a CANCELLED row that still opens no door and whose slot
+    // may already be taken. Say so instead of reporting success.
+    if (statusUpper !== 'REJECTED') {
+      const cur = await pool
+        .request()
+        .input('booking_id', sql.Int, Number(booking_id))
+        .query(`SELECT Status, RejectedReason FROM dbo.gym_booking WHERE BookingID = @booking_id`);
+      const row = cur?.recordset?.[0] || null;
+      if (row && String(row.Status).toUpperCase() === 'CANCELLED' && String(row.RejectedReason || '') === 'Rejected by admin') {
+        return res.status(200).json({
+          ok: false,
+          error: 'Booking ini sudah dibatalkan karena di-reject dan tidak bisa diaktifkan lagi. Minta karyawan booking ulang.',
+        });
+      }
+    }
     const request = pool.request();
     request.input('booking_id', sql.Int, Number(booking_id));
     request.input('approval_status', sql.VarChar(20), statusUpper);
 
+    // Rejecting used to flip only ApprovalStatus, while every consumer that matters (the
+    // door worker, quota, duplicate and no-show checks) reads Status - so a "rejected"
+    // booking kept its quota slot and still opened the door. A rejection now also cancels
+    // it. Only a still-BOOKED row: CHECKIN/COMPLETED are attendance history, and rewriting
+    // them would change the no-show arithmetic.
     const result = await request.query(
-      'UPDATE dbo.gym_booking SET ApprovalStatus = @approval_status WHERE BookingID = @booking_id'
+      `UPDATE dbo.gym_booking
+       SET ApprovalStatus = @approval_status,
+           Status = CASE WHEN @approval_status = 'REJECTED' AND Status = 'BOOKED' THEN 'CANCELLED' ELSE Status END,
+           RejectedReason = CASE WHEN @approval_status = 'REJECTED' AND Status = 'BOOKED' THEN 'Rejected by admin' ELSE RejectedReason END
+       WHERE BookingID = @booking_id`
     );
 
     const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
@@ -1336,8 +1373,13 @@ router.post('/gym-controller-access', requireGymAdmin, async (req, res) => {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
   }
 
-  const { employee_id, access, unit_no, card_no, source: sourceRaw } = req.body || {};
-  const employeeId = employee_id != null ? String(employee_id).trim() : '';
+  const { employee_id, access, unit_no, source: sourceRaw } = req.body || {};
+  const employeeIdTyped = employee_id != null ? String(employee_id).trim().toUpperCase() : '';
+  // Same MTI spelling rule as /gym-booking-create, or the ban guard below would look up
+  // 'MTI-230032' literally, find no ban, and grant his card anyway.
+  const employeeId = classifyEmployeeIdKind(employeeIdTyped) === 'MTI'
+    ? employeeIdTyped.replace(/[^A-Z0-9]/g, '') || employeeIdTyped
+    : employeeIdTyped;
   if (!employeeId) {
     return res.status(400).json({ ok: false, error: 'employee_id is required' });
   }
@@ -1350,7 +1392,12 @@ router.post('/gym-controller-access', requireGymAdmin, async (req, res) => {
   const tzAllow = envTrim(process.env.GYM_ACCESS_TZ_ALLOW) || '01';
   const tzDeny = envTrim(process.env.GYM_ACCESS_TZ_DENY) || '00';
   const customAccessTz = allow ? tzAllow : tzDeny;
-  const source = sourceRaw != null ? String(sourceRaw).trim() : 'MANUAL';
+  // Only the door worker's own loopback token (role 'system') may act as the worker. The
+  // body's `source` is caller-controlled: trusting it let any panel login claim 'WORKER'
+  // to skip the ban guard below (and to write a prunable WORKER override row).
+  const isWorkerCaller = String(req.authUser?.role || '').toLowerCase() === 'system';
+  const sourceRequested = sourceRaw != null ? String(sourceRaw).trim() : 'MANUAL';
+  const source = !isWorkerCaller && sourceRequested.toUpperCase() === 'WORKER' ? 'MANUAL_LOCK' : sourceRequested;
   log('start', { employee_id: employeeId, unit_no: unitNo, allow, tz: customAccessTz });
 
   const config = {
@@ -1381,6 +1428,33 @@ router.post('/gym-controller-access', requireGymAdmin, async (req, res) => {
     }
   }
 
+  // A manual grant (the per-row door button in the Vault page, the committee bulk grant)
+  // must not re-open the door for someone who is banned. The worker is not checked here:
+  // it already leaves banned people out of its booking grants, and its always-allow grants
+  // go to exempt roles. Revokes are never blocked. Refusing before any upload also keeps
+  // this out of gym_grant_failure, which would otherwise excuse the day as a no-show.
+  if (allow && !isWorkerCaller) {
+    let banPool = null;
+    try {
+      banPool = await new sql.ConnectionPool(config).connect();
+      const today = startOfDayUtcDateForOffsetMinutes(envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60));
+      const ban = await readEnforcedBan(banPool, employeeId, today, unitNo);
+      if (ban.banned) {
+        return res.status(200).json({
+          ok: false,
+          error: `Karyawan ini sedang di-ban sampai ${ban.until}. Cabut ban-nya dulu di Daftar Ban sebelum memberi akses gym.`,
+        });
+      }
+    } catch (e) {
+      // Short of the gym DB being down (the grant would fail anyway), this is only reached
+      // for someone who holds an active ban row - see readEnforcedBan - so it cannot
+      // refuse everybody else.
+      return res.status(200).json({ ok: false, error: `Status ban tidak bisa diperiksa: ${e?.message || String(e)}` });
+    } finally {
+      if (banPool) await banPool.close().catch(() => {});
+    }
+  }
+
   const baseUrl =
     envTrim(process.env.VAULT_UPLOAD_ASMX_BASE_URL) ||
     envTrim(process.env.VAULT_ASMX_BASE_URL) ||
@@ -1399,12 +1473,12 @@ router.post('/gym-controller-access', requireGymAdmin, async (req, res) => {
 
   let pool = null;
   try {
-    let cardNo = card_no != null ? String(card_no).trim() : '';
-    // Prevent stale gym_booking cards passed by the worker from blocking fresh CardDB lookups
-    if (source === 'WORKER') {
-      cardNo = '';
-    }
-    let cardNoSource = cardNo ? 'request' : null;
+    // The card is always resolved from the employee's own records below (CardDB, their
+    // bookings and taps). A caller-supplied card_no used to be uploaded as-is, so any panel
+    // login could pass a banned person's card under an unbanned employee_id and walk past
+    // the ban guard. No UI sends one, and the worker's was already discarded as stale.
+    let cardNo = '';
+    let cardNoSource = null;
     const cardSet = new Set();
     const pushCard = (value, sourceName) => {
       const c = value != null ? String(value).trim() : '';
@@ -1887,12 +1961,20 @@ router.post('/gym-booking-create', async (req, res) => {
   const { employee_id, session_id, booking_date, employee_type: employeeTypeRaw } = req.body || {};
   const employeeIdHeader = envTrim(req.headers['x-employee-id'] || req.headers['x-employee_id']);
   const employeeIdRaw = String(employee_id || employeeIdHeader || '');
-  const employeeId = employeeIdRaw
+  const employeeIdTyped = employeeIdRaw
     .replace(/\uFEFF/g, '')
     .replace(/[^\x20-\x7E]/g, '')
     .trim()
     .replace(/\s+/g, '')
     .toUpperCase();
+  // MTI IDs are purely alphanumeric in the master DB, and the employee lookup below strips
+  // punctuation anyway - so 'MTI-230032' used to book as Candra under his real name while
+  // every ban, no-show and duplicate check looked for the literal 'MTI-230032'. Settle on
+  // one spelling before anything reads the ID. Other kinds keep theirs: vendor and PKL IDs
+  // such as 'M-23' or 'PKL-MMS-26002' legitimately contain hyphens.
+  const employeeId = classifyEmployeeIdKind(employeeIdTyped) === 'MTI'
+    ? employeeIdTyped.replace(/[^A-Z0-9]/g, '') || employeeIdTyped
+    : employeeIdTyped;
   const sessionId = String(session_id || '').trim();
   const bookingDateStr = String(booking_date || '').trim();
   const employeeKind = classifyEmployeeIdKind(employeeId);
@@ -1978,75 +2060,6 @@ router.post('/gym-booking-create', async (req, res) => {
     );
     const schemaName = r?.recordset?.[0]?.schema_name ? String(r.recordset[0].schema_name) : null;
     return schemaName && schemaName.trim().length > 0 ? schemaName : null;
-  };
-
-  const normRole = (v) =>
-    String(v ?? '')
-      .trim()
-      .replace(/\s+/g, ' ')
-      .toUpperCase();
-
-  const isManagerRole = (role) => {
-    const r = normRole(role);
-    if (!r) return false;
-    if (r === 'GM') return true;
-    if (r === 'MANAGER') return true;
-    if (r === 'SR MANAGER' || r === 'SR. MANAGER' || r === 'SENIOR MANAGER') return true;
-    if (r.includes('SENIOR') && r.includes('MANAGER')) return true;
-    if (r.includes('SR') && r.includes('MANAGER')) return true;
-    return false;
-  };
-
-  const isEmployeeManager = async (empId) => {
-    let masterPool = null;
-    try {
-      masterPool = await new sql.ConnectionPool(masterConfig).connect();
-      const employmentSchema = await pickSchemaForTable(masterPool, 'employee_employment');
-      if (!employmentSchema) {
-        await masterPool.close();
-        return false;
-      }
-      const colsRes = await masterPool.request().query(
-        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'employee_employment' AND TABLE_SCHEMA = '${employmentSchema.replace(/'/g, "''")}'`
-      );
-      const cols = (colsRes?.recordset || []).map((x) => String(x.COLUMN_NAME));
-      const empIdCol = pickColumn(cols, ['employee_id', 'EmployeeID', 'emp_id', 'EmpID', 'StaffNo', 'staff_no']);
-      const roleCol = pickColumn(cols, [
-        'grade',
-        'Grade',
-        'job_grade',
-        'JobGrade',
-        'job_title',
-        'JobTitle',
-        'title',
-        'Title',
-        'position',
-        'Position',
-        'job_position',
-        'JobPosition',
-        'level',
-        'Level',
-        'band',
-        'Band',
-        'rank',
-        'Rank',
-      ]);
-      if (!empIdCol || !roleCol) {
-        await masterPool.close();
-        return false;
-      }
-      const req = masterPool.request();
-      req.input('id', sql.VarChar(100), String(empId));
-      const r = await req.query(
-        `SELECT TOP 1 [${roleCol}] AS role_value FROM [${employmentSchema}].[employee_employment] WHERE [${empIdCol}] = @id`
-      );
-      await masterPool.close();
-      const roleVal = r?.recordset?.[0]?.role_value;
-      return isManagerRole(roleVal);
-    } catch (_) {
-      try { if (masterPool) await masterPool.close(); } catch (_) {}
-      return false;
-    }
   };
 
   const tryLoadActiveCardNo = async (empId) => {
@@ -2281,7 +2294,19 @@ router.post('/gym-booking-create', async (req, res) => {
       );
       isCommittee = Array.isArray(committeeRes?.recordset) && committeeRes.recordset.length > 0;
     }
-    const isManager = await isEmployeeManager(employeeId);
+    // Same manager rule as the scanner, the door worker and the ban guards (lib/gymBan.js).
+    // It used to be a separate JS rule here, so this path banned people the others then
+    // treated as exempt - and never enforced. On a lookup failure: not exempt, as before.
+    let isManager = false;
+    try {
+      const mgrRes = await gymPool
+        .request()
+        .input('employee_id', sql.VarChar(20), employeeId)
+        .query(`SELECT CASE WHEN ${managerExemptSql('@employee_id')} THEN 1 ELSE 0 END AS is_manager`);
+      isManager = Number(mgrRes?.recordset?.[0]?.is_manager) === 1;
+    } catch (_) {
+      isManager = false;
+    }
     // Surfaced on the successful booking response so the user can be warned BEFORE the
     // third strike. Previously the first they knew of it was their booking being refused.
     let noShowCount = 0;
@@ -2419,6 +2444,7 @@ router.post('/gym-booking-create', async (req, res) => {
           banReq.input('banned_until', sql.Date, bannedUntil);
           banReq.input('reason', sql.VarChar(255), 'NO_SHOW_3X');
           banReq.input('consecutive_no_show', sql.Int, consecutiveNoShow);
+          banReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
           await banReq.query(
             `IF EXISTS (SELECT 1 FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id)
              BEGIN
@@ -2438,12 +2464,23 @@ router.post('/gym-booking-create', async (req, res) => {
                VALUES (@employee_id, @banned_until, @reason, @consecutive_no_show);
              END;
 
-             UPDATE dbo.gym_booking
-             SET Status = 'CANCELLED',
-                 RejectedReason = 'Auto-cancelled by System due to 3x No-Show Ban'
-             WHERE EmployeeID = @employee_id
-               AND BookingDate >= @today
-               AND Status IN ('BOOKED','CHECKIN');`
+             -- Same rule as the proactive scanner: cancel what is still only BOOKED from
+             -- today on, but leave a CHECKIN (they are inside right now) and a booking
+             -- they already attended today (that is attendance history, not a booking).
+             UPDATE gb
+             SET gb.Status = 'CANCELLED',
+                 gb.RejectedReason = 'Auto-cancelled by System due to 3x No-Show Ban'
+             FROM dbo.gym_booking gb
+             WHERE gb.EmployeeID = @employee_id
+               AND gb.BookingDate >= @today
+               AND gb.BookingDate <= @banned_until
+               AND gb.Status = 'BOOKED'
+               AND NOT EXISTS (
+                 SELECT 1 FROM dbo.gym_live_taps t
+                 WHERE t.EmployeeID = gb.EmployeeID
+                   AND CONVERT(date, t.TxnTime) = gb.BookingDate
+                   AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @entryPat
+               );`
           );
           const bannedStr = isNaN(bannedUntil.getTime()) ? null : bannedUntil.toISOString().slice(0, 10);
           await gymPool.close();
@@ -3663,7 +3700,10 @@ router.get('/gym-bookings-by-employee', async (req, res) => {
   }
 });
 
-router.post('/gym-booking-status', async (req, res) => {
+// Admin-only: it rewrites any booking's status, so unauthenticated it let anyone put a
+// ban-cancelled booking back to BOOKED (the door worker grants from Status) or turn a
+// past no-show into COMPLETED to erase a strike.
+router.post('/gym-booking-status', requireGymAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
@@ -3678,6 +3718,43 @@ router.post('/gym-booking-status', async (req, res) => {
   let pool = null;
   try {
     pool = await new sql.ConnectionPool(config).connect();
+    // Putting a booking (back) into a live state hands its owner the gym door, so refuse
+    // it while a ban covers that booking's date. Past bookings open no door and are fair
+    // game for corrections; a day already attended is left alone, as the ban scanner does.
+    if (statusUpper === 'BOOKED' || statusUpper === 'CHECKIN') {
+      const entryPattern = (envTrim(process.env.GYM_ENTRY_EVENT) || 'VALID ENTRY ACCESS').toUpperCase();
+      const today = startOfDayUtcDateForOffsetMinutes(envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60));
+      const bkRes = await pool
+        .request()
+        .input('id', sql.Int, Number(booking_id))
+        .input('today', sql.Date, today)
+        .input('entryPat', sql.VarChar(120), `%${entryPattern}%`)
+        .query(
+          `SELECT gb.EmployeeID, gb.BookingDate, gb.ApprovalStatus,
+                  CASE WHEN gb.BookingDate >= @today
+                        AND NOT EXISTS (
+                          SELECT 1 FROM dbo.gym_live_taps t
+                          WHERE t.EmployeeID = gb.EmployeeID
+                            AND CONVERT(date, t.TxnTime) = gb.BookingDate
+                            AND UPPER(CAST(t.[Transaction] AS varchar(100))) LIKE @entryPat
+                        ) THEN 1 ELSE 0 END AS opens_door
+           FROM dbo.gym_booking gb WHERE gb.BookingID = @id`
+        );
+      const bk = bkRes?.recordset?.[0] || null;
+      // A rejected booking stays dead: reviving it would hold the one-per-day slot the
+      // employee needs to re-book, count as a no-show strike, and still open no door.
+      if (bk && String(bk.ApprovalStatus || '').toUpperCase() === 'REJECTED') {
+        return res.status(200).json({ ok: false, error: 'Booking ini sudah di-reject. Minta karyawan booking ulang.' });
+      }
+      if (bk && Number(bk.opens_door) === 1) {
+        const unitFallback = (envTrim(process.env.GYM_UNIT_FILTER) || envTrim(process.env.GYM_UNIT_NO) || '').split(',')[0]?.trim() || '';
+        const unitNo = envTrim(process.env.GYM_CONTROLLER_UNIT_NO) || unitFallback || '0031';
+        const ban = await readEnforcedBan(pool, String(bk.EmployeeID), bk.BookingDate, unitNo);
+        if (ban.banned) {
+          return res.status(200).json({ ok: false, error: `${bk.EmployeeID} sedang di-ban sampai ${ban.until}` });
+        }
+      }
+    }
     const req1 = pool.request();
     req1.input('id', sql.Int, Number(booking_id));
     req1.input('status', sql.VarChar(20), statusUpper);
@@ -3703,16 +3780,23 @@ router.post('/gym-booking-cancel', async (req, res) => {
   // Canonicalize identically to gym-booking-create (strip BOM/non-ASCII, remove
   // whitespace, uppercase) so cancel matches the stored EmployeeID on any DB
   // collation — not only the case-insensitive default.
-  const employeeId = String(employee_id || '')
+  const employeeIdTyped = String(employee_id || '')
     .replace(/[^\x20-\x7E]/g, '')
     .trim()
     .replace(/\s+/g, '')
     .toUpperCase();
+  // ...including the MTI punctuation rule, or 'MTI-230032' would not find his booking.
+  const employeeId = classifyEmployeeIdKind(employeeIdTyped) === 'MTI'
+    ? employeeIdTyped.replace(/[^A-Z0-9]/g, '') || employeeIdTyped
+    : employeeIdTyped;
   if (!Number.isFinite(id) || id <= 0 || !employeeId) {
     return res.status(400).json({ ok: false, error: 'booking_id and employee_id are required' });
   }
   const tzOffsetMinutes = envInt(process.env.GYM_TZ_OFFSET_MINUTES, 8 * 60);
   const todayDate = startOfDayUtcDateForOffsetMinutes(tzOffsetMinutes);
+  const nowWita = new Date(Date.now() + tzOffsetMinutes * 60_000);
+  const p2 = (n) => String(n).padStart(2, '0');
+  const nowTime = `${p2(nowWita.getUTCHours())}:${p2(nowWita.getUTCMinutes())}:${p2(nowWita.getUTCSeconds())}`;
   const config = { server: DB_SERVER, port: Number(DB_PORT || 1433), database: DB_DATABASE, user: DB_USER, password: DB_PASSWORD, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
   let pool = null;
   try {
@@ -3721,9 +3805,36 @@ router.post('/gym-booking-cancel', async (req, res) => {
     req1.input('id', sql.Int, id);
     req1.input('employeeId', sql.VarChar(20), employeeId);
     req1.input('today', sql.Date, todayDate);
-    const result = await req1.query("UPDATE dbo.gym_booking SET Status = 'CANCELLED' WHERE BookingID = @id AND EmployeeID = @employeeId AND Status = 'BOOKED' AND BookingDate >= @today");
+    req1.input('nowTime', sql.VarChar(8), nowTime);
+    // Only before the session starts. The no-show counters only count BOOKED/CHECKIN, so a
+    // cancel accepted after the session - e.g. that evening, after not turning up - erased
+    // the strike, and anyone could dodge the 3x ban indefinitely without logging in.
+    const result = await req1.query(
+      `UPDATE gb SET gb.Status = 'CANCELLED'
+       FROM dbo.gym_booking gb
+       LEFT JOIN dbo.gym_schedule s ON s.ScheduleID = gb.ScheduleID
+       WHERE gb.BookingID = @id AND gb.EmployeeID = @employeeId AND gb.Status = 'BOOKED'
+         AND (
+           gb.BookingDate > @today
+           OR (gb.BookingDate = @today AND (s.StartTime IS NULL OR s.StartTime > CAST(@nowTime AS time)))
+         )`
+    );
     const affected = Array.isArray(result?.rowsAffected) ? Number(result.rowsAffected[0] || 0) : 0;
-    if (affected < 1) return res.status(200).json({ ok: false, error: 'Booking not found or cannot be cancelled' });
+    if (affected < 1) {
+      const started = await pool
+        .request()
+        .input('id', sql.Int, id)
+        .input('employeeId', sql.VarChar(20), employeeId)
+        .input('today', sql.Date, todayDate)
+        .query(
+          `SELECT COUNT(*) AS n FROM dbo.gym_booking
+           WHERE BookingID = @id AND EmployeeID = @employeeId AND Status = 'BOOKED' AND BookingDate <= @today`
+        );
+      if (Number(started?.recordset?.[0]?.n || 0) > 0) {
+        return res.status(200).json({ ok: false, error: 'Booking ini tidak bisa dibatalkan lagi karena sesinya sudah dimulai.' });
+      }
+      return res.status(200).json({ ok: false, error: 'Booking not found or cannot be cancelled' });
+    }
     return res.json({ ok: true, affected });
   } catch (error) {
     const message = error?.message || String(error);
@@ -3851,7 +3962,7 @@ router.get('/gym-controller-settings', async (req, res) => {
   }
 });
 
-router.post('/gym-controller-settings', async (req, res) => {
+router.post('/gym-controller-settings', requireGymAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4308,7 +4419,7 @@ router.get('/gym-access-committee', async (req, res) => {
   }
 });
 
-router.post('/gym-access-committee-add', async (req, res) => {
+router.post('/gym-access-committee-add', requireGymAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4359,7 +4470,7 @@ router.post('/gym-access-committee-add', async (req, res) => {
   }
 });
 
-router.post('/gym-access-committee-remove', async (req, res) => {
+router.post('/gym-access-committee-remove', requireGymAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4496,7 +4607,7 @@ router.get('/gym-committee-roster', async (req, res) => {
   }
 });
 
-router.post('/gym-committee-roster-assign', async (req, res) => {
+router.post('/gym-committee-roster-assign', requireGymAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4573,7 +4684,7 @@ router.post('/gym-committee-roster-assign', async (req, res) => {
   }
 });
 
-router.post('/gym-committee-roster-remove', async (req, res) => {
+router.post('/gym-committee-roster-remove', requireGymAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4874,7 +4985,7 @@ router.post('/db-connections-test', async (req, res) => {
   }
 });
 
-router.post('/gym-accounts', async (req, res) => {
+router.post('/gym-accounts', requireGymSuperAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4916,7 +5027,7 @@ router.post('/gym-accounts', async (req, res) => {
   }
 });
 
-router.put('/gym-accounts/:id', async (req, res) => {
+router.put('/gym-accounts/:id', requireGymSuperAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4978,7 +5089,7 @@ router.put('/gym-accounts/:id', async (req, res) => {
   }
 });
 
-router.delete('/gym-accounts/:id', async (req, res) => {
+router.delete('/gym-accounts/:id', requireGymSuperAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -5962,7 +6073,7 @@ router.post('/gym-booking-ban-reset', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Invalid token' });
   }
   const role = String(payload?.role || '').toLowerCase();
-  if (!['superadmin', 'committee'].includes(role)) {
+  if (!['superadmin', 'admin', 'committee'].includes(role)) {
     return res.status(403).json({ ok: false, error: 'Forbidden' });
   }
   const actionBy = String(payload?.username || payload?.email || '').trim();

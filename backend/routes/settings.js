@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import sql from 'mssql';
 import { envTrim, envBool } from '../lib/env.js';
+import { requireGymAdmin } from '../lib/gymAuth.js';
 
 const router = express.Router();
 
@@ -325,11 +326,13 @@ router.get('/gym-controller-settings', (_req, res) => {
   handleGetControllerSettings(_req, res);
 });
 
-router.post('/gym-controller/settings', (req, res) => {
+// These settings drive the door worker (grace windows, manager all-session access,
+// auto-organize on/off), so changing them is as sensitive as granting the door itself.
+router.post('/gym-controller/settings', requireGymAdmin, (req, res) => {
   handlePostControllerSettings(req, res);
 });
 
-router.post('/gym-controller-settings', (req, res) => {
+router.post('/gym-controller-settings', requireGymAdmin, (req, res) => {
   handlePostControllerSettings(req, res);
 });
 

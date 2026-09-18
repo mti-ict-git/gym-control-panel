@@ -1,4 +1,5 @@
 import { Server } from 'lucide-react';
+import { authHeaders, assertAuthorized, AuthError } from '@/lib/utils';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -113,9 +114,10 @@ export default function ControllerSettings() {
       const post = async (url: string) => {
         const resp = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify(input),
         });
+        assertAuthorized(resp);
         if (!resp.ok) throw new Error('Failed to update controller settings');
         return (await resp.json()) as { ok: boolean; error?: string };
       };
@@ -124,7 +126,8 @@ export default function ControllerSettings() {
         const json = await post('/api/gym-controller-settings');
         if (!json.ok) throw new Error(json.error || 'Failed to update controller settings');
         return true;
-      } catch (_) {
+      } catch (e) {
+        if (e instanceof AuthError) throw e;
         const json = await post('/gym-controller-settings');
         if (!json.ok) throw new Error(json.error || 'Failed to update controller settings');
         return true;

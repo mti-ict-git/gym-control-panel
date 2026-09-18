@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek } from 'date-fns';
+import { authHeaders, assertAuthorized } from '@/lib/utils';
 
 export type ScheduleStatus = 'BOOKED' | 'IN_GYM' | 'OUT';
 
@@ -360,13 +361,14 @@ export function useCheckIn() {
       if (currentCount >= 15) throw new Error('GYM_FULL');
       const resp = await fetch('/api/gym-booking-status', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ booking_id: Number(scheduleId), status: 'CHECKIN' }),
       }).catch(() => fetch('/gym-booking-status', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ booking_id: Number(scheduleId), status: 'CHECKIN' }),
       }));
+      assertAuthorized(resp);
       const json: { ok: boolean; affected?: number; error?: string } = await resp.json();
       if (!json.ok) throw new Error(json.error || 'Failed to check in');
       const nowIso = new Date().toISOString();
@@ -403,13 +405,14 @@ export function useCheckOut() {
     mutationFn: async (scheduleId: string) => {
       const resp = await fetch('/api/gym-booking-status', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ booking_id: Number(scheduleId), status: 'COMPLETED' }),
       }).catch(() => fetch('/gym-booking-status', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ booking_id: Number(scheduleId), status: 'COMPLETED' }),
       }));
+      assertAuthorized(resp);
       const json: { ok: boolean; affected?: number; error?: string } = await resp.json();
       if (!json.ok) throw new Error(json.error || 'Failed to check out');
       const nowIso = new Date().toISOString();

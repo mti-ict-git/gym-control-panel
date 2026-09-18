@@ -96,6 +96,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const token = localStorage.getItem('auth_token');
       if (!token) return;
       const resp = await fetch('/api/auth/refresh', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      if (resp.status === 401) {
+        // The token was rejected (expired, or the account is gone or inactive). Every
+        // protected action would now fail while the UI still looked logged in, so log out
+        // and let ProtectedRoute send the user to the login page. Other failures (a 503
+        // while the database is down) keep the session: the token itself is still good.
+        localStorage.removeItem('auth_token');
+        setUser(null);
+        setIsAdmin(false);
+        return;
+      }
       const ct = resp.headers.get('content-type') || '';
       if (!ct.includes('application/json')) return;
       const json = await resp.json();
