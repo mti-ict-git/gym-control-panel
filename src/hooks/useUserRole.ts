@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 
-type AppRole = 'admin' | 'user' | 'superadmin' | 'committee';
+type AppRole = 'admin' | 'user' | 'superadmin' | 'committee' | 'kingadmin';
 
 export function useUserRole() {
   const { user } = useAuth();
@@ -18,7 +18,9 @@ export function useUserRole() {
   }, [user]);
 
   const hasRole = (role: AppRole) => roles.includes(role);
-  const isSuperAdmin = hasRole('superadmin');
+  const isKingAdmin = hasRole('kingadmin');
+  // King Admin can do everything a Super Admin can, so every Super Admin gate lets it in.
+  const isSuperAdmin = hasRole('superadmin') || isKingAdmin;
   const isCommittee = hasRole('committee');
   const isAdmin = hasRole('admin') || isSuperAdmin;
 
@@ -26,6 +28,7 @@ export function useUserRole() {
     roles,
     isLoading,
     hasRole,
+    isKingAdmin,
     isSuperAdmin,
     isCommittee,
     isAdmin,

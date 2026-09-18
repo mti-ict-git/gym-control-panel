@@ -3,15 +3,10 @@ import sql from 'mssql';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { envTrim, envBool } from '../lib/env.js';
+import { uiRoleFromDb as mapDbRoleToUi } from '../lib/gymAuth.js';
+import { recordAudit } from '../lib/audit.js';
 
 const router = express.Router();
-
-function mapDbRoleToUi(role) {
-  const r = role != null ? String(role) : '';
-  if (r === 'SuperAdmin') return 'superadmin';
-  if (r === 'Admin') return 'admin';
-  return 'committee';
-}
 
 function getJwtSecret() {
   const s = envTrim(process.env.JWT_SECRET);
@@ -66,18 +61,34 @@ router.post('/auth/login', async (req, res) => {
       : 'SELECT TOP 1 AccountID, Username, Email, Role, IsActive, PasswordHash, PasswordResetRequired FROM dbo.gym_account WHERE Username = @Username';
     const r = await req1.query(query);
     const row = Array.isArray(r?.recordset) && r.recordset.length > 0 ? r.recordset[0] : null;
+    // A failed sign-in is recorded under the account it tried (when there is one), so a
+    // King Admin can see repeated guesses at a real login.
+    const failed = (reason) => recordAudit({
+      req,
+      actor: row
+        ? { account_id: row.AccountID, username: row.Username, email: row.Email, role: mapDbRoleToUi(row.Role) }
+        : { username: String(email || username).slice(0, 100), role: 'unknown' },
+      action: 'LOGIN_FAILED',
+      targetType: 'ACCOUNT',
+      targetId: row ? String(row.AccountID) : null,
+      result: 'FAIL',
+      details: { reason },
+    });
     if (!row) {
       await pool.close();
+      failed('account not found');
       return res.status(200).json({ ok: false, error: 'Account not found' });
     }
     if (!row.IsActive) {
       await pool.close();
+      failed('account inactive');
       return res.status(200).json({ ok: false, error: 'Account is inactive' });
     }
     const hash = row.PasswordHash != null ? String(row.PasswordHash) : '';
     const match = await bcrypt.compare(String(password), hash);
     if (!match) {
       await pool.close();
+      failed('wrong password');
       return res.status(200).json({ ok: false, error: 'Invalid credentials' });
     }
     try {
@@ -102,6 +113,7 @@ router.post('/auth/login', async (req, res) => {
       role: mapDbRoleToUi(row.Role),
     };
     const token = jwt.sign(payload, getJwtSecret(), { expiresIn: '8h', issuer: 'gym-control' });
+    recordAudit({ req, actor: payload, action: 'LOGIN', targetType: 'ACCOUNT', targetId: String(payload.account_id) });
     return res.json({ ok: true, token, user: payload, password_reset_required: row.PasswordResetRequired ? true : false });
   } catch (error) {
     const message = error?.message || String(error);
@@ -180,6 +192,7 @@ router.post('/auth/change-password', async (req, res) => {
     const okOld = await bcrypt.compare(String(old_password), String(row.PasswordHash || ''));
     if (!okOld) {
       await pool.close();
+      recordAudit({ req, actor: decoded, action: 'PASSWORD_CHANGE', targetType: 'ACCOUNT', targetId: String(accountId), result: 'FAIL', details: { reason: 'old password does not match' } });
       return res.status(200).json({ ok: false, error: 'Old password does not match' });
     }
     const newHash = await bcrypt.hash(String(new_password), 10);
@@ -190,6 +203,7 @@ router.post('/auth/change-password', async (req, res) => {
       'UPDATE dbo.gym_account SET PasswordHash = @Hash, PasswordResetRequired = 0, UpdatedAt = SYSDATETIME() WHERE AccountID = @Id'
     );
     await pool.close();
+    recordAudit({ req, actor: decoded, action: 'PASSWORD_CHANGE', targetType: 'ACCOUNT', targetId: String(accountId) });
     return res.json({ ok: true });
   } catch (error) {
     const message = error?.message || String(error);

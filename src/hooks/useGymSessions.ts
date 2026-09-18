@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { authHeaders } from '@/lib/utils';
 
 export interface GymSession {
   id: string;
@@ -55,7 +56,7 @@ export function useCreateGymSession() {
     mutationFn: async (session: GymSessionInsert) => {
       const resp = await fetch('/api/gym-session-create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({
           session_name: session.session_name,
           time_start: session.time_start,
@@ -64,7 +65,7 @@ export function useCreateGymSession() {
         }),
       }).catch(() => fetch('/gym-session-create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(session),
       }));
       const json = await resp.json();
@@ -101,9 +102,9 @@ export function useUpdateGymSession() {
       };
       const resp = await fetch('/api/gym-session-update', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(payload),
-      }).catch(() => fetch('/gym-session-update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }));
+      }).catch(() => fetch('/gym-session-update', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(payload) }));
       const json = await resp.json();
       if (!json.ok) throw new Error(json.error || 'Failed to update session');
       return {
@@ -130,9 +131,9 @@ export function useDeleteGymSession() {
       const original = parseIdToOriginal(id);
       const resp = await fetch('/api/gym-session-delete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ session_name: original.session_name, time_start: original.time_start }),
-      }).catch(() => fetch('/gym-session-delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ session_name: original.session_name, time_start: original.time_start }) }));
+      }).catch(() => fetch('/gym-session-delete', { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify({ session_name: original.session_name, time_start: original.time_start }) }));
       const json = await resp.json();
       if (!json.ok) throw new Error(json.error || 'Failed to delete session');
     },

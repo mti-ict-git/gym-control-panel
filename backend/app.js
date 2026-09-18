@@ -8,7 +8,9 @@ import masterRouter from './routes/master.js';
 import gymRouter from './routes/gym.js';
 import authRouter from './routes/auth.js';
 import settingsRouter from './routes/settings.js';
+import auditRouter from './routes/audit.js';
 import { envBool, envTrim, envInt, startOfDayUtcDateForOffsetMinutes } from './lib/env.js';
+import { recordAudit } from './lib/audit.js';
 import { enforcedBanExistsSql, committeeExemptSql, managerExemptSql, titleManagerSql } from './lib/gymBan.js';
 
 dotenv.config();
@@ -81,11 +83,13 @@ app.use('/api', masterRouter);
 app.use('/api', gymRouter);
 app.use('/api', authRouter);
 app.use('/api', settingsRouter);
+app.use('/api', auditRouter);
 app.use(testerRouter);
 app.use(masterRouter);
 app.use(gymRouter);
 app.use(authRouter);
 app.use(settingsRouter);
+app.use(auditRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
@@ -1005,6 +1009,10 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
             );
             lastBanScan = { t: new Date().toISOString(), ok: true, attempt, bans_written: outcome.bansWritten, bookings_cancelled: outcome.bookingsCancelled };
             pushAccessEvent({ t: lastBanScan.t, type: 'ban_scan', bans_written: outcome.bansWritten, bookings_cancelled: outcome.bookingsCancelled });
+            recordAudit({
+              action: 'BAN_SCAN',
+              details: { bans_written: outcome.bansWritten, bookings_cancelled: outcome.bookingsCancelled, attempt },
+            });
             done = true;
           } catch (e) {
             const transient = isTransientDbError(e);
@@ -1023,6 +1031,7 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
       console.log('[gym-worker] Proactive Daily Ban Scanner error:', e.message);
       lastBanScan = { t: new Date().toISOString(), ok: false, error: String(e?.message || e) };
       pushAccessEvent({ t: lastBanScan.t, type: 'ban_scan_error', error: lastBanScan.error });
+      recordAudit({ action: 'BAN_SCAN', result: 'FAIL', details: { error: lastBanScan.error } });
     } finally {
       runningScan = false;
       setTimeout(scanTick, 6 * 60 * 60 * 1000); // 6 hours

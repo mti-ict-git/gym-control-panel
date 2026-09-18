@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { authHeaders, assertAuthorized, AuthError } from '@/lib/utils';
 
 export default function WhatsAppSettings() {
   const { toast } = useToast();
@@ -122,15 +123,19 @@ export default function WhatsAppSettings() {
     const phone = String(supportContact.phone || '').trim();
     const payload = { name, phone };
     const tryPost = async (url: string) => {
-      const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const resp = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: JSON.stringify(payload) });
+      assertAuthorized(resp);
       return await resp.json();
     };
     let ok = false;
     try {
       const json = await tryPost('/api/app-settings/support-contact');
       ok = Boolean(json?.ok);
-    } catch (_) {
-      void 0;
+    } catch (e) {
+      if (e instanceof AuthError) {
+        toast({ title: 'Save Failed', description: e.message, variant: 'destructive' });
+        return;
+      }
       try {
         const json = await tryPost('/app-settings/support-contact');
         ok = Boolean(json?.ok);

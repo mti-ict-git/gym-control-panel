@@ -17,6 +17,7 @@ import VaultPage from "./pages/VaultPage";
 import ReportsPage from "./pages/ReportsPage";
 import ManagementPage from "./pages/ManagementPage";
 import BanListPage from "./pages/BanListPage";
+import AuditLogPage from "./pages/AuditLogPage";
 import NotFound from "./pages/NotFound";
 
 // Settings pages
@@ -96,8 +97,16 @@ const App = () => (
             <Route
               path="/management"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute roles={['kingadmin', 'superadmin']}>
                   <ManagementPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/audit-log"
+              element={
+                <ProtectedRoute roles={['kingadmin']}>
+                  <AuditLogPage />
                 </ProtectedRoute>
               }
             />

@@ -4,8 +4,11 @@ type LocalUser = {
   account_id: number;
   username: string;
   email: string;
-  role: 'admin' | 'user' | 'superadmin' | 'committee';
+  role: 'admin' | 'user' | 'superadmin' | 'committee' | 'kingadmin';
 };
+
+// King Admin has every Super Admin permission (plus the audit log).
+const isAdminRole = (u: LocalUser) => u.role === 'admin' || u.role === 'superadmin' || u.role === 'kingadmin';
 
 interface AuthContextType {
   user: LocalUser | null;
@@ -38,7 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const json = await resp.json();
         if (json.ok && json.user) {
           setUser(json.user as LocalUser);
-          setIsAdmin((json.user as LocalUser).role === 'admin' || (json.user as LocalUser).role === 'superadmin');
+          setIsAdmin(isAdminRole(json.user as LocalUser));
         } else {
           localStorage.removeItem('auth_token');
         }
@@ -83,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!json.ok) return { error: json.error || 'Login failed' };
       localStorage.setItem('auth_token', json.token);
       setUser(json.user as LocalUser);
-      setIsAdmin((json.user as LocalUser).role === 'admin' || (json.user as LocalUser).role === 'superadmin');
+      setIsAdmin(isAdminRole(json.user as LocalUser));
       return { error: null };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Login failed';
@@ -112,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!json?.ok || !json?.token || !json?.user) return;
       localStorage.setItem('auth_token', String(json.token));
       setUser(json.user as LocalUser);
-      setIsAdmin((json.user as LocalUser).role === 'admin' || (json.user as LocalUser).role === 'superadmin');
+      setIsAdmin(isAdminRole(json.user as LocalUser));
     } catch { return; }
   };
 

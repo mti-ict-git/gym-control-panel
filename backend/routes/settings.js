@@ -4,6 +4,13 @@ import path from 'path';
 import sql from 'mssql';
 import { envTrim, envBool } from '../lib/env.js';
 import { requireGymAdmin } from '../lib/gymAuth.js';
+import { auditAction } from '../lib/audit.js';
+
+const auditControllerSettings = auditAction('CONTROLLER_SETTINGS_UPDATE', (req) => ({
+  targetType: 'SETTINGS',
+  targetId: 'controller',
+  details: req.body || {},
+}));
 
 const router = express.Router();
 
@@ -102,7 +109,13 @@ router.get('/app-settings/support-contact', (_req, res) => {
   })();
 });
 
-router.post('/app-settings/support-contact', (req, res) => {
+// The contact shown on the public booking page: reading stays open, changing it needs a
+// panel login (and is audited) so nobody can swap in their own number.
+router.post('/app-settings/support-contact', requireGymAdmin, auditAction('SUPPORT_CONTACT_UPDATE', (req) => ({
+  targetType: 'SETTINGS',
+  targetId: 'support-contact',
+  details: { name: req.body?.name, phone: req.body?.phone },
+})), (req, res) => {
   const name = String(req.body?.name || '').trim();
   const phone = String(req.body?.phone || '').trim();
 
@@ -328,11 +341,11 @@ router.get('/gym-controller-settings', (_req, res) => {
 
 // These settings drive the door worker (grace windows, manager all-session access,
 // auto-organize on/off), so changing them is as sensitive as granting the door itself.
-router.post('/gym-controller/settings', requireGymAdmin, (req, res) => {
+router.post('/gym-controller/settings', requireGymAdmin, auditControllerSettings, (req, res) => {
   handlePostControllerSettings(req, res);
 });
 
-router.post('/gym-controller-settings', requireGymAdmin, (req, res) => {
+router.post('/gym-controller-settings', requireGymAdmin, auditControllerSettings, (req, res) => {
   handlePostControllerSettings(req, res);
 });
 

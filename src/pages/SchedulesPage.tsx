@@ -656,7 +656,7 @@ export default function SchedulesPage() {
             const tryPost = async (url: string) => {
               const r = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
                 body: JSON.stringify({
                   session_name: data.session_name,
                   time_start: data.time_start,
@@ -664,6 +664,7 @@ export default function SchedulesPage() {
                   quota: data.quota,
                 }),
               });
+              assertAuthorized(r);
               const j = await r.json();
               if (r.status >= 500) throw new Error(j?.error || 'Server error');
               return j;
@@ -671,7 +672,8 @@ export default function SchedulesPage() {
             let json: { ok: boolean; error?: string } = { ok: false };
             try {
               json = await tryPost(`${endpoint}/gym-session-create`);
-            } catch (_) {
+            } catch (e) {
+              if (e instanceof AuthError) throw e;
               json = await tryPost(`/gym-session-create`);
             }
             if (!json?.ok) throw new Error(json?.error || 'Failed to create session');
@@ -701,7 +703,7 @@ export default function SchedulesPage() {
             const tryPost2 = async (url: string) => {
               const r = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...authHeaders() },
                 body: JSON.stringify({
                   original_session_name: editingSession.session_name,
                   original_time_start: editingSession.time_start,
@@ -711,6 +713,7 @@ export default function SchedulesPage() {
                   quota: data.quota,
                 }),
               });
+              assertAuthorized(r);
               const j = await r.json();
               if (r.status >= 500) throw new Error(j?.error || 'Server error');
               return j;
@@ -718,7 +721,8 @@ export default function SchedulesPage() {
             let json2: { ok: boolean; error?: string } = { ok: false };
             try {
               json2 = await tryPost2(`${endpoint}/gym-session-update`);
-            } catch (_) {
+            } catch (e) {
+              if (e instanceof AuthError) throw e;
               json2 = await tryPost2(`/gym-session-update`);
             }
             if (!json2?.ok) throw new Error(json2?.error || 'Failed to update session');
@@ -759,13 +763,14 @@ export default function SchedulesPage() {
                   const tryPost3 = async (url: string) => {
                     const r = await fetch(url, {
                       method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
+                      headers: { 'Content-Type': 'application/json', ...authHeaders() },
                       body: JSON.stringify({
                         schedule_id: deletingSession.schedule_id,
                         session_name: deletingSession.session_name,
                         time_start: deletingSession.time_start,
                       }),
                     });
+                    assertAuthorized(r);
                     const j = await r.json();
                     if (r.status >= 500) throw new Error(j?.error || 'Server error');
                     return j;
@@ -773,7 +778,8 @@ export default function SchedulesPage() {
                   let json3: { ok: boolean; error?: string } = { ok: false };
                   try {
                     json3 = await tryPost3(`${endpoint}/gym-session-delete`);
-                  } catch (_) {
+                  } catch (e) {
+                    if (e instanceof AuthError) throw e;
                     json3 = await tryPost3(`/gym-session-delete`);
                   }
                   if (!json3?.ok) throw new Error(json3?.error || 'Failed to delete session');

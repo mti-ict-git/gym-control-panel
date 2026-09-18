@@ -44,13 +44,14 @@ async function main() {
       CLOSE c;
       DEALLOCATE c;`);
 
-    // Normalize and migrate role values
+    // Normalize and migrate role values (KingAdmin must survive: only a King Admin can make one)
+    await pool.request().query("UPDATE dbo.gym_account SET Role = 'KingAdmin' WHERE Role IN ('kingadmin','KINGADMIN','King Admin')");
     await pool.request().query("UPDATE dbo.gym_account SET Role = 'SuperAdmin' WHERE Role IN ('superadmin','SUPERADMIN','Super Admin')");
     await pool.request().query("UPDATE dbo.gym_account SET Role = 'Admin' WHERE Role IN ('admin','ADMIN')");
-    await pool.request().query("UPDATE dbo.gym_account SET Role = 'Staff' WHERE Role NOT IN ('SuperAdmin','Admin') OR Role IS NULL");
+    await pool.request().query("UPDATE dbo.gym_account SET Role = 'Staff' WHERE Role NOT IN ('KingAdmin','SuperAdmin','Admin') OR Role IS NULL");
 
     // Re-add the standardized constraint
-    await pool.request().query("ALTER TABLE dbo.gym_account ADD CONSTRAINT CK_gym_account_Role CHECK (Role IN ('SuperAdmin','Admin','Staff'))");
+    await pool.request().query("ALTER TABLE dbo.gym_account ADD CONSTRAINT CK_gym_account_Role CHECK (Role IN ('KingAdmin','SuperAdmin','Admin','Staff'))");
 
     await pool.close();
     console.log('Role migration completed');

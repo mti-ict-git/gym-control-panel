@@ -10,7 +10,9 @@ import {
   Database,
   FileText,
   UserCog,
-  Ban
+  Ban,
+  ScrollText,
+  Crown
 } from 'lucide-react';
 import {
   Sidebar,
@@ -37,6 +39,7 @@ const menuItems = [
   { title: 'Reports', url: '/reports', icon: FileText },
   { title: 'Ban List', url: '/ban-list', icon: Ban },
   { title: 'Management Account', url: '/management', icon: UserCog, superAdminOnly: true },
+  { title: 'Audit Log', url: '/audit-log', icon: ScrollText, kingOnly: true },
   { title: 'Settings', url: '/settings', icon: Settings },
 ];
 
@@ -45,7 +48,8 @@ export function AppSidebar() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { toast } = useToast();
-  const isSuperAdmin = (user?.role || '').toLowerCase() === 'superadmin';
+  const isKingAdmin = (user?.role || '').toLowerCase() === 'kingadmin';
+  const isSuperAdmin = (user?.role || '').toLowerCase() === 'superadmin' || isKingAdmin;
   const [isDark, setIsDark] = useState(false);
   const currentYear = new Date().getFullYear();
 
@@ -76,6 +80,7 @@ export function AppSidebar() {
   const displayName = user?.username || user?.email || 'Admin';
   const roleLabel = (() => {
     const r = (user?.role || '').toLowerCase();
+    if (r === 'kingadmin') return 'King Admin';
     if (r === 'superadmin') return 'Super Admin';
     if (r === 'committee') return 'Committee';
     if (r === 'admin') return 'Administrator';
@@ -83,6 +88,15 @@ export function AppSidebar() {
   })();
   const roleBadge = (() => {
     const r = (user?.role || '').toLowerCase();
+    // Only the King Admin ever sees this badge: no other role can see a King Admin account.
+    if (r === 'kingadmin') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 text-xs font-medium">
+          <Crown className="h-3 w-3" />
+          King Admin
+        </span>
+      );
+    }
     if (r === 'superadmin') {
       return (
         <span className="inline-flex items-center rounded-md bg-red-100 text-red-700 border border-red-200 px-2 py-0.5 text-xs font-medium">
@@ -118,7 +132,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems
-                .filter((item) => !item.superAdminOnly || isSuperAdmin)
+                .filter((item) => (!item.superAdminOnly || isSuperAdmin) && (!item.kingOnly || isKingAdmin))
                 .map((item) => {
                   const isActive = location.pathname === item.url || 
                     (item.url !== '/dashboard' && location.pathname.startsWith(item.url));

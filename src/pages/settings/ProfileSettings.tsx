@@ -2,6 +2,7 @@ import { User } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { useQuery } from '@tanstack/react-query';
+import { authHeaders } from '@/lib/utils';
 
 export default function ProfileSettings() {
   const { user } = useAuth();
@@ -118,7 +119,8 @@ export default function ProfileSettings() {
     queryKey: ['profile-account', user?.account_id],
     queryFn: async () => {
       if (!user?.account_id) return null as { created_at: string | null; email_verified: boolean; last_sign_in: string | null; last_sign_in_at: string | null } | null;
-      const resp = await fetch('/api/gym-accounts').catch(() => fetch('/gym-accounts'));
+      // The account list now needs a login; for a non-Super Admin it holds only their own row.
+      const resp = await fetch('/api/gym-accounts', { headers: authHeaders() }).catch(() => fetch('/gym-accounts', { headers: authHeaders() }));
       const json = await resp.json();
       if (!json?.ok) return null as { created_at: string | null; email_verified: boolean; last_sign_in: string | null; last_sign_in_at: string | null } | null;
       const found = Array.isArray(json.accounts) ? json.accounts.find((a: { account_id: number }) => Number(a.account_id) === Number(user.account_id)) : null;

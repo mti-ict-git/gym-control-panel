@@ -4,9 +4,13 @@ import { Loader2 } from 'lucide-react';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
+  // When set, only these roles may open the page; anyone else lands on the dashboard.
+  // The server enforces the same rule; this just keeps a typed-in URL from showing an
+  // empty, erroring page.
+  roles?: string[];
 }
 
-export function ProtectedRoute({ children }: ProtectedRouteProps) {
+export function ProtectedRoute({ children, roles }: ProtectedRouteProps) {
   const { user, isLoading } = useAuth();
   const location = useLocation();
 
@@ -20,6 +24,10 @@ export function ProtectedRoute({ children }: ProtectedRouteProps) {
 
   if (!user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (roles && !roles.includes(String(user.role || '').toLowerCase())) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;

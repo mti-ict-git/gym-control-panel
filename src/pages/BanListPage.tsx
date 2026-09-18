@@ -73,7 +73,8 @@ export default function BanListPage() {
   const [unbanRemark, setUnbanRemark] = useState('');
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const canUnbanByRole = user?.role === 'superadmin' || user?.role === 'committee';
+  // Same roles the server accepts on /gym-booking-ban-reset.
+  const canUnbanByRole = ['kingadmin', 'superadmin', 'admin', 'committee'].includes(String(user?.role || ''));
   const isCommittee = user?.role === 'committee';
 
   useEffect(() => {

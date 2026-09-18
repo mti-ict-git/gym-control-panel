@@ -3,8 +3,25 @@ import sql from 'mssql';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { envTrim, envBool, envInt, startOfDayUtcDateForOffsetMinutes } from '../lib/env.js';
-import { getJwtSecret, requireGymAdmin, requireGymSuperAdmin } from '../lib/gymAuth.js';
+import {
+  getJwtSecret,
+  requireGymAdmin,
+  requireGymSuperAdmin,
+  uiRoleFromDb,
+  dbRoleFromUi,
+  isKingAdmin,
+  actorLabel,
+} from '../lib/gymAuth.js';
 import { enforcedBanExistsSql, managerExemptSql } from '../lib/gymBan.js';
+import { auditAction, recordAudit } from '../lib/audit.js';
+
+const bodyOf = (req) => req.body || {};
+const sessionDetails = (b) => ({
+  session_name: b.session_name,
+  time_start: b.time_start,
+  time_end: b.time_end,
+  quota: b.quota,
+});
 
 const router = express.Router();
 
@@ -557,7 +574,13 @@ router.get('/gym-sessions', async (req, res) => {
   }
 });
 
-router.post('/gym-session-create', async (req, res) => {
+// Session (schedule) edits change quota and times for everyone who books, so they need a
+// panel login like the other admin writes - and a name for the audit log.
+router.post('/gym-session-create', requireGymAdmin, auditAction('SESSION_CREATE', (req) => ({
+  targetType: 'SESSION',
+  targetId: `${bodyOf(req).session_name || ''} ${bodyOf(req).time_start || ''}`.trim(),
+  details: sessionDetails(bodyOf(req)),
+})), async (req, res) => {
   const {
     DB_SERVER,
     DB_PORT,
@@ -621,7 +644,14 @@ router.post('/gym-session-create', async (req, res) => {
   }
 });
 
-router.post('/gym-session-update', async (req, res) => {
+router.post('/gym-session-update', requireGymAdmin, auditAction('SESSION_UPDATE', (req) => ({
+  targetType: 'SESSION',
+  targetId: `${bodyOf(req).original_session_name || ''} ${bodyOf(req).original_time_start || ''}`.trim(),
+  details: {
+    before: { session_name: bodyOf(req).original_session_name, time_start: bodyOf(req).original_time_start },
+    after: sessionDetails(bodyOf(req)),
+  },
+})), async (req, res) => {
   const {
     DB_SERVER,
     DB_PORT,
@@ -695,7 +725,11 @@ router.post('/gym-session-update', async (req, res) => {
   }
 });
 
-router.post('/gym-session-delete', async (req, res) => {
+router.post('/gym-session-delete', requireGymAdmin, auditAction('SESSION_DELETE', (req) => ({
+  targetType: 'SESSION',
+  targetId: `${bodyOf(req).session_name || ''} ${bodyOf(req).time_start || ''}`.trim() || String(bodyOf(req).schedule_id || ''),
+  details: { schedule_id: bodyOf(req).schedule_id, session_name: bodyOf(req).session_name, time_start: bodyOf(req).time_start },
+})), async (req, res) => {
   const {
     DB_SERVER,
     DB_PORT,
@@ -1259,7 +1293,11 @@ router.get('/carddb-staff', async (req, res) => {
   }
 });
 
-router.post('/gym-booking-update-status', requireGymAdmin, async (req, res) => {
+router.post('/gym-booking-update-status', requireGymAdmin, auditAction('BOOKING_APPROVAL', (req) => ({
+  targetType: 'BOOKING',
+  targetId: String(bodyOf(req).booking_id || ''),
+  details: { approval_status: String(bodyOf(req).approval_status || '').toUpperCase() },
+})), async (req, res) => {
   const {
     DB_SERVER,
     DB_PORT,
@@ -1348,7 +1386,20 @@ router.post('/gym-booking-update-status', requireGymAdmin, async (req, res) => {
   }
 });
 
-router.post('/gym-controller-access', requireGymAdmin, async (req, res) => {
+router.post('/gym-controller-access', requireGymAdmin, auditAction('DOOR_ACCESS', (req) => {
+  // The door worker grants and revokes every booking on its own; those are routine and
+  // already in the access-event feed. Only a person pressing the button is audited.
+  if (String(req.authUser?.role || '').toLowerCase() === 'system') return null;
+  const b = bodyOf(req);
+  const a = String(b.access ?? '').trim().toLowerCase();
+  const allow = a === '1' || a === 'true' || a === 'yes' || a === 'y';
+  return {
+    action: allow ? 'DOOR_ACCESS_GRANT' : 'DOOR_ACCESS_REVOKE',
+    targetType: 'EMPLOYEE',
+    targetId: String(b.employee_id || '').trim().toUpperCase(),
+    details: { unit_no: b.unit_no, source: b.source },
+  };
+}), async (req, res) => {
   const debug = envBool(process.env.GYM_CONTROLLER_ACCESS_DEBUG, false);
   const reqId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const debugEvents = [];
@@ -2483,6 +2534,13 @@ router.post('/gym-booking-create', async (req, res) => {
                );`
           );
           const bannedStr = isNaN(bannedUntil.getTime()) ? null : bannedUntil.toISOString().slice(0, 10);
+          recordAudit({
+            req,
+            action: 'BAN_APPLIED',
+            targetType: 'EMPLOYEE',
+            targetId: employeeId,
+            details: { reason: 'NO_SHOW_3X', consecutive_no_show: consecutiveNoShow, banned_until: bannedStr, via: 'booking' },
+          });
           await gymPool.close();
           gymPool = null;
           return res.status(200).json({ ok: false, error: `You are banned from booking until ${bannedStr || 'a later date'}` });
@@ -3470,7 +3528,9 @@ router.get('/gym-live-persisted', async (req, res) => {
   }
 });
 
-router.post('/gym-accounts-init', async (req, res) => {
+// Schema init. It also rewrites every unknown Role to 'Staff', so it needs a SuperAdmin
+// login: unauthenticated, one request from anyone could demote every account.
+router.post('/gym-accounts-init', requireGymSuperAdmin, auditAction('ACCOUNTS_INIT'), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -3493,7 +3553,7 @@ router.post('/gym-accounts-init', async (req, res) => {
         Username VARCHAR(50) NOT NULL UNIQUE,
         Email VARCHAR(100) NOT NULL UNIQUE,
         PasswordHash VARCHAR(255) NOT NULL,
-        Role VARCHAR(30) NOT NULL CONSTRAINT CK_gym_account_Role CHECK (Role IN ('SuperAdmin','Admin','Staff')),
+        Role VARCHAR(30) NOT NULL CONSTRAINT CK_gym_account_Role CHECK (Role IN ('KingAdmin','SuperAdmin','Admin','Staff')),
         IsActive BIT NOT NULL CONSTRAINT DF_gym_account_IsActive DEFAULT (1),
         CreatedAt DATETIME2 NOT NULL CONSTRAINT DF_gym_account_CreatedAt DEFAULT SYSDATETIME(),
         CreatedBy VARCHAR(50) NULL,
@@ -3538,10 +3598,11 @@ router.post('/gym-accounts-init', async (req, res) => {
     END
     CLOSE c;
     DEALLOCATE c;`);
+    await exec(`UPDATE dbo.gym_account SET Role = 'KingAdmin' WHERE Role IN ('kingadmin','KINGADMIN','King Admin')`);
     await exec(`UPDATE dbo.gym_account SET Role = 'SuperAdmin' WHERE Role IN ('superadmin','SUPERADMIN','Super Admin')`);
     await exec(`UPDATE dbo.gym_account SET Role = 'Admin' WHERE Role IN ('admin','ADMIN')`);
-    await exec(`UPDATE dbo.gym_account SET Role = 'Staff' WHERE Role NOT IN ('SuperAdmin','Admin') OR Role IS NULL`);
-    await exec(`ALTER TABLE dbo.gym_account ADD CONSTRAINT CK_gym_account_Role CHECK (Role IN ('SuperAdmin','Admin','Staff'))`);
+    await exec(`UPDATE dbo.gym_account SET Role = 'Staff' WHERE Role NOT IN ('KingAdmin','SuperAdmin','Admin') OR Role IS NULL`);
+    await exec(`ALTER TABLE dbo.gym_account ADD CONSTRAINT CK_gym_account_Role CHECK (Role IN ('KingAdmin','SuperAdmin','Admin','Staff'))`);
     await exec(`IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_gym_account_Email' AND object_id = OBJECT_ID('dbo.gym_account')) BEGIN
       CREATE UNIQUE INDEX UX_gym_account_Email ON dbo.gym_account (Email);
     END`);
@@ -3561,7 +3622,38 @@ router.post('/gym-accounts-init', async (req, res) => {
   }
 });
 
-router.get('/gym-accounts', async (req, res) => {
+// Who sees which accounts. King Admin: all. SuperAdmin: all except King Admin accounts,
+// which must not exist as far as any other role can tell. Everyone else: only their own
+// row (the Profile page reads it). Filtered in SQL, so a hidden row never leaves the DB.
+function accountVisibilitySql(viewer, req1) {
+  if (isKingAdmin(viewer)) return '';
+  if (String(viewer?.role || '').toLowerCase() === 'superadmin') return "WHERE Role <> 'KingAdmin'";
+  req1.input('Me', sql.Int, Number(viewer?.account_id) > 0 ? Number(viewer.account_id) : -1);
+  return "WHERE AccountID = @Me AND Role <> 'KingAdmin'";
+}
+
+// Looks up an account the way the caller is allowed to see it: a King Admin account is
+// "not found" to anyone but a King Admin, so edit/delete cannot confirm it exists either.
+async function readVisibleAccount(pool, id, viewer) {
+  const r = await pool
+    .request()
+    .input('Id', sql.Int, id)
+    .query('SELECT TOP 1 AccountID, Username, Email, Role, IsActive FROM dbo.gym_account WHERE AccountID = @Id');
+  const row = r?.recordset?.[0] || null;
+  if (!row) return null;
+  if (String(row.Role) === 'KingAdmin' && !isKingAdmin(viewer)) return null;
+  return row;
+}
+
+async function otherActiveKingCount(pool, id) {
+  const r = await pool
+    .request()
+    .input('Id', sql.Int, id)
+    .query("SELECT COUNT(1) AS n FROM dbo.gym_account WHERE Role = 'KingAdmin' AND IsActive = 1 AND AccountID <> @Id");
+  return Number(r?.recordset?.[0]?.n || 0);
+}
+
+router.get('/gym-accounts', requireGymAdmin, async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -3587,19 +3679,22 @@ router.get('/gym-accounts', async (req, res) => {
     if (colLastSignInAt) selectCols.push(utcDateExpr('LastSignInAt'));
     let result;
     try {
-      result = await pool.request().query(
-        `SELECT ${selectCols.join(', ')} FROM dbo.gym_account ORDER BY CreatedAt DESC`
+      const req1 = pool.request();
+      const whereSql = accountVisibilitySql(req.authUser, req1);
+      result = await req1.query(
+        `SELECT ${selectCols.join(', ')} FROM dbo.gym_account ${whereSql} ORDER BY CreatedAt DESC`
       );
     } catch (e) {
       const minimalCols = ['AccountID', 'Username', 'Email', 'Role', 'IsActive', utcDateExpr('CreatedAt'), utcDateExpr('UpdatedAt')];
-      result = await pool.request().query(
-        `SELECT ${minimalCols.join(', ')} FROM dbo.gym_account ORDER BY CreatedAt DESC`
+      const req2 = pool.request();
+      const whereSql = accountVisibilitySql(req.authUser, req2);
+      result = await req2.query(
+        `SELECT ${minimalCols.join(', ')} FROM dbo.gym_account ${whereSql} ORDER BY CreatedAt DESC`
       );
     }
     const rows = Array.isArray(result?.recordset) ? result.recordset : [];
     const accounts = rows.map((r) => {
-      const dbRole = r.Role != null ? String(r.Role) : '';
-      const role = dbRole === 'SuperAdmin' ? 'superadmin' : dbRole === 'Admin' ? 'admin' : 'committee';
+      const role = uiRoleFromDb(r.Role);
       return {
         account_id: Number(r.AccountID),
         username: r.Username != null ? String(r.Username) : '',
@@ -3703,7 +3798,11 @@ router.get('/gym-bookings-by-employee', async (req, res) => {
 // Admin-only: it rewrites any booking's status, so unauthenticated it let anyone put a
 // ban-cancelled booking back to BOOKED (the door worker grants from Status) or turn a
 // past no-show into COMPLETED to erase a strike.
-router.post('/gym-booking-status', requireGymAdmin, async (req, res) => {
+router.post('/gym-booking-status', requireGymAdmin, auditAction('BOOKING_STATUS', (req) => ({
+  targetType: 'BOOKING',
+  targetId: String(bodyOf(req).booking_id || ''),
+  details: { status: String(bodyOf(req).status || '').toUpperCase() },
+})), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
@@ -3844,7 +3943,10 @@ router.post('/gym-booking-cancel', async (req, res) => {
   }
 });
 
-router.delete('/gym-booking/:id', requireGymAdmin, async (req, res) => {
+router.delete('/gym-booking/:id', requireGymAdmin, auditAction('BOOKING_DELETE', (req) => ({
+  targetType: 'BOOKING',
+  targetId: String(req.params.id || ''),
+})), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   if (!DB_SERVER || !DB_DATABASE || !DB_USER || !DB_PASSWORD) {
     return res.status(500).json({ ok: false, error: 'Gym DB env is not configured' });
@@ -3857,6 +3959,22 @@ router.delete('/gym-booking/:id', requireGymAdmin, async (req, res) => {
   let pool = null;
   try {
     pool = await new sql.ConnectionPool(config).connect();
+    // The row is gone afterwards, so keep what it was for the audit log.
+    const snap = await pool
+      .request()
+      .input('id', sql.Int, id)
+      .query('SELECT EmployeeID, EmployeeName, BookingDate, Status, ApprovalStatus FROM dbo.gym_booking WHERE BookingID = @id')
+      .catch(() => null);
+    const was = snap?.recordset?.[0] || null;
+    if (was) {
+      res.locals.audit = {
+        employee_id: was.EmployeeID,
+        employee_name: was.EmployeeName,
+        booking_date: was.BookingDate instanceof Date ? was.BookingDate.toISOString().slice(0, 10) : String(was.BookingDate || ''),
+        status: was.Status,
+        approval_status: was.ApprovalStatus,
+      };
+    }
     const req1 = pool.request();
     req1.input('id', sql.Int, id);
     const r = await req1.query('DELETE FROM dbo.gym_booking WHERE BookingID = @id');
@@ -3962,7 +4080,11 @@ router.get('/gym-controller-settings', async (req, res) => {
   }
 });
 
-router.post('/gym-controller-settings', requireGymAdmin, async (req, res) => {
+router.post('/gym-controller-settings', requireGymAdmin, auditAction('CONTROLLER_SETTINGS_UPDATE', (req) => ({
+  targetType: 'SETTINGS',
+  targetId: 'controller',
+  details: bodyOf(req),
+})), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4419,7 +4541,11 @@ router.get('/gym-access-committee', async (req, res) => {
   }
 });
 
-router.post('/gym-access-committee-add', requireGymAdmin, async (req, res) => {
+router.post('/gym-access-committee-add', requireGymAdmin, auditAction('COMMITTEE_ADD', (req) => ({
+  targetType: 'EMPLOYEE',
+  targetId: String(bodyOf(req).employee_id || '').trim(),
+  details: { unit_no: bodyOf(req).unit_no },
+})), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4470,7 +4596,11 @@ router.post('/gym-access-committee-add', requireGymAdmin, async (req, res) => {
   }
 });
 
-router.post('/gym-access-committee-remove', requireGymAdmin, async (req, res) => {
+router.post('/gym-access-committee-remove', requireGymAdmin, auditAction('COMMITTEE_REMOVE', (req) => ({
+  targetType: 'EMPLOYEE',
+  targetId: String(bodyOf(req).employee_id || '').trim(),
+  details: { unit_no: bodyOf(req).unit_no },
+})), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4607,7 +4737,11 @@ router.get('/gym-committee-roster', async (req, res) => {
   }
 });
 
-router.post('/gym-committee-roster-assign', requireGymAdmin, async (req, res) => {
+router.post('/gym-committee-roster-assign', requireGymAdmin, auditAction('ROSTER_ASSIGN', (req) => ({
+  targetType: 'EMPLOYEE',
+  targetId: String(bodyOf(req).employee_id || '').trim(),
+  details: { schedule_id: bodyOf(req).schedule_id, duty_date: bodyOf(req).duty_date },
+})), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4684,7 +4818,11 @@ router.post('/gym-committee-roster-assign', requireGymAdmin, async (req, res) =>
   }
 });
 
-router.post('/gym-committee-roster-remove', requireGymAdmin, async (req, res) => {
+router.post('/gym-committee-roster-remove', requireGymAdmin, auditAction('ROSTER_REMOVE', (req) => ({
+  targetType: 'EMPLOYEE',
+  targetId: String(bodyOf(req).employee_id || '').trim(),
+  details: { schedule_id: bodyOf(req).schedule_id, duty_date: bodyOf(req).duty_date },
+})), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4985,7 +5123,11 @@ router.post('/db-connections-test', async (req, res) => {
   }
 });
 
-router.post('/gym-accounts', requireGymSuperAdmin, async (req, res) => {
+router.post('/gym-accounts', requireGymSuperAdmin, auditAction('ACCOUNT_CREATE', (req) => ({
+  targetType: 'ACCOUNT',
+  targetId: String(bodyOf(req).username || ''),
+  details: { username: bodyOf(req).username, email: bodyOf(req).email, role: bodyOf(req).role, is_active: bodyOf(req).is_active },
+})), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -4998,12 +5140,16 @@ router.post('/gym-accounts', requireGymSuperAdmin, async (req, res) => {
   if (!username || !email || !role) {
     return res.status(400).json({ ok: false, error: 'username, email, role are required' });
   }
+  const dbRole = dbRoleFromUi(role);
+  // Only a King Admin can make another one; to a SuperAdmin the role does not exist.
+  if (dbRole === 'KingAdmin' && !isKingAdmin(req.authUser)) {
+    return res.status(403).json({ ok: false, error: 'Forbidden' });
+  }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
   let pool = null;
   try {
     pool = await new sql.ConnectionPool(config).connect();
     const req1 = pool.request();
-    const dbRole = String(role).toLowerCase() === 'superadmin' ? 'SuperAdmin' : String(role).toLowerCase() === 'admin' ? 'Admin' : 'Staff';
     req1.input('Username', sql.VarChar(50), String(username));
     req1.input('Email', sql.VarChar(100), String(email));
     req1.input('Role', sql.VarChar(30), dbRole);
@@ -5020,14 +5166,32 @@ router.post('/gym-accounts', requireGymSuperAdmin, async (req, res) => {
     await req1.query(q);
     return res.json({ ok: true });
   } catch (error) {
-    const message = error?.message || String(error);
+    // SQL Server's duplicate-key text quotes the clashing value and index; say it plainly
+    // without echoing another account's details back.
+    const raw = error?.message || String(error);
+    const message = /duplicate key|UNIQUE KEY|UX_gym_account/i.test(raw) ? 'Username atau email sudah dipakai akun lain.' : raw;
     return res.status(200).json({ ok: false, error: message });
   } finally {
     if (pool) await pool.close().catch(() => {});
   }
 });
 
-router.put('/gym-accounts/:id', requireGymSuperAdmin, async (req, res) => {
+router.put('/gym-accounts/:id', requireGymSuperAdmin, auditAction('ACCOUNT_UPDATE', (req) => {
+  const b = bodyOf(req);
+  const changed = ['username', 'email', 'role', 'is_active'].filter((k) => b[k] != null);
+  return {
+    targetType: 'ACCOUNT',
+    targetId: String(req.params.id || ''),
+    details: {
+      changed,
+      username: b.username,
+      email: b.email,
+      role: b.role,
+      is_active: b.is_active,
+      password_changed: Boolean(b.password && String(b.password).trim()),
+    },
+  };
+}), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -5041,17 +5205,32 @@ router.put('/gym-accounts/:id', requireGymSuperAdmin, async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Invalid id' });
   }
   const { username, email, role, is_active, password: rawPassword, last_sign_in_at } = req.body || {};
+  const newDbRole = role != null ? dbRoleFromUi(role) : null;
+  if (newDbRole === 'KingAdmin' && !isKingAdmin(req.authUser)) {
+    return res.status(403).json({ ok: false, error: 'Forbidden' });
+  }
   const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
   let pool = null;
   try {
     pool = await new sql.ConnectionPool(config).connect();
+    const target = await readVisibleAccount(pool, id, req.authUser);
+    if (!target) {
+      return res.status(200).json({ ok: false, error: 'Account not found or not updated' });
+    }
+    res.locals.audit = { target_username: target.Username, role_before: uiRoleFromDb(target.Role) };
+    // Never leave the panel without a King Admin: only a King Admin can create one, so
+    // losing the last would need a database script to undo.
+    const losingKing = String(target.Role) === 'KingAdmin'
+      && ((newDbRole != null && newDbRole !== 'KingAdmin') || (is_active != null && !is_active));
+    if (losingKing && (await otherActiveKingCount(pool, id)) < 1) {
+      return res.status(200).json({ ok: false, error: 'Ini King Admin terakhir. Jadikan akun lain King Admin dulu.' });
+    }
     const req1 = pool.request();
     req1.input('Id', sql.Int, id);
     if (username != null) req1.input('Username', sql.VarChar(50), String(username));
     if (email != null) req1.input('Email', sql.VarChar(100), String(email));
-    if (role != null) {
-      const dbRole = String(role).toLowerCase() === 'superadmin' ? 'SuperAdmin' : String(role).toLowerCase() === 'admin' ? 'Admin' : 'Staff';
-      req1.input('Role', sql.VarChar(30), dbRole);
+    if (newDbRole != null) {
+      req1.input('Role', sql.VarChar(30), newDbRole);
     }
     if (is_active != null) req1.input('IsActive', sql.Bit, is_active ? 1 : 0);
     const setParts = [];
@@ -5082,14 +5261,18 @@ router.put('/gym-accounts/:id', requireGymSuperAdmin, async (req, res) => {
     }
     return res.json({ ok: true, affected });
   } catch (error) {
-    const message = error?.message || String(error);
+    const raw = error?.message || String(error);
+    const message = /duplicate key|UNIQUE KEY|UX_gym_account/i.test(raw) ? 'Username atau email sudah dipakai akun lain.' : raw;
     return res.status(200).json({ ok: false, error: message });
   } finally {
     if (pool) await pool.close().catch(() => {});
   }
 });
 
-router.delete('/gym-accounts/:id', requireGymSuperAdmin, async (req, res) => {
+router.delete('/gym-accounts/:id', requireGymSuperAdmin, auditAction('ACCOUNT_DELETE', (req) => ({
+  targetType: 'ACCOUNT',
+  targetId: String(req.params.id || ''),
+})), async (req, res) => {
   const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
   const server = envTrim(DB_SERVER);
   const database = envTrim(DB_DATABASE);
@@ -5106,6 +5289,14 @@ router.delete('/gym-accounts/:id', requireGymSuperAdmin, async (req, res) => {
   let pool = null;
   try {
     pool = await new sql.ConnectionPool(config).connect();
+    const target = await readVisibleAccount(pool, id, req.authUser);
+    if (!target) {
+      return res.status(200).json({ ok: false, error: 'Account not found or not deleted' });
+    }
+    res.locals.audit = { target_username: target.Username, target_email: target.Email, role: uiRoleFromDb(target.Role) };
+    if (String(target.Role) === 'KingAdmin' && (await otherActiveKingCount(pool, id)) < 1) {
+      return res.status(200).json({ ok: false, error: 'Ini King Admin terakhir dan tidak bisa dihapus.' });
+    }
     const req1 = pool.request();
     req1.input('Id', sql.Int, id);
     const r = await req1.query('DELETE FROM dbo.gym_account WHERE AccountID = @Id');
@@ -6025,7 +6216,12 @@ router.get('/gym-booking-ban-list', async (req, res) => {
         CASE WHEN b.BannedUntil >= @today THEN 'ACTIVE' ELSE 'EXPIRED' END AS status,
         b.Reason AS reason,
         b.UnbanRemark AS unban_remark,
-        b.ActionBy AS action_by,
+        -- New King Admin actions are already written as 'System'; this also hides the name
+        -- on rows written before that account became King Admin.
+        CASE WHEN EXISTS (
+          SELECT 1 FROM dbo.gym_account ka
+          WHERE ka.Role = 'KingAdmin' AND (ka.Username = b.ActionBy OR ka.Email = b.ActionBy)
+        ) THEN 'System' ELSE b.ActionBy END AS action_by,
         b.ConsecutiveNoShow AS consecutive_no_show,
         b.UpdatedAt AS updated_at,
         b.CreatedAt AS created_at
@@ -6062,7 +6258,13 @@ router.get('/gym-booking-ban-list', async (req, res) => {
   }
 });
 
-router.post('/gym-booking-ban-reset', async (req, res) => {
+// Auth is checked inside the handler here, which sets req.authUser; a request turned away
+// before that (no/expired token) is not an unban attempt worth a row.
+router.post('/gym-booking-ban-reset', auditAction('BAN_RESET', (req) => (req.authUser ? {
+  targetType: 'EMPLOYEE',
+  targetId: String(bodyOf(req).employee_id || '').trim(),
+  details: { remark: bodyOf(req).remark },
+} : null)), async (req, res) => {
   const auth = req.headers.authorization || '';
   const m = auth.match(/^Bearer\s+(.+)$/i);
   if (!m) return res.status(401).json({ ok: false, error: 'Missing bearer token' });
@@ -6073,10 +6275,11 @@ router.post('/gym-booking-ban-reset', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Invalid token' });
   }
   const role = String(payload?.role || '').toLowerCase();
-  if (!['superadmin', 'admin', 'committee'].includes(role)) {
+  if (!['kingadmin', 'superadmin', 'admin', 'committee'].includes(role)) {
     return res.status(403).json({ ok: false, error: 'Forbidden' });
   }
-  const actionBy = String(payload?.username || payload?.email || '').trim();
+  req.authUser = payload;
+  const actionBy = actorLabel(payload);
 
   const {
     DB_SERVER,

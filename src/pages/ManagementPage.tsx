@@ -13,8 +13,23 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { UserCog, Shield, Users, UserPlus, Eye, EyeOff, Pencil, Trash2 } from 'lucide-react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { useUserRole } from '@/hooks/useUserRole';
 
-type AppRole = 'admin' | 'user' | 'superadmin' | 'committee';
+type AppRole = 'admin' | 'user' | 'superadmin' | 'committee' | 'kingadmin';
+
+// King Admin is offered only to a King Admin. For everyone else the role does not exist:
+// the server hides King Admin accounts and refuses to create one for them.
+function RoleOptions({ withKing }: { withKing: boolean }) {
+  return (
+    <>
+      {withKing && <SelectItem value="kingadmin">King Admin</SelectItem>}
+      <SelectItem value="superadmin">Super Admin</SelectItem>
+      <SelectItem value="committee">Committee</SelectItem>
+      <SelectItem value="admin">Admin</SelectItem>
+      <SelectItem value="user">User</SelectItem>
+    </>
+  );
+}
 
 interface GymAccount {
   account_id: number;
@@ -29,6 +44,7 @@ interface GymAccount {
 }
 
 export default function ManagementPage() {
+  const { isKingAdmin } = useUserRole();
   const [accounts, setAccounts] = useState<GymAccount[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -54,7 +70,8 @@ export default function ManagementPage() {
   const fetchUsers = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/gym-accounts');
+      const res = await fetch('/api/gym-accounts', { headers: authHeaders() });
+      assertAuthorized(res);
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || 'Failed to fetch accounts');
       setAccounts(json.accounts as GymAccount[]);
@@ -84,7 +101,7 @@ export default function ManagementPage() {
       fetchUsers();
     } catch (error) {
       console.error('Error updating role:', error);
-      toast.error('Failed to update role');
+      toast.error(error instanceof Error ? error.message : 'Failed to update role');
     }
   };
 
@@ -219,6 +236,7 @@ export default function ManagementPage() {
 
   const getRoleBadgeVariant = (role: AppRole) => {
     switch (role) {
+      case 'kingadmin':
       case 'superadmin':
         return 'outline';
       case 'committee':
@@ -232,6 +250,8 @@ export default function ManagementPage() {
 
   const getRoleBadgeClass = (role: AppRole) => {
     switch (role) {
+      case 'kingadmin':
+        return 'rounded-full bg-amber-50 text-amber-800 border-amber-300 px-3 py-1';
       case 'superadmin':
         return 'rounded-full bg-red-50 text-red-600 border-red-200 px-3 py-1';
       case 'committee':
@@ -245,6 +265,8 @@ export default function ManagementPage() {
 
   const getRoleLabel = (role: AppRole) => {
     switch (role) {
+      case 'kingadmin':
+        return 'King Admin';
       case 'superadmin':
         return 'Super Admin';
       case 'committee':
@@ -351,10 +373,7 @@ export default function ManagementPage() {
                             <SelectValue placeholder="Select role" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="superadmin">Super Admin</SelectItem>
-                            <SelectItem value="committee">Committee</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                            <SelectItem value="user">User</SelectItem>
+                            <RoleOptions withKing={isKingAdmin} />
                           </SelectContent>
                         </Select>
                       </div>
@@ -448,10 +467,7 @@ export default function ManagementPage() {
                                     <SelectValue placeholder="Select role" />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="superadmin">Super Admin</SelectItem>
-                                    <SelectItem value="committee">Committee</SelectItem>
-                                    <SelectItem value="admin">Admin</SelectItem>
-                                    <SelectItem value="user">User</SelectItem>
+                                    <RoleOptions withKing={isKingAdmin} />
                                   </SelectContent>
                                 </Select>
                               </TableCell>
@@ -569,10 +585,7 @@ export default function ManagementPage() {
                           <SelectValue placeholder="Select role" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="superadmin">Super Admin</SelectItem>
-                          <SelectItem value="committee">Committee</SelectItem>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="user">User</SelectItem>
+                          <RoleOptions withKing={isKingAdmin} />
                         </SelectContent>
                       </Select>
                     </div>
