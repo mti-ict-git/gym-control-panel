@@ -35,6 +35,8 @@ interface BanRecord {
   unban_remark: string | null;
   action_by: string | null;
   consecutive_no_show: number;
+  ban_count: number;
+  last_banned_at: string | null;
   updated_at: string | null;
   created_at: string | null;
 }
@@ -320,6 +322,7 @@ export default function BanListPage() {
                       <TableHead className="whitespace-nowrap">Unban Remark</TableHead>
                       {!isCommittee && <TableHead className="whitespace-nowrap">Action By</TableHead>}
                       <TableHead className="whitespace-nowrap">Consecutive No-Show</TableHead>
+                      <TableHead className="whitespace-nowrap">Pernah Di-ban</TableHead>
                       <TableHead className="whitespace-nowrap">Updated At</TableHead>
                       <TableHead className="whitespace-nowrap">Countdown</TableHead>
                       <TableHead className="whitespace-nowrap">Aksi</TableHead>
@@ -342,6 +345,15 @@ export default function BanListPage() {
                           : noShowCount >= 1
                           ? 'bg-amber-100 text-amber-700'
                           : 'bg-slate-100 text-slate-700';
+                      // An unban clears the reason and the counter, so without this a
+                      // repeat offender asking to be let off looks like a first-timer.
+                      const banCount = Number(row.ban_count || 0);
+                      const banCountClass =
+                        banCount >= 3
+                          ? 'bg-rose-100 text-rose-700'
+                          : banCount >= 2
+                          ? 'bg-amber-100 text-amber-700'
+                          : 'bg-slate-100 text-slate-700';
                       return (
                         <TableRow key={`${row.employee_id}-${row.banned_until}`} className={rowClass}>
                           <TableCell className="whitespace-nowrap font-mono py-2">{row.employee_id || '-'}</TableCell>
@@ -355,6 +367,18 @@ export default function BanListPage() {
                           <TableCell className="whitespace-nowrap font-mono py-2">
                             <span className={`inline-flex rounded-full px-2 py-0.5 ${noShowClass}`}>
                               {noShowCount}
+                            </span>
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap py-2">
+                            <span
+                              className={`inline-flex rounded-full px-2 py-0.5 font-mono ${banCountClass}`}
+                              title={
+                                row.last_banned_at
+                                  ? `Terakhir di-ban ${format(new Date(row.last_banned_at), 'yyyy-MM-dd HH:mm')}`
+                                  : undefined
+                              }
+                            >
+                              {banCount}x
                             </span>
                           </TableCell>
                           <TableCell className="whitespace-nowrap font-mono py-2">

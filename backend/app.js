@@ -779,6 +779,14 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
          );
        END`
     );
+    // The scan can be the first thing to touch the ban table after an upgrade, so it
+    // cannot assume the routes have added these columns yet.
+    await pool.request().query(
+      `IF COL_LENGTH('dbo.gym_booking_ban', 'BanCount') IS NULL
+         ALTER TABLE dbo.gym_booking_ban ADD BanCount INT NOT NULL CONSTRAINT DF_gym_booking_ban_BanCount DEFAULT 0;
+       IF COL_LENGTH('dbo.gym_booking_ban', 'LastBannedAt') IS NULL
+         ALTER TABLE dbo.gym_booking_ban ADD LastBannedAt DATETIME NULL;`
+    );
     const scanReq = pool.request();
     scanReq.input('entryPat', sql.VarChar(120), `%${entryPattern}%`);
     scanReq.input('gymUnit', sql.VarChar(20), String(gymUnit || '0031'));
@@ -793,6 +801,14 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
         DECLARE @windowStart DATE = DATEADD(day, -7, @today);
         DECLARE @bansWritten INT = 0;
         DECLARE @bookingsCancelled INT = 0;
+        -- Who was banned, not just how many: without this the scan's only trace is a
+        -- count, and after an unban wipes the row nothing says the person was ever banned.
+        DECLARE @banned TABLE (
+          EmployeeID VARCHAR(20),
+          BannedUntil DATE,
+          ConsecutiveNoShow INT,
+          BanCount INT
+        );
         BEGIN TRAN;
         ;WITH Candidate AS (
           SELECT DISTINCT gb.EmployeeID
@@ -934,10 +950,13 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
             UnbanRemark = NULL,
             UnbanAt = NULL,
             ActionBy = NULL,
+            BanCount = tgt.BanCount + 1,
+            LastBannedAt = GETDATE(),
             UpdatedAt = GETDATE()
         WHEN NOT MATCHED THEN
-          INSERT (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow)
-          VALUES (src.EmployeeID, src.BannedUntil, 'NO_SHOW_3X', src.ConsecutiveNoShow);
+          INSERT (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow, BanCount, LastBannedAt)
+          VALUES (src.EmployeeID, src.BannedUntil, 'NO_SHOW_3X', src.ConsecutiveNoShow, 1, GETDATE())
+        OUTPUT inserted.EmployeeID, inserted.BannedUntil, inserted.ConsecutiveNoShow, inserted.BanCount INTO @banned;
         SELECT @bansWritten = @@ROWCOUNT;
 
         -- Cancel from the ban table's current state, not from this run's ToBan (a CTE,
@@ -964,6 +983,12 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
         SELECT @bookingsCancelled = @@ROWCOUNT;
 
         COMMIT;
+        SELECT
+          EmployeeID AS employee_id,
+          CONVERT(varchar(10), BannedUntil, 23) AS banned_until,
+          ConsecutiveNoShow AS consecutive_no_show,
+          BanCount AS ban_count
+        FROM @banned;
         SELECT @bansWritten AS bans_written, @bookingsCancelled AS bookings_cancelled;
       END TRY
       BEGIN CATCH
@@ -971,10 +996,20 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
         THROW;
       END CATCH
     `);
-    const row = scanRes?.recordsets?.[scanRes.recordsets.length - 1]?.[0] || null;
+    const recs = Array.isArray(scanRes?.recordsets) ? scanRes.recordsets : [];
+    const row = recs[recs.length - 1]?.[0] || null;
+    const bannedRows = Array.isArray(recs[recs.length - 2]) ? recs[recs.length - 2] : [];
     return {
       bansWritten: Number(row?.bans_written || 0),
       bookingsCancelled: Number(row?.bookings_cancelled || 0),
+      banned: bannedRows
+        .filter((r) => r && r.employee_id)
+        .map((r) => ({
+          employeeId: String(r.employee_id).trim(),
+          bannedUntil: r.banned_until != null ? String(r.banned_until) : null,
+          consecutiveNoShow: Number(r.consecutive_no_show || 0),
+          banCount: Number(r.ban_count || 0),
+        })),
     };
   };
   const scanTick = async () => {
@@ -1013,6 +1048,22 @@ if (['1', 'true', 'yes', 'y'].includes(enableProactiveScan)) {
               action: 'BAN_SCAN',
               details: { bans_written: outcome.bansWritten, bookings_cancelled: outcome.bookingsCancelled, attempt },
             });
+            // One row per person, so a ban stays on the record after an unban clears the
+            // ban table. The audit page resolves the employee's name from their bookings.
+            for (const b of outcome.banned || []) {
+              recordAudit({
+                action: 'BAN_APPLIED',
+                targetType: 'EMPLOYEE',
+                targetId: b.employeeId,
+                details: {
+                  reason: 'NO_SHOW_3X',
+                  consecutive_no_show: b.consecutiveNoShow,
+                  banned_until: b.bannedUntil,
+                  ban_count: b.banCount,
+                  via: 'scanner',
+                },
+              });
+            }
             done = true;
           } catch (e) {
             const transient = isTransientDbError(e);

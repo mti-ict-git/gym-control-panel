@@ -69,6 +69,27 @@ async function ensureGymBookingBanTable(pool) {
   await pool.request().query(
     "IF COL_LENGTH('dbo.gym_booking_ban', 'UnbanAt') IS NULL BEGIN ALTER TABLE dbo.gym_booking_ban ADD UnbanAt DATETIME NULL; END"
   );
+  // How many times this person has ever been banned. The table keeps one row per employee
+  // and an unban wipes it clean (Reason NULL, ConsecutiveNoShow 0) - which is right, the
+  // count has to be forgiven or the scanner re-bans on the same old bookings - but it also
+  // left a repeat offender looking exactly like a first-timer. BanCount is the one field
+  // an unban does NOT touch, so the next decision can see the pattern.
+  await pool.request().query(
+    "IF COL_LENGTH('dbo.gym_booking_ban', 'BanCount') IS NULL BEGIN ALTER TABLE dbo.gym_booking_ban ADD BanCount INT NOT NULL CONSTRAINT DF_gym_booking_ban_BanCount DEFAULT 0; END"
+  );
+  await pool.request().query(
+    "IF COL_LENGTH('dbo.gym_booking_ban', 'LastBannedAt') IS NULL BEGIN ALTER TABLE dbo.gym_booking_ban ADD LastBannedAt DATETIME NULL; END"
+  );
+  // One-time seed for rows that predate the counter: a row carrying a ban reason or an
+  // unban has been banned at least once. Bans before this column existed cannot be
+  // recovered, so an old repeat offender starts at 1 rather than at their true total.
+  // Self-limiting: once seeded the row no longer matches BanCount = 0.
+  await pool.request().query(
+    `UPDATE dbo.gym_booking_ban
+     SET BanCount = 1,
+         LastBannedAt = COALESCE(LastBannedAt, UpdatedAt, CreatedAt)
+     WHERE BanCount = 0 AND (Reason IS NOT NULL OR UnbanAt IS NOT NULL)`
+  );
   await pool.request().query(
     "IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_gym_booking_ban_BannedUntil' AND object_id = OBJECT_ID('dbo.gym_booking_ban')) BEGIN CREATE INDEX IX_gym_booking_ban_BannedUntil ON dbo.gym_booking_ban(BannedUntil); END"
   );
@@ -2506,13 +2527,16 @@ router.post('/gym-booking-create', async (req, res) => {
                   UnbanRemark = NULL,
                   UnbanAt = NULL,
                   ActionBy = NULL,
+                  -- Survives the next unban, unlike everything else on this row.
+                  BanCount = BanCount + 1,
+                  LastBannedAt = GETDATE(),
                    UpdatedAt = GETDATE()
                WHERE EmployeeID = @employee_id;
              END
              ELSE
              BEGIN
-               INSERT INTO dbo.gym_booking_ban (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow)
-               VALUES (@employee_id, @banned_until, @reason, @consecutive_no_show);
+               INSERT INTO dbo.gym_booking_ban (EmployeeID, BannedUntil, Reason, ConsecutiveNoShow, BanCount, LastBannedAt)
+               VALUES (@employee_id, @banned_until, @reason, @consecutive_no_show, 1, GETDATE());
              END;
 
              -- Same rule as the proactive scanner: cancel what is still only BOOKED from
@@ -2534,12 +2558,18 @@ router.post('/gym-booking-create', async (req, res) => {
                );`
           );
           const bannedStr = isNaN(bannedUntil.getTime()) ? null : bannedUntil.toISOString().slice(0, 10);
+          const banCount = await gymPool
+            .request()
+            .input('employee_id', sql.VarChar(20), employeeId)
+            .query('SELECT BanCount FROM dbo.gym_booking_ban WHERE EmployeeID = @employee_id')
+            .then((r) => Number(r?.recordset?.[0]?.BanCount || 0))
+            .catch(() => 0);
           recordAudit({
             req,
             action: 'BAN_APPLIED',
             targetType: 'EMPLOYEE',
             targetId: employeeId,
-            details: { reason: 'NO_SHOW_3X', consecutive_no_show: consecutiveNoShow, banned_until: bannedStr, via: 'booking' },
+            details: { reason: 'NO_SHOW_3X', consecutive_no_show: consecutiveNoShow, banned_until: bannedStr, ban_count: banCount, via: 'booking' },
           });
           await gymPool.close();
           gymPool = null;
@@ -6223,6 +6253,8 @@ router.get('/gym-booking-ban-list', async (req, res) => {
           WHERE ka.Role = 'KingAdmin' AND (ka.Username = b.ActionBy OR ka.Email = b.ActionBy)
         ) THEN 'System' ELSE b.ActionBy END AS action_by,
         b.ConsecutiveNoShow AS consecutive_no_show,
+        b.BanCount AS ban_count,
+        b.LastBannedAt AS last_banned_at,
         b.UpdatedAt AS updated_at,
         b.CreatedAt AS created_at
      FROM dbo.gym_booking_ban b
@@ -6243,6 +6275,8 @@ router.get('/gym-booking-ban-list', async (req, res) => {
       unban_remark: r.unban_remark != null ? String(r.unban_remark).trim() : null,
       action_by: r.action_by != null ? String(r.action_by).trim() : null,
       consecutive_no_show: Number(r.consecutive_no_show ?? 0) || 0,
+      ban_count: Number(r.ban_count ?? 0) || 0,
+      last_banned_at: r.last_banned_at ? new Date(r.last_banned_at).toISOString() : null,
       updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : null,
       created_at: r.created_at ? new Date(r.created_at).toISOString() : null,
     })).filter((b) => b.employee_id);
