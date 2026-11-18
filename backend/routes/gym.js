@@ -4571,6 +4571,72 @@ router.get('/gym-access-committee', async (req, res) => {
   }
 });
 
+// The committee picker searches the MTI employee master, so anyone who is not an MTI
+// employee - a vendor's housekeeping or catering staff - could not be found there and
+// therefore could not be added from the panel at all, even though the committee table and
+// the door worker accept any ID and resolve the card from here anyway. This serves the
+// access-card system's own directory so those people can be searched and named too.
+router.get('/gym-card-directory', requireGymAdmin, async (req, res) => {
+  const { DB_SERVER, DB_PORT, DB_DATABASE, DB_USER, DB_PASSWORD, DB_ENCRYPT, DB_TRUST_SERVER_CERTIFICATE } = process.env;
+  const server = envTrim(DB_SERVER);
+  const database = envTrim(DB_DATABASE);
+  const user = envTrim(DB_USER);
+  const password = envTrim(DB_PASSWORD);
+  if (!server || !database || !user || !password) {
+    return res.status(500).json({ ok: false, error: 'Gym DB env is not configured', employees: [] });
+  }
+
+  const q = String(req.query.q || '').trim();
+  const idsRaw = String(req.query.ids || '').trim();
+  const ids = idsRaw ? idsRaw.split(',').map((v) => v.trim()).filter(Boolean).slice(0, 200) : [];
+  const limitRaw = Number(req.query.limit || 20);
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(200, Math.floor(limitRaw))) : 20;
+  if (!q && ids.length === 0) return res.json({ ok: true, employees: [] });
+
+  const config = { server, port: Number(DB_PORT || 1433), database, user, password, options: { encrypt: envBool(DB_ENCRYPT, false), trustServerCertificate: envBool(DB_TRUST_SERVER_CERTIFICATE, true) }, pool: { max: 2, min: 0, idleTimeoutMillis: 5000 } };
+  let pool = null;
+  try {
+    pool = await new sql.ConnectionPool(config).connect();
+    const req1 = pool.request();
+    req1.input('limit', sql.Int, limit);
+    let whereId = '';
+    if (ids.length > 0) {
+      const params = ids.map((_, i) => `@id${i}`);
+      ids.forEach((id, i) => req1.input(`id${i}`, sql.VarChar(50), id));
+      whereId = `AND LTRIM(RTRIM(c.StaffNo)) IN (${params.join(', ')})`;
+    } else {
+      req1.input('q', sql.VarChar(120), `%${q}%`);
+      whereId = 'AND (c.StaffNo LIKE @q OR c.Name LIKE @q)';
+    }
+    // One row per person: the same employee can hold several cards.
+    const result = await req1.query(
+      `SELECT TOP (@limit)
+         LTRIM(RTRIM(c.StaffNo)) AS employee_id,
+         MAX(LTRIM(RTRIM(ISNULL(c.Name, '')))) AS name,
+         MAX(NULLIF(LTRIM(RTRIM(ISNULL(NULLIF(LTRIM(RTRIM(ISNULL(c.Department, ''))), ''), ISNULL(c.Company, '')))), '')) AS department
+       FROM DataDBEnt.dbo.CardDB c
+       WHERE ISNULL(LTRIM(RTRIM(c.StaffNo)), '') <> ''
+         AND c.Status = 1
+         AND (c.Block IS NULL OR c.Block = 0)
+         AND (c.del_state = 0 OR c.del_state IS NULL)
+         ${whereId}
+       GROUP BY LTRIM(RTRIM(c.StaffNo))
+       ORDER BY employee_id`
+    );
+    const employees = (result?.recordset || []).map((r) => ({
+      employee_id: String(r.employee_id || '').trim(),
+      name: r.name != null ? String(r.name).trim() : '',
+      department: r.department != null ? String(r.department).trim() || null : null,
+    })).filter((e) => e.employee_id);
+    return res.json({ ok: true, employees });
+  } catch (error) {
+    const message = error?.message || String(error);
+    return res.status(200).json({ ok: false, error: message, employees: [] });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
+  }
+});
+
 router.post('/gym-access-committee-add', requireGymAdmin, auditAction('COMMITTEE_ADD', (req) => ({
   targetType: 'EMPLOYEE',
   targetId: String(bodyOf(req).employee_id || '').trim(),

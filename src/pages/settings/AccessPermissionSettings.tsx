@@ -9,6 +9,58 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
+type Person = { employee_id: string; name: string; department: string | null; from_card?: boolean };
+
+// GET helpers for the two directories below. Same "/api then bare path" fallback the rest
+// of this page uses; an expired session must not be mistaken for "no results".
+async function getJson(url: string) {
+  const resp = await fetch(url, { headers: authHeaders() });
+  assertAuthorized(resp);
+  if (!resp.ok) throw new Error('Request failed');
+  return (await resp.json()) as { ok: boolean; employees?: Person[]; error?: string };
+}
+
+async function getWithFallback(path: string) {
+  try {
+    return await getJson(`/api${path}`);
+  } catch (e) {
+    if (e instanceof AuthError) throw e;
+    return await getJson(path);
+  }
+}
+
+// Two directories, because neither one holds everybody: employee_core has MTI staff with
+// their department, the access-card system has everyone who carries a card - vendors and
+// contractors included, who exist nowhere else. Master data wins where both know someone.
+async function lookupPeople(params: { q?: string; ids?: string[] }): Promise<Person[]> {
+  const qs = params.ids?.length
+    ? `ids=${encodeURIComponent(params.ids.join(','))}&limit=200`
+    : `q=${encodeURIComponent(params.q || '')}&limit=20`;
+  const soften = (e: unknown) => {
+    if (e instanceof AuthError) throw e;
+    return { ok: false, employees: [] as Person[] };
+  };
+  const [master, cards] = await Promise.all([
+    getWithFallback(`/employee-core?${qs}`).catch(soften),
+    getWithFallback(`/gym-card-directory?${qs}`).catch(soften),
+  ]);
+  const merged = new Map<string, Person>();
+  for (const e of master.employees || []) {
+    if (e?.employee_id) merged.set(String(e.employee_id), { ...e, employee_id: String(e.employee_id) });
+  }
+  for (const e of cards.employees || []) {
+    const id = String(e?.employee_id || '');
+    if (!id) continue;
+    const existing = merged.get(id);
+    if (!existing) {
+      merged.set(id, { ...e, employee_id: id, from_card: true });
+    } else if (!existing.name && e.name) {
+      merged.set(id, { ...existing, name: e.name, department: existing.department ?? e.department });
+    }
+  }
+  return [...merged.values()];
+}
+
 export default function AccessPermissionSettings() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -130,30 +182,9 @@ export default function AccessPermissionSettings() {
   );
 
   const committeeDetailsQuery = useQuery({
-    queryKey: ['employee-core', { ids: committeeIds.join(',') }],
+    queryKey: ['committee-details', { ids: committeeIds.join(',') }],
     enabled: committeeIds.length > 0,
-    queryFn: async () => {
-      const tryFetch = async (url: string) => {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error('Failed to fetch employee details');
-        return (await resp.json()) as {
-          ok: boolean;
-          employees?: Array<{ employee_id: string; name: string; department: string | null }>;
-          error?: string;
-        };
-      };
-
-      const ids = committeeIds.join(',');
-      try {
-        const json = await tryFetch(`/api/employee-core?ids=${encodeURIComponent(ids)}&limit=200`);
-        if (!json.ok) throw new Error(json.error || 'Failed to fetch employee details');
-        return Array.isArray(json.employees) ? json.employees : [];
-      } catch (_) {
-        const json = await tryFetch(`/employee-core?ids=${encodeURIComponent(ids)}&limit=200`);
-        if (!json.ok) throw new Error(json.error || 'Failed to fetch employee details');
-        return Array.isArray(json.employees) ? json.employees : [];
-      }
-    },
+    queryFn: async () => lookupPeople({ ids: committeeIds }),
   });
 
   const committeeInfoMap = useMemo(() => {
@@ -166,30 +197,9 @@ export default function AccessPermissionSettings() {
   }, [committeeDetailsQuery.data]);
 
   const employeeSearchQuery = useQuery({
-    queryKey: ['employee-core-search', debouncedSearch],
+    queryKey: ['committee-search', debouncedSearch],
     enabled: debouncedSearch.length > 0,
-    queryFn: async () => {
-      const tryFetch = async (url: string) => {
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error('Failed to search employees');
-        return (await resp.json()) as {
-          ok: boolean;
-          employees?: Array<{ employee_id: string; name: string; department: string | null }>;
-          error?: string;
-        };
-      };
-
-      const q = debouncedSearch;
-      try {
-        const json = await tryFetch(`/api/employee-core?q=${encodeURIComponent(q)}&limit=20`);
-        if (!json.ok) throw new Error(json.error || 'Failed to search employees');
-        return Array.isArray(json.employees) ? json.employees : [];
-      } catch (_) {
-        const json = await tryFetch(`/employee-core?q=${encodeURIComponent(q)}&limit=20`);
-        if (!json.ok) throw new Error(json.error || 'Failed to search employees');
-        return Array.isArray(json.employees) ? json.employees : [];
-      }
-    },
+    queryFn: async () => lookupPeople({ q: debouncedSearch }),
   });
 
   const addCommitteeMutation = useMutation({
@@ -410,7 +420,7 @@ export default function AccessPermissionSettings() {
                   value={search}
                   disabled={isBusy}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search by employee ID or name"
+                  placeholder="Search by employee ID or name (incl. vendor)"
                   className="pl-9"
                 />
               </div>
@@ -434,7 +444,14 @@ export default function AccessPermissionSettings() {
                       return (
                         <TableRow key={e.employee_id}>
                           <TableCell className="font-mono">{e.employee_id}</TableCell>
-                          <TableCell className="font-medium">{e.name}</TableCell>
+                          <TableCell className="font-medium">
+                            <span>{e.name || '-'}</span>
+                            {e.from_card && (
+                              <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-xs font-normal text-amber-700 ring-1 ring-amber-200">
+                                Kartu akses
+                              </span>
+                            )}
+                          </TableCell>
                           <TableCell className="hidden md:table-cell">{e.department ?? '-'}</TableCell>
                           <TableCell className="text-right">
                             <Button
