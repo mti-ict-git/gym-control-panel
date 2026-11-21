@@ -4,43 +4,67 @@ import { envTrim, envBool } from '../lib/env.js';
 
 const router = express.Router();
 
-router.get('/employees', async (req, res) => {
-  const {
-    MASTER_DB_SERVER,
-    MASTER_DB_PORT,
-    MASTER_DB_DATABASE,
-    MASTER_DB_USER,
-    MASTER_DB_PASSWORD,
-    MASTER_DB_ENCRYPT,
-    MASTER_DB_TRUST_SERVER_CERTIFICATE,
-  } = process.env;
+// ONE pool for this process, kept open.
+//
+// Every route here used to call `sql.connect(config)` - which is mssql's single GLOBAL
+// pool, shared with every other caller - and then `pool.close()` when it was done. That
+// closed the connection out from under any request still using it, so overlapping lookups
+// died with "Connection is closed." and the booking page showed the employee as not found.
+// It only bit sometimes, which is exactly what made it look like bad data: the dropdown
+// search and the profile fetch fire together, and two people booking at once collide.
+let masterPoolPromise = null;
 
+function masterDbConfig() {
+  const server = envTrim(process.env.MASTER_DB_SERVER);
+  const database = envTrim(process.env.MASTER_DB_DATABASE);
+  const user = envTrim(process.env.MASTER_DB_USER);
+  const password = envTrim(process.env.MASTER_DB_PASSWORD);
+  if (!server || !database || !user || !password) return null;
+  return {
+    server,
+    port: Number(envTrim(process.env.MASTER_DB_PORT) || '1433'),
+    database,
+    user,
+    password,
+    options: {
+      encrypt: envBool(process.env.MASTER_DB_ENCRYPT, false),
+      trustServerCertificate: envBool(process.env.MASTER_DB_TRUST_SERVER_CERTIFICATE, true),
+    },
+    pool: { max: 5, min: 0, idleTimeoutMillis: 30000 },
+  };
+}
+
+async function getMasterPool() {
+  const config = masterDbConfig();
+  if (!config) return null;
+  if (masterPoolPromise) {
+    try {
+      const existing = await masterPoolPromise;
+      if (existing && (existing.connected || existing.connecting)) return existing;
+    } catch (_) {
+      // fall through and build a fresh one
+    }
+    masterPoolPromise = null;
+  }
+  const pool = new sql.ConnectionPool(config);
+  const promise = pool.connect().catch((e) => {
+    if (masterPoolPromise === promise) masterPoolPromise = null;
+    throw e;
+  });
+  // A dropped connection must not poison every later request.
+  pool.on('error', () => {
+    if (masterPoolPromise === promise) masterPoolPromise = null;
+  });
+  masterPoolPromise = promise;
+  return promise;
+}
+
+router.get('/employees', async (req, res) => {
   const q = String(req.query.q || '').trim();
 
-  const masterServer = envTrim(MASTER_DB_SERVER);
-  const masterDatabase = envTrim(MASTER_DB_DATABASE);
-  const masterUser = envTrim(MASTER_DB_USER);
-  const masterPassword = envTrim(MASTER_DB_PASSWORD);
-
-  if (!masterServer || !masterDatabase || !masterUser || !masterPassword) {
-    return res.status(500).json({ success: false, error: 'Master DB env is not configured' });
-  }
-
-  const config = {
-    server: masterServer,
-    port: Number(MASTER_DB_PORT || 1433),
-    database: masterDatabase,
-    user: masterUser,
-    password: masterPassword,
-    options: {
-      encrypt: envBool(MASTER_DB_ENCRYPT, false),
-      trustServerCertificate: envBool(MASTER_DB_TRUST_SERVER_CERTIFICATE, true),
-    },
-    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
-  };
-
   try {
-    const pool = await sql.connect(config);
+    const pool = await getMasterPool();
+    if (!pool) return res.status(500).json({ success: false, error: 'Master DB env is not configured', employees: [] });
     const request = pool.request();
     if (q) {
       request.input('q', sql.VarChar(50), q + '%');
@@ -49,7 +73,6 @@ router.get('/employees', async (req, res) => {
       ? 'SELECT TOP 20 employee_id FROM employee_core WHERE employee_id LIKE @q ORDER BY employee_id'
       : 'SELECT TOP 20 employee_id FROM employee_core ORDER BY employee_id';
     const result = await request.query(query);
-    await pool.close();
     const employees = (result?.recordset || []).map((row) => String(row.employee_id));
     return res.json({ success: true, employees });
   } catch (error) {
@@ -59,16 +82,6 @@ router.get('/employees', async (req, res) => {
 });
 
 router.get('/employee-core', async (req, res) => {
-  const {
-    MASTER_DB_SERVER,
-    MASTER_DB_PORT,
-    MASTER_DB_DATABASE,
-    MASTER_DB_USER,
-    MASTER_DB_PASSWORD,
-    MASTER_DB_ENCRYPT,
-    MASTER_DB_TRUST_SERVER_CERTIFICATE,
-  } = process.env;
-
   const q = String(req.query.q || '').trim();
   const idsRaw = String(req.query.ids || '').trim();
   const limitRaw = Number(req.query.limit || 200);
@@ -82,28 +95,6 @@ router.get('/employee-core', async (req, res) => {
         .slice(0, 200)
     : [];
 
-  const masterServer = envTrim(MASTER_DB_SERVER);
-  const masterDatabase = envTrim(MASTER_DB_DATABASE);
-  const masterUser = envTrim(MASTER_DB_USER);
-  const masterPassword = envTrim(MASTER_DB_PASSWORD);
-
-  if (!masterServer || !masterDatabase || !masterUser || !masterPassword) {
-    return res.status(500).json({ ok: false, error: 'Master DB env is not configured', employees: [] });
-  }
-
-  const config = {
-    server: masterServer,
-    port: Number(MASTER_DB_PORT || 1433),
-    database: masterDatabase,
-    user: masterUser,
-    password: masterPassword,
-    options: {
-      encrypt: envBool(MASTER_DB_ENCRYPT, false),
-      trustServerCertificate: envBool(MASTER_DB_TRUST_SERVER_CERTIFICATE, true),
-    },
-    pool: { max: 2, min: 0, idleTimeoutMillis: 5000 },
-  };
-
   const pickColumn = (columns, candidates) => {
     const map = new Map(columns.map((c) => [String(c).toLowerCase(), String(c)]));
     for (const cand of candidates) {
@@ -114,7 +105,8 @@ router.get('/employee-core', async (req, res) => {
   };
 
   try {
-    const pool = await sql.connect(config);
+    const pool = await getMasterPool();
+    if (!pool) return res.status(500).json({ ok: false, error: 'Master DB env is not configured', employees: [] });
 
     const schemaResult = await pool.request().query(
       "SELECT TOP 1 TABLE_SCHEMA AS schema_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'employee_core' ORDER BY CASE WHEN TABLE_SCHEMA = 'dbo' THEN 0 ELSE 1 END, TABLE_SCHEMA"
@@ -136,7 +128,6 @@ router.get('/employee-core', async (req, res) => {
     const genderCol = pickColumn(columns, ['gender', 'Gender', 'sex', 'Sex', 'jenis_kelamin', 'Jenis Kelamin']);
 
     if (!employeeIdCol || !nameCol) {
-      await pool.close();
       return res.status(200).json({ ok: false, error: 'employee_core must have employee_id and Name columns', employees: [] });
     }
 
@@ -166,7 +157,6 @@ router.get('/employee-core', async (req, res) => {
     const query = `SELECT TOP (${limit}) ${selectCols} FROM [${schema}].[employee_core] ${whereSql} ORDER BY [${employeeIdCol}] ASC`;
 
     const result = await request.query(query);
-    await pool.close();
 
     const employees = (result?.recordset || []).map((row) => ({
       employee_id: String(row.employee_id ?? '').trim(),

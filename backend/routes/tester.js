@@ -25,14 +25,19 @@ router.post('/test', async (req, res) => {
     pool: { max: 1, min: 0, idleTimeoutMillis: 3000 },
   };
 
+  // Its own pool, never mssql's global one: `sql.connect()` here would hand back whatever
+  // global pool already exists - so this would report on the wrong database - and closing
+  // it would break the employee lookups running on it.
+  let pool = null;
   try {
-    const pool = await sql.connect(config);
+    pool = await new sql.ConnectionPool(config).connect();
     await pool.request().query('SELECT 1 AS ok');
-    await pool.close();
     return res.json({ success: true });
   } catch (error) {
     const message = error?.message || String(error);
     return res.status(200).json({ success: false, error: message });
+  } finally {
+    if (pool) await pool.close().catch(() => {});
   }
 });
 
